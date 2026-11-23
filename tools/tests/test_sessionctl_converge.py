@@ -58,6 +58,12 @@ class _Fence(unittest.TestCase):
         carrier = mock.patch("lib.sessionctl.park._has_carrier", return_value=False)
         carrier.start()
         self.addCleanup(carrier.stop)
+        # QuotaWall Q4：Stop／PreToolUse 現在先問 `quotawall.plan`（讀真實額度、真行程表）；本檔只測
+        # 收斂閘，把額度讀數圍成「量不到」＝stage none（額度牆判準另在
+        # test_sessionctl_quotawall_q4）
+        quota = mock.patch("lib.sessionctl.qw_wall.default_read", return_value=None)
+        quota.start()
+        self.addCleanup(quota.stop)
 
     def main(self, *ctxs: int) -> Path:
         path = self.slug / f"{SID}.jsonl"
@@ -446,7 +452,9 @@ class StopVerdictTest(_Fence):
         why = converge.stop_verdict(self.stop(background_tasks=shell), self.env)
         for needle in ("冷叫醒閘", "TaskStop", "1 個", "只推回這一次"):
             self.assertIn(needle, why)
-        self.assertEqual([r["event"] for r in self.traces()], ["finalized_wake_block"])
+        # 額度牆的「量不到」痕跡（Q4：Stop 先問 quotawall）不是閘的決定，不算進斷言面
+        self.assertEqual([r["event"] for r in self.traces()
+                          if r["event"] != "quotawall_unmeasured"], ["finalized_wake_block"])
         # A4（DES §4.2）：封存有效、未交棒時在飛代理交監督閘看管，冷叫醒閘不再叫人殺它
         # （舊斷言「代理也被推 TaskStop」正是 A4 病灶；遷移＝語意改變、不是放寬）
         agent = {"id": "a1", "type": "subagent", "status": "running"}

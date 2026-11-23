@@ -106,6 +106,16 @@ def _passed(cond: int, sid: str, *, context: str = "", show: str = "", **fields)
     return out
 
 
+def _stay(sid: str, env) -> bool:
+    """DES §8 觸發 2：判「留在本窗」（`留：`／快取熱／`f4_resume_cheaper`）∧ 本 sid 為最新包的
+    原主人 ∧ 包 live ∧ 已封存 ∧ 未交棒 ⇒ 記續跑（`.resumed`、作廢封存）。判準單一家＝`kw_run`
+    （觸發 1 同一支）。WHY：留下來繼續的原視窗就是自續跑；不記的話封存閘／冷叫醒閘仍把它當
+    「已封存待交棒」推回。"""
+    from . import kw_run  # noqa: PLC0415 — lazy：kw_run 依賴面大，hook 鏈只有判到「留」才付
+
+    return kw_run.mark_resumed_if_owner(sid, env)
+
+
 def _handed_over_verdict(pkg: Path, payload: dict, mode: str, now: datetime, alive) -> dict:
     """路徑二：包已交棒。新視窗活著 ∧ auto ⇒ 擋並說明；否則放行＋一行現況。"""
     sid = payload["session_id"]
@@ -133,8 +143,8 @@ def _forward_verdict(pkg: Path, payload: dict, env, now: datetime, *, spawn, ali
     """路徑一的條件 5～9（1～4 已由呼叫端判過）＋條件 10（R216 F4：冷但續跑較便宜 ⇒ 留原視窗）。"""
     sid, tpath = payload["session_id"], Path(payload["transcript_path"])
     state = cache(tpath, now)
-    if not state.get("cold"):
-        return _passed(5, sid)  # 熱：留在原地較便宜（ARCH §2.4 例二）
+    if not state.get("cold"):  # 熱：留在原地較便宜（ARCH §2.4 例二）；原主人自續跑（DES §8 觸發 2）
+        return _passed(5, sid, resumed=_stay(sid, env))
     if crons(sid) is not False:
         return _passed(6, sid)  # 有排程或讀不到 ⇒ 不轉送（偏放行）
     # D9／F4（R216）：快取冷了也未必該換——上下文不夠大時續跑重寫比換新便宜，
@@ -145,7 +155,8 @@ def _forward_verdict(pkg: Path, payload: dict, env, now: datetime, *, spawn, ali
                f"上下文 {held:,} tokens 續跑重寫（{costmodel.W_CC1 * held:,.0f} 單位）比換新"
                f"（{costmodel.fresh_total(env):,.0f} 單位）便宜")
         note = f"快取已冷，但{why}，所以這句照常送進本視窗（沒有轉送）。"
-        return _passed(10, sid, context=note, show=f"ℹ️ {note}", why="f4_resume_cheaper", ctx=held)
+        return _passed(10, sid, context=note, show=f"ℹ️ {note}", why="f4_resume_cheaper", ctx=held,
+                       resumed=_stay(sid, env))
     hint = f"建議改到新 session（快取已冷）：python tools/sessionctl.py handoff --spawn {pkg}"
     # 7／8 放行時掌舵者也要看得到「沒轉送、原因是 X」（DEF-200-609：原本只進模型 context，
     # 真機畫面一片空白，無從得知轉送為何沒發生）。
@@ -204,7 +215,7 @@ def prompt_verdict(payload, env=None, *, now: datetime | None = None, spawn=None
             return _passed(2, sid)
         if text.lstrip().startswith(ESCAPE_PREFIXES):
             oldwin.record_keep_veto(sid, raw, env, now)  # R217 D-17：`留：`＝否決自動關閉舊窗
-            return _passed(3, sid)
+            return _passed(3, sid, resumed=_stay(sid, env))  # DES §8 觸發 2
         now, alive = handoff._aware(now), alive or handoff._alive
         pkg = seal.handed_over(sid, env)
         if pkg is not None:
@@ -222,17 +233,35 @@ def prompt_verdict(payload, env=None, *, now: datetime | None = None, spawn=None
         return {"kind": "pass", "text": ""}
 
 
+def _failure_note(payload, env) -> str:
+    """park 到點失敗提示（`qw_prompt`；同專案任一視窗、同一失敗只一次）；任何例外 ⇒ 空。"""
+    try:
+        from . import qw_prompt  # noqa: PLC0415
+
+        return qw_prompt.failure_notice(payload, env)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _join(*parts: str, sep: str = "\n") -> str:
+    return sep.join(p for p in parts if p)
+
+
 def hook_output(payload, env=None, **inject) -> dict | None:
-    """跳板用：回要印到 stdout 的 JSON（放行無附註 ⇒ `None`）。零判準、不拋。"""
+    """跳板用：回要印到 stdout 的 JSON（放行無附註 ⇒ `None`）。零判準、不拋。
+    park 失敗提示（REQ-QW-35）在轉送判準之後併入：block 併進 reason、其餘進 additionalContext
+    與 systemMessage（人眼必經的入口，不只進模型 context）。"""
     try:
         verdict = prompt_verdict(payload, env, **inject)
+        note = _failure_note(payload, env)
         if verdict["kind"] == "block":
-            return {"decision": "block", "reason": verdict["text"]}
-        if verdict["kind"] == "context":
+            return {"decision": "block", "reason": _join(verdict["text"], note, sep="\n\n")}
+        if verdict["kind"] == "context" or note:
             out = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                          "additionalContext": verdict["text"]}}
-            if verdict.get("show"):
-                out["systemMessage"] = verdict["show"]
+                                          "additionalContext": _join(verdict["text"], note)}}
+            show = _join(verdict.get("show", ""), note)
+            if show:
+                out["systemMessage"] = show
             return out
     except Exception:  # noqa: BLE001
         pass

@@ -99,6 +99,12 @@ class _Base(unittest.TestCase):
         rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x]
         return [r for r in rows if r.get("event") == name]
 
+    def reseal(self) -> None:
+        """還原夾具封存狀態：判「留在本窗」會記續跑（`.resumed`、刪 `.sealed`；QW DES §8 觸發 2），
+        同一測試內要再走一次判準前先還原。"""
+        self.pkg.with_suffix(".resumed").unlink(missing_ok=True)
+        self.pkg.with_suffix(".sealed").write_text(NOW.isoformat() + "\n", encoding="utf-8")
+
     def hand_over(self) -> None:
         """造「已交棒」：包已 ack，且痕跡有 spawn 記錄（pid=PID）。"""
         self.pkg.with_suffix(".ack").write_text("ok\n", encoding="utf-8")
@@ -137,6 +143,7 @@ class PathOneForwardTest(_Base):
                 self.assertNotEqual(out["kind"], "block")
                 self.assertEqual(self.spawned, [])
                 self.assertEqual(self.events(forward.EV_PASS)[before]["cond"], cond)
+                self.reseal()  # 條件 3／5 判「留在本窗」會記續跑、刪封存戳
         # 條件 4：沒有封存戳
         self.pkg.with_suffix(".sealed").unlink()
         self.assertEqual(self.verdict("x")["kind"], "pass")
@@ -248,6 +255,7 @@ class PathOneForwardTest(_Base):
         self.assertIn("便宜", out["systemMessage"])
         self.assertEqual(self.spawned, [])
         self.assertEqual(self.events(forward.EV_PASS)[-1]["cond"], 10)
+        self.reseal()  # cond 10＝留在本窗＝原主人自續跑，已記 `.resumed`（DES §8 觸發 2）
         self.set_ctx(600_000)
         self.assertEqual(self.verdict("指令")["kind"], "block")
 
@@ -257,6 +265,7 @@ class PathOneForwardTest(_Base):
         self.set_ctx(480_000)
         self.assertNotEqual(self.verdict("x")["kind"], "block")
         self.assertEqual(self.events(forward.EV_PASS)[-1]["cond"], 10)
+        self.reseal()  # cond 10 已記續跑（DES §8 觸發 2）
         self.set_ctx(480_001)
         self.assertEqual(self.verdict("x")["kind"], "block")
         self.set_ctx(None)

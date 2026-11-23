@@ -7,7 +7,11 @@
 `{"systemMessage": ...}` rc 0；否則收斂閘成立 ⇒
 `{"decision":"block","reason":...}` 推回一次（`stop_hook_active` 為真即放行，判準
 `converge.stop_verdict`；其尾端另判 park＝額度停工憑證 `park.stop_verdict`，
-逃生口 `AUTOSDD_PARK_GUARD_OFF`）。PreToolUse：rc 2 ＝阻斷（stderr 回饋模型）；解析不到一律放行。
+逃生口 `AUTOSDD_PARK_GUARD_OFF`）。額度牆（QuotaWall Q4）：Agent／Task／Workflow 的
+PreToolUse 於 `converge_verdict` 內併判 `quotawall.pretool_verdict`（W11a，逃生口
+`AUTOSDD_QUOTAWALL_OFF`）；Stop 先算牆中／準備帶靜音（`qw_guard.mute`，牆中整體不推回）、
+OIR 讓路在準備帶不設 KEEPWARM_OFF，無推回時帶出「備援缺席」（`converge.stop_notice`）。
+PreToolUse：rc 2 ＝阻斷（stderr 回饋模型）；解析不到一律放行。
 PreToolUse／PowerShell、Bash：子代理（payload 有 `agent_id`）的前景呼叫 timeout > 270000 ms ⇒ rc 2，
 指路 `sessionctl runlong`／`waitfor`（`longwait.pretool_verdict`；R216 WP-D、設計 §4.5 D13；行內豁免
 `# keepwarm-ok: <WHY>`）；主控的 shell 呼叫不判、不付 import 成本。
@@ -74,17 +78,23 @@ def main() -> int:
         )
 
         if event == "Stop":
-            env = os.environ
+            env, mute = os.environ, None  # mute：QuotaWall §6.4 靜音分類（判準在 qw_guard）
             if not payload.get("stop_hook_active"):  # 完成閘讓路：OIR undriven 不叫掛保溫（§4.4）
                 try:
                     from lib.openitems import gate  # noqa: PLC0415
+                    from lib.sessionctl import qw_guard  # noqa: PLC0415
 
-                    if gate.keepwarm_yields(str(payload.get("session_id") or "")):
+                    mute = qw_guard.mute(payload, os.environ)
+                    # 額度準備帶（quota）時不讓路：close 階段正需要掛主載具（REQ-QW-16）
+                    sid_ = str(payload.get("session_id") or "")
+                    if mute != "quota" and gate.keepwarm_yields(sid_):
                         env = {**os.environ, "AUTOSDD_KEEPWARM_OFF": "1"}
                 except Exception:  # noqa: BLE001 — 讓路壞了不得連累其他 Stop 閘
                     pass
-            why = converge.stop_verdict(payload, env)  # 先判推回：背景 shell 不得蓋掉它
-            msg = "" if why else roster.stop_message(payload)
+            # 先判推回：背景 shell 不得蓋掉它；raw_env＝主載具閘判 off 的原始環境（OIR 注入不算）
+            why = converge.stop_verdict(payload, env, mute=mute, raw_env=os.environ)
+            msg = "" if why else "\n".join(filter(None, (
+                roster.stop_message(payload), converge.stop_notice(payload, env))))
             sid = str(payload.get("session_id") or "")
             if not why and (note := "\n".join(filter(None, (
                     oldwin.take_unread_notice(sid), oldwin.pending_manual_close(sid))))):

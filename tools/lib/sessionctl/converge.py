@@ -50,22 +50,41 @@ def _exits(sid: str, env) -> str:
             "  ② /compact（上下文降到門檻下自動解除）\n"
             "  ③ AUTOSDD_SESSION_SWITCH_MODE=notify（只出聲）\n")
 
-def converge_verdict(payload: dict, env) -> tuple[int, str]:
-    """PreToolUse 收斂閘：`(0, "")` 放行；`(2, 訊息)` 阻斷。任何例外 `(0, "")`。"""
+def _wall_pretool(payload: dict, env, now, seams: dict) -> tuple[int, str]:
+    """額度牆擋派（QuotaWall §6.1、W11a；判準 `quotawall.pretool_verdict`）。fail-open。
+
+    WHY（H.2-2）：這是 rc 2 硬擋，輸入污染的代價是工作被擋；它的上線前提是 `ping_pp_eff` 的乾淨
+    樣本門檻（REQ-QW-74，已在 `qw_calc`／`qw_schema`）已生效——順序鎖的行為斷言＝AT-QW-84。"""
+    try:
+        from . import qw_guard  # noqa: PLC0415 — lazy：只有 Agent／Task／Workflow 才付
+
+        return qw_guard.pretool(payload, env, now=now, **seams)
+    except Exception:  # noqa: BLE001
+        return 0, ""
+
+
+def converge_verdict(payload: dict, env, *, now=None, **seams) -> tuple[int, str]:
+    """PreToolUse 收斂閘＋額度牆擋派：`(0, "")` 放行；`(2, 訊息)` 阻斷。任何例外 `(0, "")`。
+    兩閘都成立只出收斂閘訊息＋一行額度牆摘要（REQ-QW-10）。`now`／`read_quota` 等為測試縫。"""
     try:
         if not isinstance(payload, dict) or payload.get("tool_name") not in EXPAND_TOOLS:
             return 0, ""
         if payload.get("agent_id"):  # 子代理自己的呼叫：閘管主控
             return 0, ""
         got = _gate(payload, env)
+        wall_rc, wall_msg = _wall_pretool(payload, env, now, seams)
         if got is None:
-            return 0, supervise.dispatch_note(payload, env)  # FR-W8：放行時帶一行掛監督附註
+            if wall_rc == 2:
+                return 2, wall_msg
+            # FR-W8：放行時帶一行掛監督附註；notify 模式的額度牆訊息（rc 0）一併帶出
+            return 0, "\n".join(t for t in (wall_msg, supervise.dispatch_note(payload, env)) if t)
         sid, ctx, hard = got
         switch.trace("converge_block", sid=sid, ctx=ctx, hard=hard, tool=payload.get("tool_name"))
+        summary = f"額度牆摘要：{wall_msg.splitlines()[0]}\n" if wall_rc == 2 and wall_msg else ""
         return 2, (f"🔴 收斂閘：主控上下文 {ctx:,} ≥ 硬線 {hard:,}（再長就撞 autocompact），"
                    f"不再展開 {payload.get('tool_name')}。"
                    "只擋 Agent／Task／Workflow，讀、改、跑測試、SendMessage 不擋。\n"
-                   + _exits(sid, env) + _LATCHLESS + "\n")
+                   + _exits(sid, env) + summary + _LATCHLESS + "\n")
     except Exception:  # noqa: BLE001 — hook 內任何例外一律放行
         return 0, ""
 
@@ -106,35 +125,52 @@ def _finalized_wake(payload: dict, env) -> str:
             "（只推回這一次；第二次 Stop 放行。）")
 
 
-def stop_verdict(payload: dict, env=None) -> str:
-    """Stop 推回的合成（ARCH §1.4 互斥兩組）；回 reason，不成立 ⇒ `""`；任何例外 `""`。
+def stop_verdict(payload: dict, env=None, *, mute: str | None = None, raw_env=None,
+                 **seams) -> str:
+    """Stop 推回的合成（ARCH §1.4 互斥兩組；QuotaWall §6.2～§6.4）；回 reason，不成立 ⇒ `""`；
+    任何例外 `""`。`mute`＝呼叫端（hook）已算好的 `qw_guard.mute` 結果（缺省自己算）；
+    `raw_env`＝hook 行程的原始環境（主載具閘的 `off` 判準用，OIR 讓路注入不算）；其餘為測試縫。
 
-    · 有在飛子代理：只判冷叫醒閘（監督閘接點見下，WP-4 補）。
-    · 無在飛子代理：冷叫醒閘（已交棒卻掛背景 shell）優先；否則封存閘、park、保溫閘
+    · 牆中（`mute=="wall"`）：整體回 `""`（只剩出聲，不推回）。
+    · 有在飛子代理：冷叫醒閘（已交棒該 TaskStop）→ 額度牆在飛側（close ⇒ TaskStop 在飛代理，
+      不得要求先封存）→ 監督閘（沒人看管該掛 watch）取第一個非空。
+    · 無在飛子代理：冷叫醒閘（已交棒卻掛背景 shell）優先；否則封存閘、額度類（close 的收尾步驟／
+      none 階段的既有 park 推回，主載具在跑時套 S-18 閂鎖／主載具閘）、保溫閘
       （`keepwarm.stop_verdict`：沒有任何背景任務在跑、人離開後快取會冷）成立者 **合併成一則**，
-      次序 封存→park→保溫，只一個成立就出那一個。"""
+      次序 封存→park→主載具→保溫，只一個成立就出那一個；額度類已涵蓋 keepwarm 時不再重複保溫閘。"""
     env = os.environ if env is None else env
     try:
         if not isinstance(payload, dict) or payload.get("stop_hook_active"):
             return ""  # 迴圈煞車：第二次 Stop 一律放行
         sid = roster._payload_sid(payload)
         supervise.record_crons(payload, sid)  # 只記錄、不影響任何判決
+        from . import qw_guard  # noqa: PLC0415 — lazy：與 park 同一條「Stop 沒走到就不付」紀律
+
+        if (qw_guard.mute(payload, env, **seams) if mute is None else mute) == "wall":
+            return ""
         if sid and seal.agents_running(payload, sid):
-            # WHY：在飛側只准冷叫醒閘（已交棒該 TaskStop）與監督閘（沒人看管該掛 watch）兩者擇一，
-            # 冷叫醒優先——互斥兩組見 ARCH §1.4；封存／park 要求無在飛代理，不在這一側。
-            return _finalized_wake(payload, env) or supervise.stop_verdict(payload, env)
+            # WHY：在飛側只准冷叫醒閘（已交棒該 TaskStop）、額度牆（close 該 TaskStop）與監督閘
+            # （沒人看管該掛 watch）；冷叫醒優先——互斥兩組見 ARCH §1.4；封存／park 要求無在飛
+            # 代理，不在這一側。
+            return (_finalized_wake(payload, env) or qw_guard.inflight(payload, env, **seams)
+                    or supervise.stop_verdict(payload, env))
         wake = _finalized_wake(payload, env)
         if wake:
             return wake
-        sealed, parked = seal.stop_verdict(payload, env), _park_stop(payload, env)
-        return "\n\n".join(x for x in (sealed, parked, keepwarm.stop_verdict(payload, env)) if x)
+        quota, covers = qw_guard.idle(payload, env, **seams)
+        gate = "" if (quota or covers) else qw_guard.primary_gate(
+            payload, env, raw_env=raw_env, now=seams.get("now"))
+        keep = "" if (covers or gate) else keepwarm.stop_verdict(payload, env)
+        return "\n\n".join(x for x in (seal.stop_verdict(payload, env), quota, gate, keep) if x)
     except Exception:  # noqa: BLE001 — fail-open
         return ""
 
 
-def _park_stop(payload: dict, env) -> str:
+def stop_notice(payload: dict, env=None, **seams) -> str:
+    """S-18 閂鎖之後的 `systemMessage`「備援缺席」（不 block）；Stop 沒有推回時由 hook 帶出。"""
     try:
-        from . import park  # noqa: PLC0415 — lazy：Stop 沒走到這裡就不付 import 成本
-        return park.stop_verdict(payload, env)
-    except Exception:  # noqa: BLE001 — fail-open（P0）
+        from . import qw_guard  # noqa: PLC0415
+
+        return qw_guard.stop_notice(payload, os.environ if env is None else env, **seams)
+    except Exception:  # noqa: BLE001
         return ""

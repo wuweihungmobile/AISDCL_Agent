@@ -70,16 +70,48 @@ def midwork_hits(text: str, is_quoted: Callable[[str, int, int], bool]) -> list[
 
 
 def background_idle(payload: dict) -> bool:
-    """Stop payload 帶 `background_tasks` 且沒有任何 running 項（子代理、shell、任何型別）。
-    欄位缺席（舊 harness）回 False ⇒ 不判（fail-open）。讀法同 `roster._tasks`。"""
+    """Stop payload 帶 `background_tasks` 且沒有任何會叫醒主控做事的 running 項。
+    欄位缺席（舊 harness）回 False ⇒ 不判（fail-open）。讀法同 `roster._tasks`。
+
+    純保溫／監督 shell（`sessionctl.py watch`／`keepwarm`）預設不算「會叫醒主控做事」的背景工作
+    （判準單一家＝roster.is_supervision_shell，REQ-WP-22；不複製正則）；**例外（QuotaWall S-18）**：
+    帶目標的主載具（running shell ∧ holder 活、`wake_at` 在未來、mode∈chain／single）是會在
+    預定時刻叫醒主控續工的事件源 ⇒ 有它在就不是閒置，半路停工不判。`periodic` 只保溫不續工，
+    維持排除（舊行為）。競態寬限：holder 尚未寫入但有 running 的本 sid keepwarm shell ⇒ 同一
+    背景任務 id 只寬限一次（`qw_latch.latch_grace`；**有副作用，一個 Stop 只准呼叫一次**）。"""
     if "background_tasks" not in payload:
         return False
     raw = payload["background_tasks"]
     rows = [raw] if isinstance(raw, dict) else raw if isinstance(raw, list) else []
-    # 純保溫／監督 shell（`sessionctl.py watch`／`keepwarm`）不算「會叫醒主控做事」的背景工作：
-    # 判準單一家＝roster.is_supervision_shell（REQ-WP-22；不複製正則）；子代理另有 agent 項。
-    return not any(isinstance(r, dict) and str(r.get("status") or "running") == "running"
-                   and not _is_supervision(r) for r in rows)
+    running = [r for r in rows
+               if isinstance(r, dict) and str(r.get("status") or "running") == "running"]
+    if any(not _is_supervision(r) for r in running):
+        return False
+    return not (running and _primary_event_source(payload, running))
+
+
+def _primary_event_source(payload: dict, shells: list[dict]) -> bool:
+    """S-18：running 的監督 shell 之中是否有「會在預定時刻叫醒主控續工」的主載具；判不出 ⇒ False
+    （維持排除＝舊行為）。"""
+    try:
+        from datetime import datetime  # noqa: PLC0415
+
+        from . import holder, qw_latch, roster  # noqa: PLC0415 — lazy：hook 鏈不為這一格預付成本
+
+        sid = roster._payload_sid(payload)
+        if not sid:
+            return False
+        if qw_latch.primary_live(payload, sid, datetime.now().astimezone()):
+            return True
+        if holder.read(sid) is not None:
+            return False
+        for task in shells:
+            cmd = str(task.get("command") or "")
+            if roster.KEEPWARM_CMD_RE.search(cmd) and sid in cmd:
+                return qw_latch.latch_grace(sid, task.get("id"))
+        return False
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _is_supervision(task: dict) -> bool:

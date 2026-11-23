@@ -291,6 +291,18 @@ def midwork_stop(payload: dict, claim: str, tools: set[str],
     return hits if (work_evidence(payload, tools) if evidence is None else evidence) else []
 
 
+def _quota_mute(payload: dict) -> str:
+    """QuotaWall §6.4 靜音分類（判準住 `tools/lib/sessionctl/qw_guard.py`）：`wall`＝牆中，
+    三種推回全部不出；`quota`＝準備帶，完成閘改一行 systemMessage；`""`＝照舊。
+    import／判準失敗＝""（fail-open）。"""
+    try:
+        from lib.sessionctl import qw_guard  # type: ignore[import-not-found]  # noqa: PLC0415
+
+        return qw_guard.mute(payload, os.environ)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _trace(hits: list[dict], session_id: str, event: str = "handoff_block") -> None:
     """落一列痕跡（「沒觸發＝檔不長大」）。任何 I/O 失敗吞掉：痕跡不得反過來變成守衛的故障源。"""
     if trace_dir is None:
@@ -341,12 +353,17 @@ def main() -> int:
         und = bool(state and state.undriven)
         if not hits and not mid and not und:
             return _say(note)
+        mute = _quota_mute(payload)  # 只在「有東西要推」時才算（plan 讀額度，不是每次 Stop 都付）
+        if mute == "wall":  # 牆中：三種推回全部不出（REQ-QW-15；牆中推回只會燒冷重寫）
+            return _say(note)
         tools = tools_this_turn(transcript)
         if ASK_TOOL in tools:
             return _say(note)
         evidence = work_evidence(payload, tools) if (mid or und) else False
         mid = midwork_stop(payload, claim, tools, evidence) if mid else []
         oi = gate.stop_verdict(state, payload, os.environ, evidence=evidence) if und else ""
+        if oi and mute == "quota":  # 準備帶：完成閘只出一行 systemMessage，不推回、不 mark_pushed
+            note, oi = "\n".join(filter(None, (note, oi.splitlines()[0][:200]))), ""
         if not hits and not mid and not oi:
             return _say(note)
         if hits:

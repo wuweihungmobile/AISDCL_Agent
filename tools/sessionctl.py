@@ -1,7 +1,10 @@
 """sessionctl 命令列入口（薄殼：只分派，判準全在 `lib/sessionctl/`；ADR-XPLAT-004 §2.13）。
 
 用法：python tools/sessionctl.py <子指令> [旗標]
-  子指令：handoff|status|stop|advice|rush|park|watch|keepwarm|runlong|waitfor|oldwin
+  子指令：handoff|status|stop|advice|rush|park|watch|keepwarm|quotawall|runlong|waitfor|oldwin
+  quotawall [--sid] [--projects-dir]
+      額度牆計畫（唯讀、零 token；lib/sessionctl/qw_cli；印 stage／R／V／L 與末行
+      `QUOTAWALL_PLAN=`、`QUOTAWALL_TARGET=`）
   watch [--sid] [--stall-min] [--wall-min] [--ctx-max] [--poll-sec]
       背景代理監督（lib/sessionctl/watch；以 run_in_background 掛著，結束＝叫醒主控）
   keepwarm [--sid] [--min] [--poll-sec] [--idle-min] [--heartbeat-min]
@@ -84,11 +87,13 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write(f"control: ?（量不到：{type(exc).__name__}）\n")
         rc = roster.cli(args)
         if verb == "status" and rc == 0:  # R3 WP-4B FR-W9：監督一行（依心跳檔）
-            from lib.sessionctl import oldwin_sched, rv_orphans, supervise
+            from lib.sessionctl import oldwin_sched, qw_cli, rv_orphans, supervise
 
             sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
             sys.stdout.write((supervise.status_line(sid) if sid
                               else "監督：無法判斷（缺 CLAUDE_CODE_SESSION_ID）") + "\n")
+            if sid:  # QuotaWall §10：主載具／備援／哨兵三列憑證（缺席照實印 absent）
+                sys.stdout.write("\n".join(qw_cli.status_lines(sid)) + "\n")
             sys.stdout.write(oldwin_sched.status_text())  # R217：舊窗重試排程與「只提醒」列
             sys.stdout.write(rv_orphans.status_line() + "\n")  # 真機驗證租約帳孤兒（只讀）
         return rc
@@ -112,13 +117,17 @@ def main(argv: list[str] | None = None) -> int:
         from lib.sessionctl import keepwarm
 
         return keepwarm.cli(rest)
+    if verb == "quotawall":  # QuotaWall S-9：唯讀額度牆計畫（零 token；末行 QUOTAWALL_PLAN=）
+        from lib.sessionctl import qw_cli
+
+        return qw_cli.cli(rest)
     if verb in ("runlong", "waitfor"):  # R216 WP-D：子代理長等待（背景跑＋每段 <5 分鐘前景回來看）
         from lib.sessionctl import longwait
 
         return longwait.cli_runlong(rest) if verb == "runlong" else longwait.cli_waitfor(rest)
     sys.stderr.write("sessionctl: 用法錯誤：子指令須為 "
-                     "handoff／status／stop／advice／rush／park／watch／keepwarm／runlong／waitfor／"
-                     "oldwin\n")
+                     "handoff／status／stop／advice／rush／park／watch／keepwarm／quotawall／"
+                     "runlong／waitfor／oldwin\n")
     return _USAGE_RC
 
 

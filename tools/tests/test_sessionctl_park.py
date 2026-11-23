@@ -272,7 +272,10 @@ class StopVerdictTest(_Fence):
     def test_at_pk_21b_total_entry_via_converge(self) -> None:
         """tools/lib/sessionctl/converge.py：總入口 `stop_verdict` 在收斂閘不成立時落到 park
         判準。"""
-        with mock.patch.object(park, "stop_verdict", return_value="PARK-REASON") as fake:
+        # QuotaWall Q4：總入口先問 `quotawall.plan`；額度量不到（stage none）才落到既有 park 判準
+        # （S-16）。這裡把額度讀數圍成「量不到」，不讀真實額度。
+        with (mock.patch("lib.sessionctl.qw_wall.default_read", return_value=None),
+              mock.patch.object(park, "stop_verdict", return_value="PARK-REASON") as fake):
             self.assertEqual(converge.stop_verdict({"session_id": SID}, {}), "PARK-REASON")
             fake.assert_called_once()
 
