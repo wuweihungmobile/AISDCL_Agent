@@ -1387,7 +1387,8 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "與同表 `keepwarm.py`／`park.py`／`seal.py` 同型"
     ),
     "tools/lib/realverify/cases/sideeffect_sites.py": (
-        "非呼叫：`--check` 的 JSON 資料 `{\"argv\": [\"python\", \"-c\", \"pass\"]}`（寫進沙盒 OIR 的"
+        "非呼叫：`--check` 的 JSON 資料 `{\"argv\": [\"python\", \"-c\", \"pass\"]}`"
+        "（寫進沙盒 OIR 的"
         "check 列，真機案例 E2E-SE-06 的素材）；列內 argv 由 openitems 驅動器的 `console_run` 在 "
         "spawn 前把 `python` 換成當前直譯器絕對路徑，裸名不經 PATH 解析；與同表 "
         "`tools/probe/openitems_drive_e2e.py`／`tools/lib/openitems/drive.py` 同型"

@@ -42,7 +42,7 @@ def sweep() -> str:
 def alive(pid: int) -> bool:
     if sys.platform != "win32":
         raise SystemExit("本 smoke 只在 Windows 跑（tasklist／taskkill）")
-    out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, check=False).stdout  # noqa: E501
+    out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, encoding="utf-8", errors="replace", check=False).stdout  # noqa: E501
     return str(pid) in out
 
 
@@ -55,7 +55,8 @@ def main() -> int:
     bystander = sandbox.Sandbox.create(probe_hook=False)  # 主人＝本行程（存活）
     try:
         owner = subprocess.Popen([PY, "-c", OWNER.format(tools=str(TOOLS), lib=str(TOOLS / "lib"), task=task)],  # noqa: E501
-                                 stdout=subprocess.PIPE, text=True)
+                                 stdout=subprocess.PIPE, text=True,
+                                 encoding="utf-8", errors="replace")
         line = owner.stdout.readline().split()
         root, sleeper = Path(line[1]), int(line[2])
         subprocess.run(["taskkill", "/F", "/PID", str(owner.pid)], capture_output=True, check=False)  # noqa: E501

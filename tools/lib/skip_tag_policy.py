@@ -433,7 +433,7 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # SelfImproving P5 2026-11-10（收尾單人窗口）：新增 `_selfimproving_p5_fixtures.py`、
     # `test_selfimproving_fourq_{model,gate}.py` 後實測 127 支，99 只剩實測的 78%，
     # `tree_floor_problems` 重釘為 101 ⇒ 照填（只升不降）。
-    "tools/tests": 128,  # 2026-11-22 重釘 126→128（副作用隔離 S2 新鎖檔，實測 160；只升不降）
+    "tools/tests": 140,  # 2026-11-23 重釘 128→140（R218 收尾，實測 176；只升不降；前：126→128）
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。
@@ -691,7 +691,10 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # TestGetRepoPythonBehavior` 的 `@unittest.skipIf(_pwsh_exe() is None, …)`——兩者都是
         # 「解不到載具就明說跳過、不假綠」的正確形態，述詞問的是工具在不在而非平台，故歸
         # `tool-absence`。QA 複審實跑 `tools/run_root_unittests.py` 在靜態掃描階段早退抓到此漂移。
-        "tool-absence": 39,
+        # 🔴 R218 收尾重釘 `tool-absence` 39→40（**非放寬**，本表判準是「相等」）：新增
+        # `test_sched_isolation.py` 類別層 `skipUnless(_WIN, "真 schtasks（Windows）…")`，述詞問的是
+        # 排程器在不在（常數 `_WIN`），歸 `tool-absence`；有明說理由、不是隱藏失敗。
+        "tool-absence": 40,
         # 🔴 R88 重釘 `runtime-skipTest` 20→22（**非放寬**，同上：本表判準是「相等」）。
         # DEF-200-104 的第三個掃描面（SDD LATEST hook 樹的 console-spawn 判準）新增兩支測試，
         # 兩支皆以函式體內 `self.skipTest("[TOOL-ABSENCE] …")` 對「解不出 LATEST／該樹無
@@ -769,7 +772,10 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # 2026-11-17 重釘 `runtime-skipTest` 33→35（**非放寬**，同上：本表判準是「相等」）。
         # 新站點＝`test_sessionctl_forward.py` 兩個測試函式體內的 `self.skipTest(...)`
         # （hook／settings 尚未套用 UserPromptSubmit 時明說跳過、不假綠；套用後即真跑）。
-        "runtime-skipTest": 35,
+        # 🔴 R218 收尾重釘 `runtime-skipTest` 35→36（**非放寬**）：新增 `test_openitems_run_died.py`
+        # 函式體內 `self.skipTest("這個平台量不到開機時間…")`——量不到開機時間時 fail-safe 路徑
+        # 已由同檔其他案例覆蓋，明說跳過而非假綠。
+        "runtime-skipTest": 36,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在

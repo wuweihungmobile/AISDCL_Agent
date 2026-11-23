@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9559,
+    "test_adr_xplat001_c1c2_lock.py": 9588,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -636,7 +636,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_defect_log_crossref.py": 3954,
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 3835,
-    "test_check_pending_handoff.py": 380,
+    "test_check_pending_handoff.py": 397,
     "test_check_pytest_baseline_sites.py": 315,
     "test_check_script_parity.py": 2007,
     "test_check_wrapper_thinness.py": 1153,
@@ -646,7 +646,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 2001,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 274,
-    "test_context_budget_guard.py": 15958,
+    "test_context_budget_guard.py": 15981,
     "test_context_window_parity.py": 325,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 276,
@@ -674,10 +674,11 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 308,
     "test_ntfs_trailing_space_device_name.py": 698,
     "test_onboarding_parity_interlock.py": 233,
-    "test_openitems_drive.py": 720,
+    "test_openitems_drive.py": 761,
     "test_openitems_gate.py": 547,
     "test_openitems_ledger.py": 440,
     "test_openitems_marker_lock.py": 173,
+    "test_openitems_run_died.py": 447,
     "test_openitems_scan.py": 119,
     "test_platform_neutral_paths.py": 5764,
     "test_platform_utils_dedup.py": 1168,
@@ -692,22 +693,26 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_quota_pace_floor.py": 338,
     "test_quota_policy.py": 4840,
     "test_quota_reconcile_gap.py": 146,
-    "test_quota_rush.py": 481,
-    "test_realverify_leases.py": 218,
-    "test_realverify_lib.py": 634,
+    "test_quota_rush.py": 484,
+    "test_realverify_leases.py": 221,
+    "test_realverify_lib.py": 656,
+    "test_realverify_se_leases.py": 605,
+    "test_realverify_se_locks.py": 874,
+    "test_realverify_se_snapshot.py": 653,
     "test_recovery_hint_passes_ps_lint.py": 103,
     "test_refresh_nightly_anchor.py": 305,
     "test_resume_cost.py": 197,
     "test_root_guard_known_model_r145.py": 240,
     "test_root_infra_parity.py": 437,
     "test_root_module_layout.py": 355,
-    "test_run_root_unittests.py": 5478,
+    "test_run_root_unittests.py": 5480,
     "test_sandbox_scope.py": 595,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 309,
-    "test_sched_isolation.py": 454,
+    "test_sched_isolation.py": 468,
     "test_schedule_capability_parity.py": 598,
     "test_script_scan_surface_ssot.py": 376,
     "test_sdd_hook_router_r158.py": 189,
+    "test_se_s3_sites.py": 484,
     "test_selfimproving_backtest.py": 870,
     "test_selfimproving_capability.py": 798,
     "test_selfimproving_capacity_retire.py": 621,
@@ -729,7 +734,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_selfimproving_p2_meta.py": 515,
     "test_selfimproving_p3_meta.py": 429,
     "test_selfimproving_p7_memory.py": 403,
-    "test_selfimproving_p7_push.py": 4695,
+    "test_selfimproving_p7_push.py": 4700,
     "test_selfimproving_p7_report.py": 1364,
     "test_selfimproving_promote.py": 724,
     "test_selfimproving_props.py": 1556,
@@ -742,24 +747,34 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_selfimproving_schedule_patrol.py": 757,
     "test_selfimproving_verify.py": 1070,
     "test_sentinel_tick_e2e_r145.py": 466,
-    "test_session_brief.py": 1546,
+    "test_session_brief.py": 1547,
+    "test_sessionctl_ackhook.py": 350,
+    "test_sessionctl_agentbrief.py": 504,
     "test_sessionctl_cachegate.py": 292,
-    "test_sessionctl_converge.py": 522,
+    "test_sessionctl_control.py": 446,
+    "test_sessionctl_converge.py": 539,
     "test_sessionctl_costmodel.py": 158,
-    "test_sessionctl_forward.py": 406,
-    "test_sessionctl_handoff.py": 1264,
+    "test_sessionctl_forward.py": 415,
+    "test_sessionctl_handoff.py": 1325,
     "test_sessionctl_hooks.py": 607,
-    "test_sessionctl_keepwarm.py": 604,
+    "test_sessionctl_keepwarm.py": 609,
+    "test_sessionctl_keepwarm_q2.py": 672,
     "test_sessionctl_longwait.py": 324,
     "test_sessionctl_modelmix.py": 94,
-    "test_sessionctl_oldwin.py": 1220,
-    "test_sessionctl_park.py": 985,
-    "test_sessionctl_park_route.py": 251,
+    "test_sessionctl_oldwin.py": 1241,
+    "test_sessionctl_park.py": 1004,
+    "test_sessionctl_park_q3.py": 648,
+    "test_sessionctl_park_route.py": 262,
+    "test_sessionctl_quotawall.py": 1093,
+    "test_sessionctl_quotawall_q4.py": 519,
     "test_sessionctl_roster.py": 953,
-    "test_sessionctl_seal.py": 392,
-    "test_sessionctl_supervise.py": 301,
+    "test_sessionctl_se_isolation.py": 688,
+    "test_sessionctl_seal.py": 394,
+    "test_sessionctl_supervise.py": 316,
     "test_sessionctl_switch.py": 592,
-    "test_sessionctl_watch.py": 686,
+    "test_sessionctl_visibility.py": 485,
+    "test_sessionctl_watch.py": 819,
+    "test_sessionctl_watchlock.py": 250,
     "test_single_venv_identity.py": 162,
     "test_skip_ceiling_ratchet_direction.py": 719,
     "test_skip_discoverability_r83.py": 731,
@@ -773,11 +788,12 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_waste_census_keep.py": 348,
     "test_waste_census_metrics.py": 686,
     "test_waste_census_supervision.py": 173,
+    "test_waste_census_wall.py": 523,
     "test_windows_forbidden_filename_parity.py": 931,
     "test_windows_nightly_anchor_parity.py": 119,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
     "test_windowsapps_guard_bash_parity.py": 1016,
-    "test_windowsapps_guard_cross_consistency.py": 2112,
+    "test_windowsapps_guard_cross_consistency.py": 2124,
     "test_workflow_permission_concurrency_lock.py": 1808,
     "test_workflow_schedule_sync.py": 305,
     "test_workflow_timeout_coverage.py": 158,
@@ -3277,6 +3293,14 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "（隔離判準與 planner 接線的單元鎖）＋本檔自身漂移。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/06_quality/CrossPlatform_R217_WorkProgress_Closure_Evidence.md。"),
+    ("R214", 177588, 187294, +9706,  # round-label-ok r218clos1
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE "
+     "的R214 名冊列承接] 同標籤第六十列（R218 本批收尾單人窗口：額度牆續航、背景代理掌控、"
+     "副作用隔離與真機驗證家族的回歸鎖）：新鎖檔 test_sessionctl_quotawall.py、"
+     "test_sessionctl_keepwarm_q2.py、test_sessionctl_park_q3.py、test_sessionctl_control.py、"
+     "test_se_s3_sites.py、test_realverify_se_locks.py 等與既有測試檔的回歸鎖＋本檔自身漂移。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
+     "證據＝docs/06_quality/CrossPlatform_R218_QuotaWall_Control_Closure_Evidence.md。"),
 )
 
 
@@ -3378,7 +3402,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (49076, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (58782, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -4062,6 +4086,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "R218-B 副作用隔離 S2 回歸鎖："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok r218clos1
+     "R218 本批收尾回歸鎖："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -4237,10 +4265,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 406
+_REPIN_LOG_FROZEN_PREFIX_LEN = 407
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "219eda6e0ad62176160a8fa468c78b0551cfe15e91b8f9472044d05df9e5ef7d")
+    "47d7b7ffdd67bb5a2977020371aebb126488649db2863dc3530b171170c60f62")
 
 
 def repin_log_history_digest(
@@ -4488,6 +4516,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "71669857899e", "c964e562c427", "DEF-200-632"),  # round-label-ok r218bs1ledger
     ("R214", "c964e562c427", "9de605874ba4", "DEF-200-632"),  # round-label-ok r218bs5ledger
     ("R214", "9de605874ba4", "219eda6e0ad6", "DEF-200-632"),  # round-label-ok r218bs2ledger
+    ("R214", "219eda6e0ad6", "47d7b7ffdd67", "DEF-200-638"),  # round-label-ok r218clos1ledger
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

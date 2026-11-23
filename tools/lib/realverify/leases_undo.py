@@ -40,7 +40,7 @@ def list_procs() -> list[tuple[int, str, str]]:
         rows = [data] if isinstance(data, dict) else data
         return [(int(r["ProcessId"]), str(r["Name"] or ""), str(r["CommandLine"] or "")) for r in rows]  # noqa: E501
     pr = subprocess.run(["ps", "-A", "-o", "pid=,comm=,args="], capture_output=True, text=True,  # noqa: S603,S607
-                        timeout=30, check=False)
+                        encoding="utf-8", errors="replace", timeout=30, check=False)
     rows = []
     for line in pr.stdout.splitlines():
         parts = line.split(None, 2)

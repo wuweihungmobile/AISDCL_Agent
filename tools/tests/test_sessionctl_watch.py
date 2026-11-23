@@ -503,8 +503,10 @@ def _plan(stage: str, n_live: int | None = 1):
 
 
 class QuotaSeriesLatchTests(_Fence):
-    """tools/lib/sessionctl/{watch,watch_wake,keepwarm}.py：r9 W11d 兩條序列各自閂鎖（REQ-QW-75～77；
-    AT-QW-89～91）。WHY：07:43 一次計畫序列 close 誤報鎖住單一序列，之後 85% prepare 與新派工都沒出聲，
+    """tools/lib/sessionctl/{watch,watch_wake,keepwarm}.py：r9 W11d 兩條序列各自閂鎖（REQ-QW-75
+    ～77；
+    AT-QW-89～91）。WHY：07:43 一次計畫序列 close 誤報鎖住單一序列，之後 85% prepare 與新派工都
+    沒出聲，
     到 100% halt 才響（2026-11-23 撞牆事件 RCA 第 2 題）。"""
 
     def _once(self, keys, *, plan=None, anchor=None) -> tuple[str, str]:
@@ -520,7 +522,8 @@ class QuotaSeriesLatchTests(_Fence):
         return [self._once(keys, plan=plan)[0] for keys, plan in rounds]
 
     def test_at_qw_89_the_two_series_latch_independently(self) -> None:
-        """AT-QW-89。WHY（MU-QW-57 閂鎖回單一序列）：計畫序列的 close 已閂鎖，原始讀數跨 prepare 仍要
+        """AT-QW-89。WHY（MU-QW-57 閂鎖回單一序列）：計畫序列的 close 已閂鎖，原始讀數跨 prepare
+         仍要
         出聲；反向亦然。同序列同級或降級不出聲。"""
         close, prep = ("close", "R", None), ("prepare", "R", 90.0)
         self.assertEqual(self._events(([close], _plan("close")), ([prep], None)),
@@ -535,7 +538,9 @@ class QuotaSeriesLatchTests(_Fence):
         self.assertEqual(self._events(([close], _plan("close")), ([close], _plan("close")),
                                       ([nodis], _plan("nodispatch"))),
                          ["quota", "keepwarm", "keepwarm"])
-        self.assertEqual(self._events(([("halt", "R", 99.0)], None), ([("prepare", "R", 90.0)], None)),
+        events = self._events(([("halt", "R", 99.0)], None),
+                              ([("prepare", "R", 90.0)], None))
+        self.assertEqual(events,
                          ["quota", "keepwarm"])
 
     def test_at_qw_89_raw_halt_still_outranks_raw_prepare(self) -> None:
@@ -544,7 +549,8 @@ class QuotaSeriesLatchTests(_Fence):
                                       ([("halt", "R", 100.0)], None)), ["quota", "quota"])
 
     def test_at_qw_89_a_v1_latch_file_means_no_latch_and_no_error(self) -> None:
-        """AT-QW-89。WHY：舊（單一序列）閂鎖檔讀回＝無閂鎖、fail-open，不得報錯或卡住升級後的新路徑。"""
+        """AT-QW-89。WHY：舊（單一序列）閂鎖檔讀回＝無閂鎖、fail-open，不得報錯或卡住升級後的新
+        路徑。"""
         path = keepwarm.latch_path(SID)
         path.parent.mkdir(parents=True)
         path.write_text(json.dumps({"schema": keepwarm.SCHEMA, "sid": SID, "band": "close",
@@ -583,7 +589,8 @@ class QuotaSeriesLatchTests(_Fence):
                          ([nodis], _plan("nodispatch", 2))), ["quota", "keepwarm", "keepwarm"])
 
     def test_at_qw_91_plan_trigger_text_names_the_wall_not_the_raw_reading(self) -> None:
-        """AT-QW-91①。WHY（MU-QW-59）：12:16 計畫階段觸發卻寫「原始讀數已達 prepare」是假話，主控據此
+        """AT-QW-91①。WHY（MU-QW-59）：12:16 計畫階段觸發卻寫「原始讀數已達 prepare」是假話，主
+        控據此
         誤判讀數；文案必須指向實際來源與數字。"""
         _event_name, out = self._once([("nodispatch", "R", None)], plan=_plan("nodispatch"))
         line = next(x for x in out.splitlines() if "quota：" in x)

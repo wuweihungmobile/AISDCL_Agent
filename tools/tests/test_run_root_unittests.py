@@ -738,7 +738,7 @@ class TestWriterModulesDeclareTheModuleFence(unittest.TestCase):
                                    "test_sentinel_tick_e2e_r145.py", "test_quota_burndown.py",
                                    "test_sessionctl_watch.py",  # DEF-200-607：watch 預種額度快取
                                    "test_sched_isolation.py",  # R218-B：呼叫 planner.main，已接圍籬
-                                   "test_sessionctl_watchlock.py"},  # 已接模組級圍籬（上面 problems 為空）
+                                   "test_sessionctl_watchlock.py"},  # 已接模組級圍籬
                          "偵測器認出的寫端不是已知九支（認不出＝分母 0 假綠；多認出＝先看是不是"
                          "誤判，真的新寫端接好圍籬後把檔名加進本集合）")
 

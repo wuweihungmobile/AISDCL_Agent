@@ -211,7 +211,8 @@ def _iso(minutes_ago: float) -> str:
 
 
 def _task() -> dict:
-    return {"type": "user", "timestamp": _iso(180), "message": {"role": "user", "content": "任務書X"}}
+    return {"type": "user", "timestamp": _iso(180),
+            "message": {"role": "user", "content": "任務書X"}}
 
 
 def _cut() -> dict:
@@ -324,7 +325,8 @@ class WatchAndBriefVoiceTest(CutVoiceTestCase):
         self.assertIn("cut（usage_limit）", text)
 
     def test_three_sites_share_one_text_function(self) -> None:
-        """原始碼掃描：三個呼叫點各自只呼叫 cutvoice；`render_cut` 只在 cutvoice 出現（同一函式）。"""
+        """原始碼掃描：三個呼叫點各自只呼叫 cutvoice；`render_cut` 只在 cutvoice 出現（同一函式）。
+        """
         want = {"roster.py": "cutvoice.stop_text", "watch.py": "cutvoice.watch_text",
                 "briefline.py": "cutvoice.brief_text"}
         for name, call in want.items():

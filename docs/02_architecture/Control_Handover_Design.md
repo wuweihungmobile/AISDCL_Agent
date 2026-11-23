@@ -667,3 +667,13 @@ TCS-SessionCtl AT-SC-34「11 欄」→ 13 欄（逐欄斷言）、`handoff_build
 | P3-n1 | §7.2 H 列與 §7.4「非 `effective`」含 `unreadable`，與 §3.2 矛盾 | **採納**：兩處改「`none` 或 `invalidated`」；TCS REQ-CTL-25 同改 | §7.2 H、§7.4；REQ-CTL-25 |
 | P3-n2 | TCS §7 第 5 項「TH-1～TH-7」漏 TH-8；REQ-CTL-48 無真機 E2E 未登明 | **採納**：改 TH-1～TH-8（TCS §7 第 5 項、DES §18 第 3 問）；REQ-CTL-48 無真機 E2E 的劃界保留（改以 `waste_census` 真跑量測，TCS §6 表第 48 列已標示，覆蓋表一致），並在 TCS §7 明載 | TCS §6、§7；DES §18 |
 | P3-n3 | `ensure_pending` 呼叫點含「封存閘 Stop」恆不成立且違反 §3.1 | **採納**：刪此呼叫點，餘 watch 輪詢、`control_state`／`switch-plan`；AT-CTL-86 同改 | D-CT-11、§7.4；AT-CTL-86 |
+
+
+## 23. 實作對照註記（2026-11-23 收尾；只增註記，既有條文不改）
+
+> 依 W4／W4b 實作落地後的實況補註；上列條文（§16、§0.3、§21、附錄）逐字保留，以本節為對照。
+
+1. **`cut_kind` 的實作位置**：§16 與 TCS AT-CTL-32 寫的 `rosterscope.cut_kind`，實作落在 `tools/lib/sessionctl/agentbrief.py::cut_kind`（`rosterscope` 只負責名冊限本專案的掃描範圍）。以下列為準：`agentbrief.cut_kind(agent_path, *, killed, agent_id, ...)`。
+2. **新常數 `agentbrief.STOPPED_RECENT_SECONDS`＝24 小時**（`24 * 3600`）：主逐字稿記著被 TaskStop、近 24 小時內有動、且名冊不再列的代理才算「近期被停」（`stopped`）；超過者不出聲。本常數與 `cut_kind` 同檔，屬 W4 新增，原設計未載。
+3. **`cutvoice.py` 的掛點**：三處出聲各只呼叫一個 `cutvoice` 函式——Stop `roster.stop_message` 呼叫 `cutvoice.stop_text`、`watch` 判決處置字尾呼叫 `cutvoice.watch_text`、SessionStart `briefline` 呼叫 `cutvoice.brief_text`；`agentbrief.render_cut` 只被 `cutvoice` 使用（REQ-CTL-20；判準全在葉模組）。
+4. **`ackhook` 的掛點在入口層**：`tools/sessionctl.py` 的 `handoff` 分支呼叫 `ackhook.after_handoff(rest, handoff.cli(rest))`，`--ack` 成功才進 `ackhook.on_ack`（REQ-CTL-47）；`handoff.py` 本身不 import `ackhook`，維持行數牆（§21）。

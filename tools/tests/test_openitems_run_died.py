@@ -387,7 +387,8 @@ print(driver_run.run_driver(root, oi_params.load(root), item_id, task, deps), fl
 class RealRunnerDeathE2ETest(unittest.TestCase):
     """E2E-WP-46 修訂：真驅動器子行程被 `taskkill /T /F`（等同關機）⇒ 帳本停在 start，
     真 CLI `list`／完成閘立即判 `run_died`，不等預算。載具＝真子行程＋真 kill＋真 CLI；
-    驅動器用注入 Deps 的啟動器（不碰真排程器、不碰互動讓路與真額度——那兩個會讓測試依賴本機狀態）。"""
+    驅動器用注入 Deps 的啟動器（不碰真排程器、不碰互動讓路與真額度——那兩個會讓測試依賴本機狀態）。
+    """
 
     def test_killed_driver_is_undriven_run_died_right_away(self):
         import tempfile  # noqa: PLC0415

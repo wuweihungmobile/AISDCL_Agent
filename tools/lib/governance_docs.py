@@ -713,6 +713,9 @@ _GOVERNANCE_DOCS = (
     # R217：工作推進軸期 A 收尾的缺陷明細、決策與理論洞清單（DEF-200-624～637）。資格同上。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R217_WorkProgress_Closure_Evidence.md",
+    # R218：額度牆續航／掌控／副作用隔離收尾的缺陷明細與收尾決策（DEF-200-638～645）。資格同上。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R218_QuotaWall_Control_Closure_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

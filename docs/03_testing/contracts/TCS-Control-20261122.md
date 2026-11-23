@@ -390,3 +390,10 @@
 5. DES §17 追加註記 N-1～N-10 全數套用；PRD §16.6 兩列〔OI〕依 1～4 逐項結案；DES §13 理論洞 TH-1～TH-8（r3：含有條件的 TH-8）抄進證據檔並各附升級觸發條件。
 6. 守衛面碼的暴露證據齊備：A4（逐字稿座標＋12 件痕跡）、A12／A14（掌舵者原話第 3 題、`status` 畫面）、前鏈原話缺（M-S2 9／37）、park 提前（E8、E9）、ack 撤 park（11/22 主控手動 `park --cancel` 實例，DES §20.2）；**pending／`switch_due` 小塊＝預防性（情境真實命中 3、損害在現行機制下未證，DES §7.7；主控裁決 2 代決）——若再審認定不足則整塊降為 TH-8、不寫守衛碼，W5 其餘不受影響**；理論洞不寫守衛碼。
 7. 各包交卷附當回合 `check_loc_budget.py --json` 輸出（DES §21；r3：含 `park_cli.py` 餘額現查，W4b／W6 動工前後各一次）；REQ-CTL-48 無真機 E2E 為誠實劃界（§6 表第 48 列：以 `waste_census` 真跑量測代之，不算入 E2E 24／24，亦不入 `cases.json`）；W1 交卷附 `wake_package` 既有測試遷移對照表（AT-CTL-15）。
+
+
+## 實作對照註記（2026-11-23 收尾；只增註記，既有條文不改）
+
+1. **AT-CTL-32** 的 `rosterscope.cut_kind` 實作在 `tools/lib/sessionctl/agentbrief.py::cut_kind`（名稱以實作為準；AT 的判準與樣本不變）。
+2. `agentbrief.STOPPED_RECENT_SECONDS`＝24 小時（`stopped` 只認近期被 TaskStop 者），見 Control_Handover DES §23。
+3. REQ-CTL-20 三處出聲掛 `cutvoice`（`roster.stop_message`、`watch`、`briefline`），REQ-CTL-47 的 `ackhook` 掛在 `tools/sessionctl.py` 入口層（`ackhook.after_handoff`），不在 `handoff.py` 內。

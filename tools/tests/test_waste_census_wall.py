@@ -1,5 +1,6 @@
 """`tools/lib/wastecensus/sections_wall.py`（＋`keep_load.scan_walls`、`sections_keep`
-的 M-K1 扣除）的驗收測試（R218 QuotaWall Q5；TCS-QuotaWall REQ-QW-50／51／52／53／55、AT-QW-56／57／58／61 的
+的 M-K1 扣除）的驗收測試（R218 QuotaWall Q5；TCS-QuotaWall REQ-QW-50／51／52／53／55、AT-QW-56／
+57／58／61 的
 量測面、MU-QW-11、E2E-QW-19／20 的 CI 形態）。
 
 守的是「額度牆續航有沒有被量到」：牆後冷重寫要單獨算且不再混進 M-K1、保溫有沒有保住快取與省下

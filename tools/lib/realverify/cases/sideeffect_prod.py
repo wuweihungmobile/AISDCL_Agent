@@ -73,7 +73,7 @@ def _prepare(ctx: CaseContext, box: SimpleNamespace, ctx_tokens: int) -> Path:
     ctx.check(r.returncode == 0, f"handoff --build rc={r.returncode} {r.stderr[-300:]}")
     pkg = Path(r.stdout.strip().splitlines()[-1])
     pkg.write_text(re.sub(r"TODO:[^\n]*", "realverify 正式目標替身，無實際工作。", pkg.read_text(encoding="utf-8")), encoding="utf-8", newline="\n")
-    dirty = subprocess.run(["git", "status", "--short"], cwd=str(box.root), capture_output=True, text=True, creationflags=NOWIN, check=False).stdout.strip()  # noqa: S603,S607
+    dirty = subprocess.run(["git", "status", "--short"], cwd=str(box.root), capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=NOWIN, check=False).stdout.strip()  # noqa: S603,S607
     ctx.check(not dirty, f"正式替身 repo 髒（D-23 同一輔助函式應使其乾淨）：{dirty[:200]}")
     return pkg
 

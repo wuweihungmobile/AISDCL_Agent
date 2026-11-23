@@ -490,7 +490,8 @@ class AllSettledStillClosesTest(_Fake):
 
 
 class DeadRegistryRowsTest(_Fake):
-    """`tools/lib/realverify/sandbox.py::_drop_dead_registry_rows_in`：被強殺行程的 `~/.claude/sessions`
+    """`tools/lib/realverify/sandbox.py::_drop_dead_registry_rows_in`：被強殺行程的 `~/.claude/s
+    essions`
     登記檔由 cleanup 收掉（否則 RV-SE11／sessionctl_watch 的快照在 cleanup 後量到洩漏）。"""
 
     def _row(self, folder, pid, cwd):
