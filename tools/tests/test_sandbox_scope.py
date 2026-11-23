@@ -440,12 +440,12 @@ class JobEnvTest(_Tmp):
         )
 
     def test_at_se_37_missing_sandbox_home_applies_nothing_and_builds_nothing(self) -> None:
-        """居所值在已刪沙盒家目錄之下 ⇒ ResidenceMissing(rc 9)；環境未動、
-        目錄集合前後相同（MU-SE-22）。"""
+        """已刪沙盒家目錄下的居所 ⇒ ResidenceMissing(rc 9)；環境與目錄皆不動（MU-SE-22）。"""
         value = str(self.tmp / "AutoSDD_RV_sbx_gone" / "traces")
         before = sorted(p.name for p in self.tmp.rglob("*"))
         with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("AUTOSDD_TRACE_DIR", None)
+            for key in ("AUTOSDD_TRACE_DIR", "AUTOSDD_SENTINEL_OFF"):  # 後者＝runner 洩漏圍籬
+                os.environ.pop(key, None)
             with self.assertRaises(endurance_env.ResidenceMissing) as ctx:
                 endurance_env.apply_job_env(
                     [
