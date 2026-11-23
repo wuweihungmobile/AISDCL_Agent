@@ -66,6 +66,7 @@ import quota_burndown  # noqa: E402
 # 且 `quota_policy` 早就 import 它（`as W`）：本行沒有新增任何一條相依邊的方向。
 import quota_pace  # noqa: E402
 import quota_policy  # noqa: E402
+import quota_short_window as QSW  # noqa: E402
 
 #: reset 多遠以內才值得「排程等它」。5 小時視窗最遠 5h、週視窗最遠 7 天，中間這個
 #: 缺口大到不需要精確：取 6 小時。方向鎖守的是「七天後才 reset 的線不得被排程」。
@@ -792,7 +793,7 @@ def pace_line(decision: quota_policy.Decision, live: int, max_fanout: int) -> st
     # 🔴 DEF-200-528：清倉授權在場時標題行只追加短標記（落款 id＋放寬／未放寬軸數）；全文另起一行
     # （`quota_burndown.full_line`，只印一次，渲染住 `quota_burndown`）。過期／撤銷後
     # `decision.burndown` 為 `()`，這一段整個消失。
-    tail = decision.burndown.mark if decision.burndown else ""
+    tail = QSW.short_window_note(decision) + (decision.burndown.mark if decision.burndown else "")
     return head + f"｜最緊的一條＝{axis.kind} {axis.pct:g}% {when}" + tail
 
 
