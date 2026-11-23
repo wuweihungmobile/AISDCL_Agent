@@ -691,10 +691,10 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # TestGetRepoPythonBehavior` 的 `@unittest.skipIf(_pwsh_exe() is None, …)`——兩者都是
         # 「解不到載具就明說跳過、不假綠」的正確形態，述詞問的是工具在不在而非平台，故歸
         # `tool-absence`。QA 複審實跑 `tools/run_root_unittests.py` 在靜態掃描階段早退抓到此漂移。
-        # 🔴 R218 收尾重釘 `tool-absence` 39→40（**非放寬**，本表判準是「相等」）：新增
-        # `test_sched_isolation.py` 類別層 `skipUnless(_WIN, "真 schtasks（Windows）…")`，述詞問的是
-        # 排程器在不在（常數 `_WIN`），歸 `tool-absence`；有明說理由、不是隱藏失敗。
-        "tool-absence": 40,
+        # 🔴 R218 CLOSE1 曾因 `test_sched_isolation.py` 類別層 `skipUnless(_WIN, …)` 重釘 39→40；
+        # FIX6（5bf381b4）拿掉該類別 skip、三支 E2E 改在 POSIX 經 schedule_backend 真跑（darwin
+        # skip 天花板 50>48），故回 40→39（收緊方向；本表判準是「相等」）。
+        "tool-absence": 39,
         # 🔴 R88 重釘 `runtime-skipTest` 20→22（**非放寬**，同上：本表判準是「相等」）。
         # DEF-200-104 的第三個掃描面（SDD LATEST hook 樹的 console-spawn 判準）新增兩支測試，
         # 兩支皆以函式體內 `self.skipTest("[TOOL-ABSENCE] …")` 對「解不出 LATEST／該樹無
