@@ -341,3 +341,81 @@
 3. 根層全套（runlong／waitfor）與 `ruff check tools/ .claude/hooks/` 綠；`.env.example` 生成物新鮮度鎖綠；SE 的 AT-SE-39（`SITES` AST 鎖）於 Q3 commit 綠；SE 的 AT-SE-31／E2E-SE-09 黃金序列於 Q3 同一 commit 重釘並綠（S-21 改了 disarm 位置與 spawn 次序）。
 4. QA 獨立審查 PASS，且以 E2E-QW-22 變體 A 與 B「修前紅、修後綠」重現 22:42 事件。
 5. 上線閘（REQ-QW-55）：校準三鍵有值且寫入 `env.shared`。PRD §16.6 本列 OI 依 1～5 逐項結案；DES §17 OI-a～f 各自依其承接條件結案；M-K8／M-K9 真實頻率屬觀察期指標，不作結案條件（OI-a～c 例外：其承接條件正是觀察指標）。
+
+## 8. r9 增補：2026-11-23 撞牆 RCA（W11a～e）——REQ／AT／E2E／MU（只追加；r8 以前每行不動）
+
+> 設計＝DES 附錄 H（r9）；立案＝PRD 修訂表 v2.1.27、§16.6 2026-11-23 列。**計數**：r8 基線 REQ 61／AT 82／E2E 30／MU 51；r9 新增 REQ 12（70～81）／AT 14（83～96）／E2E 6（31～36，RealVerify `RV-QW31`～`RV-QW36`）／MU 14（52～65）；**合計 REQ 73／AT 96／E2E 36／MU 65**。本檔表頭（L4）與 §7 的 r8 數字由 Q7 收尾窗口在凍結 W11 時同步改為合計（本節不就地改以保持只增不刪）。
+> 暴露證據座標：逐字稿 `C:\Users\wuwei\.claude\projects\D--CursorProject-AISDCL-Agent\8feb3081-ccbc-469d-be8a-ec9e00ae3fad.jsonl`，行號 seq 494、711、739、768、857、869、879、880、915；`~/.autosdd/traces/quota_burn.jsonl` 10:00:02 列；`traces/watch/8feb3081….quota.json`（10:21:15）；`traces/halt_8feb3081….json`（10:21:19）；`autosdd_session_switch.jsonl` 07:42:42 兩列；保溫帳 `traces/keepwarm/8feb3081….json`；scratchpad `se11_run.txt`；12:16:07 watch 末行；12:20 半成品硬擋（tag `8feb3081-q4w6-halfwork-20261123`）。**重放夾具**由實作棒自上述座標截取（截到指定 seq 的逐字稿副本＋當時保溫帳＋快取讀數），落證據檔，不連線真額度。
+
+### 8.1 REQ
+| REQ | 內容 | DES | WP |
+|---|---|---|---|
+| REQ-QW-70 | （W11a）主控 Agent／Task／Workflow 的 PreToolUse 呼叫 `quotawall.pretool_verdict`：`nodispatch`／`close` ⇒ rc 2，訊息含階段、D、R、V、L、`calibrated`、ping_pp 來源與步驟；子代理放行；`續派理由：<≥8 字>` 放行記 `quotawall_override`；與收斂閘同時成立只出收斂閘＋一行摘要（REQ-QW-10 的接線兌現） | H.3 W11a | Q4 |
+| REQ-QW-71 | （W11a 順序鎖）`sessionctl_guard` 接上 `pretool_verdict` 的同時，`ping_pp_eff` 的乾淨樣本門檻（REQ-QW-74）必須已生效：污染樣本 `[6.0]`（agents=1）不得使 12:16 情境（讀數 47%）被擋；半成品不得留在運作路徑（被停的包保全後移出工作樹） | H.2 | Q4、W11c |
+| REQ-QW-72 | （W11c①）`L＝V＋AGENT_EST＋burn_live×min(D,T_OBS)`，`burn_live＝BURN×N`，N＝在飛背景子代理＋背景真 `claude` 行程；`T_OBS＝30` 只准下修；N＝0 ⇒ 與 r8 逐位相同；不新增設定鍵（沿用 `BURN_PP_PER_MIN`、`AGENT_EST_PP`） | H.3 W11c① | W11c |
+| REQ-QW-73 | （W11c②）相鄰兩次 ping 叫醒之間任一時刻有在飛子代理或背景 `claude` 行程 ⇒ Δ 不寫進 `ping_costs`（不乾淨）；讀不到在飛狀態 ⇒ 視為不乾淨 | H.3 W11c② | W11c |
+| REQ-QW-74 | （W11c③）量測僅在乾淨樣本 ≥ 3 且量測平均 ≤ 縮放／校準值×3 時合格；`ping_pp_eff＝max(縮放／校準值, 合格量測均值)`（保留 S-25 只抬不降；QA W13 P2-2），無合格量測 ⇒ 縮放／校準值；超上限整批丟棄並落 `ping_cost_outlier`；`kw_ledger` schema `/1`→`/2`（每筆 `{pp,clean}`），舊檔一律不乾淨、讀回 `[]`；`qw_schema.ping_costs` 只回乾淨 pp，跨包欄名仍十一個 | H.3 W11c③ | W11c |
+| REQ-QW-75 | （W11d①）額度閂鎖拆兩條序列各自閂鎖：原始讀數 prepare＜halt、計畫 nodispatch＜close；任一序列升級即重新觸發；同序列同級／較低級不出聲；閂鎖檔升 schema，舊檔視為無閂鎖 | H.3 W11d | W11d |
+| REQ-QW-76 | （W11d②）閂鎖後在飛代理（含背景 claude 行程）數增加且 stage ≥ nodispatch ⇒ 重新觸發一次；N 不增不連發 | H.3 W11d | W11d |
+| REQ-QW-77 | （W11d③）事件文案依來源分開：原始讀數觸發「短窗原始讀數 N% 已達 prepare」；計畫階段觸發「額度牆判 nodispatch／close（R=…、L=…；ping_pp 來源=…）」；原始讀數未達 prepare 時不得出現「原始讀數已達」 | H.3 W11d | W11d |
+| REQ-QW-78 | （W11b 前半）`quota_messages.pace_line` 在 gate 軸最高帶 ≠ binding 帶時標題補 `｜短窗=<band> five_hour <pct>% 剩 <N> 分`；相同不補；`_binding_key` 行為（含平手取剩餘分鐘較長）不變 | H.3 W11b | W11b |
+| REQ-QW-79 | （W11b 後半，排 W6 後）`--pace` 加一行 `QUOTAWALL_PLAN=…`，由 planner 呼叫 `sessionctl.quotawall.plan_lines`；`quota_gate` 不 import `sessionctl`；量不到不印不報錯 | H.3 W11b | W11b（W6 後） |
+| REQ-QW-80 | （W11e①）`Case.spends_quota`：本批含此類案例且 `stage∈{nodispatch,close,wall}` 或短窗原始讀數 ≥ prepare ⇒ 整批判 env `QUOTA-PREFLIGHT`、零 claude 行程；量不到放行 | H.3 W11e | W11e |
+| REQ-QW-81 | （W11e②）`driver.run_claude` rc≠0 或逾時，且（輸出含 harness 撞額度字樣〔重用既有辨識、實查後寫入，不得猜〕或 halt 標記晚於案例開跑）⇒ `EnvMissing("quota-wall")` 判 env；`AssertionError` 仍判 fail；無字樣且 halt 標記早於開跑 ⇒ 維持 fail | H.3 W11e | W11e |
+
+### 8.2 AT（縫同 §3；加 `ROS`＝假 roster 快照〔在飛代理／背景 claude 行程數與區間內活動〕、`DRV`＝假 `run_claude` 結果）
+| AT | REQ | 輸入 | 預期 |
+|---|---|---|---|
+| AT-QW-83 | 70 | `PL`：主控 Agent／Task／Workflow payload；`Q`：stage nodispatch／close／free；另含子代理 payload、`續派理由：測試用理由八字以上`、`AUTOSDD_UNATTENDED` 下同文 | nodispatch／close ⇒ rc 2 且訊息含階段／D／R／V／L／ping_pp 來源；free、子代理 ⇒ 放行；理由放行記 `quotawall_override`，無人窗口理由無效；收斂閘同時成立只出收斂閘訊息 |
+| AT-QW-84 | 71、74 | 組合：hook 接線開啟（用 `converge` 真路徑呼叫 `pretool_verdict`）＋保溫帳 `[6.0]`（agents=1、`clean=false`）＋12:16 快照（ctx 289,728、讀數 47、reset＝now＋204 分） | `ping_pp` 來源＝`calibrated`／`scaled`（不是 `measured`），stage＝`free`，rc 0；同組合下把乾淨門檻拿掉（突變）⇒ stage 變 nodispatch、rc 2 |
+| AT-QW-85 | 72 | `Q`：R＝20（讀數 80）、D＝38、burn 0.663、AGENT_EST 取校準鍵、c＝289,728：①N＝1（在飛 1）；②N＝0；③在飛 1＋背景 claude 行程 2（N＝3）；④D＝10（`min(D,T_OBS)＝10`）；⑤D＝90（取 30） | ①`stage＝nodispatch`（L＝V＋AGENT_EST＋0.663×30 ≥ R）；②L 與 r8 公式逐位相同；③L 隨 N 線性放大；④⑤`min(D,T_OBS)` 邊界各自成立；`close` 判準（R ≤ V）①～⑤不變 |
+| AT-QW-86 | 73 | `ROS`＋`TR`：兩次 ping 叫醒（t0、t1）讀數差 6；①區間內 S6 子代理在飛；②區間內只有背景 claude 行程；③區間內全無；④`ROS` 讀取拋例外 | ①②④ ⇒ `ping_costs` 不增、痕跡 `keepwarm_ping_cost` 帶 `clean=false`；③ ⇒ 記一筆 `clean=true` |
+| AT-QW-87 | 74、73 | `ping_pp_eff(縮放 0.5)`：①樣本 `[6.0]`（unclean）；②乾淨 `[0.4,0.5,0.45]`；③乾淨 `[2.0,2.2,2.1]`（均值 > 縮放×3）；④乾淨僅 2 筆；⑤`kw_ledger` 讀到 `/1` schema 檔（含 `[6.0]`）；⑥乾淨 `[0.8,0.9,0.85]` | ① 退縮放值；② 量測合格但均值 0.45 < 縮放 0.5 ⇒ 0.5（只抬不降）；⑥ 採量測均值 0.85；③ 整批丟棄、退縮放值、痕跡 `ping_cost_outlier`（含樣本與倍數）；④ 退縮放值；⑤ 讀回 `[]`、視為不乾淨 |
+| AT-QW-88 | 74、72 | 12:16 情境：ctx＝289,728、讀數 47（R＝53）、k＝4、保溫帳 `[6.0]`＋Q5 校準 `PP_PER_KUNIT＝0.0061` | `ping_pp≈0.381`（校準）、`V≈5.70`、`L≈6.88`（N＝0）、stage＝`free`；對照：把 `[6.0]` 當量測值採用則 `V＝52`（watch 實印值）、stage＝nodispatch |
+| AT-QW-89 | 75 | 閂鎖在 `(計畫, close, r)`；之後原始讀數跨 prepare（同 r）；反向：先 `(原始, prepare, r)` 再計畫 nodispatch；同序列同級；同序列降級 | 前兩者各自觸發一次；同序列同級／降級不出聲；`(原始, halt)` 仍高於 prepare；舊 schema 閂鎖檔 ⇒ 視為無閂鎖、不報錯 |
+| AT-QW-90 | 76 | 閂鎖在 nodispatch（N＝1）：①N 1→2 且 stage＝nodispatch；②N 2→2；③N 1→2 但 stage＝free；④連續兩次重掛 N 都 2 | ① 觸發一次並更新 `n_latched`；②④ 不觸發；③ 不觸發 |
+| AT-QW-91 | 77 | 事件文案：①stage＝nodispatch、原始讀數 47；②原始讀數 90、stage＝free；③原始讀數 90 且 stage＝close | ① 文案含「額度牆判 nodispatch」「R=」「L=」「ping_pp 來源=」，**不含**「原始讀數已達」；② 含「短窗原始讀數 90% 已達 prepare」、不含「額度牆判」；③ 兩句並陳 |
+| AT-QW-92 | 78 | `pace_line`：①five_hour 80% converge 剩 38 分＋seven_day 58% notice（平手取 seven_day 為 binding）；②five_hour 即 binding；③five_hour 低於 binding 帶；④`_binding_key` 回歸：同 ①餵 `_binding_key`、平手結果與 r8 相同 | ① 標題含 `短窗=converge five_hour 80% 剩 38 分`；②③ 不補；④ binding 仍為 seven_day（不改規則） |
+| AT-QW-93 | 79 | 沙盒快取＝10:00:02 讀數（80／58，reset 10:40）；planner `--pace`；AST 掃 `tools/lib/quota_gate*`；量不到 | 輸出含 `短窗=converge five_hour` 與 `QUOTAWALL_PLAN=` 一行；`quota_gate` 無 `sessionctl` import；量不到 ⇒ 不印該行、rc 不變 |
+| AT-QW-94 | 80 | `Q` 與假 runner：①含 `spends_quota` 案例＋stage close；②同批但 stage free、讀數 60；③無 `spends_quota` 案例＋stage close；④含 `spends_quota`＋原始讀數 ≥ prepare；⑤量不到 | ①④ 整批 env `QUOTA-PREFLIGHT`、`run_claude` 呼叫 0 次；②③⑤ 照跑 |
+| AT-QW-95 | 81 | `DRV` 結果：①rc＝-9＋輸出含撞額度字樣；②rc＝1、無字樣、halt 標記時間 > 案例開跑；③rc＝1、無字樣、halt 標記早於開跑；④rc＝0 但案例 `AssertionError`；⑤逾時＋無字樣＋halt 標記晚於開跑 | ①②⑤ `EnvMissing("quota-wall")`、結果 env；③④ 判 fail（真缺陷不被吞） |
+| AT-QW-96 | 70、75 | 12:20 事故回歸：半成品式「污染樣本＋hook 接線」組合在**新規則下**重放 12:20 payload（短窗 54%、保溫帳 `[6.0]`、agents＝1） | rc 0 放行（污染樣本不得使 54% 讀數被擋）；同輸入下把乾淨門檻拿掉（突變）⇒ rc 2。「半成品不得留在運作路徑」是流程規則（DES H.2-3），無機械測試，不宣稱有 |
+
+### 8.3 E2E（真機；RealVerify 家族 `quotawall`；共通沿用 §4：不需人按鍵、不真開窗、不燒真額度到撞牆；重放以本事件逐字稿截取檔為主）
+| E2E | REQ | 情境與步驟 | 預期 |
+|---|---|---|---|
+| E2E-QW-31（RV-QW31） | 70、71、74 | **12:16／12:20 重放**：沙盒 session 帶 12:16 快照（ctx 28.9 萬、讀數 47、reset 未來 204 分）與污染保溫帳 `[6.0]`；(a) 真跑 `sessionctl quotawall --sid <沙盒 sid>`；(b) 以真 hook 行程（`sessionctl_guard` PreToolUse）餵主控 `Agent` payload；(c) 重放 07:43（讀數 64、`[6.0]`）。**N 釘死（QA W13 P2-1）**：12:16 在飛 3 支（Q4、W6、RCA）⇒ N＝3；12:20 在飛 0（Q4／W6 已停、RCA 已交卷）⇒ N＝0 | 12:16（N＝3）：(a)(b) `stage≠close`（nodispatch 可接受——當時實燒約 1.8 pp／分，擋第 4 支屬正確）；12:20（N＝0）：(a) `stage=free`、(b) rc 0 不得被擋；(c) 不再是 close；修前（無門檻）皆紅 |
+| E2E-QW-32（RV-QW32） | 70、72、78 | **10:02 重放**：seq 869 時刻快照（讀數 80、reset 10:40、D＝38；背景 `RV-SE11` 真 claude 行程以替身 `sleep` 行程偽裝成 claude 身分；Q3 是待派者、由 `AGENT_EST` 承擔，**N 釘死＝1**〔QA W13 P2-1〕；QA 自算 L＝25.25 ≥ R＝20）；(a) planner `--pace` 標題；(b) 真 hook 餵主控 `Agent` payload | (a) 標題含 `短窗=converge five_hour 80% 剩 38 分`（W11b）；(b) W11c① 上線後 rc 2、stage＝nodispatch 或 close、訊息含「續派理由」（W11c① 前此半段記 ENV-NOT-YET，不得宣稱 PASS） |
+| E2E-QW-33（RV-QW33） | 73、74 | 真 keepwarm 行程（`--min 1`、縮時）兩次 ping 之間以替身在飛子代理（沙盒 `claude -p` 長回合）跑；接著再無在飛區間補兩筆乾淨、再一筆離群；讀 `kw_ledger` 與 `autosdd_session_switch.jsonl` | 在飛區間 Δ 不入帳（`clean=false`）；乾淨 < 3 筆時 `plan` 的 ping_pp 來源非 `measured`；≥3 筆乾淨且合理時採用；離群時痕跡 `ping_cost_outlier` |
+| E2E-QW-34（RV-QW34） | 75、76、77 | 真 watch 行程＋沙盒快取依序 64→80→88（reset 固定）；中途加掛一支在飛子代理 | 64 時不誤報 close；80 時計畫序列／原始序列各自觸發且文案各依來源；88 跨 prepare 觸發；N 增加且 stage ≥ nodispatch 時再觸發一次；末行 `WATCH_VERDICT=` 保持 rc 0（DEF-200-622） |
+| E2E-QW-35（RV-QW35） | 80、81 | `realverify run` 於沙盒：(a) 預設 stage＝close 的沙盒快取＋含 `spends_quota` 案例 ⇒ 整批；(b) 假 `claude` 替身輸出實查後的撞額度字樣且 rc≠0 ⇒ 單案；(c) 假 `claude` 無字樣、halt 標記早於開跑、rc≠0 | (a) env `QUOTA-PREFLIGHT`、替身被呼叫 0 次；(b) 判 env；(c) 判 fail；字樣取自證據檔（OI-g 未結則 (b) 的字樣分支標 ENV-PENDING、halt 標記分支照跑） |
+| E2E-QW-36（RV-QW36） | 78、79 | 沙盒 `~/.autosdd` 快取＝10:00:02 讀數；真跑 `python tools/session_resume_planner.py --pace`（W6 後含 QW 行） | 標題含 converge＋five_hour；QW 行在 W6 之後出現且量不到時不出；rc 與 r8 相同 |
+
+### 8.4 MU（每條必須讓指定測試轉紅）
+| MU | 突變 | 必紅 |
+|---|---|---|
+| MU-QW-52 | 拿掉 `sessionctl_guard` 對 `quotawall.pretool_verdict` 的呼叫（或對主控放行） | AT-QW-83、E2E-QW-32(b) |
+| MU-QW-53 | 拿掉乾淨樣本門檻（n＝1 即採用量測值）而保留 hook 接線 | AT-QW-84、AT-QW-87①、AT-QW-88、AT-QW-96、E2E-QW-31 |
+| MU-QW-54 | `L` 拿掉 `burn_live×min(D,T_OBS)` 項，或 N 只算子代理不算背景 claude 行程 | AT-QW-85、E2E-QW-32(b) |
+| MU-QW-55 | `ping_cost` 在區間內有在飛代理／背景 claude 仍記入 | AT-QW-86、E2E-QW-33 |
+| MU-QW-56 | `MIN_CLEAN_SAMPLES` 改 1，或拿掉 `OUTLIER_X` 上限 | AT-QW-87②③④、E2E-QW-33 |
+| MU-QW-57 | 閂鎖回單一序列（prepare＜nodispatch＜close＜halt 一條） | AT-QW-89、E2E-QW-34 |
+| MU-QW-58 | 新派工（N 增加）不重新評估閂鎖 | AT-QW-90、E2E-QW-34 |
+| MU-QW-59 | watch 文案寫死「原始讀數已達 prepare」 | AT-QW-91、E2E-QW-34 |
+| MU-QW-60 | `pace_line` 不補「短窗」欄（或補成 binding 欄） | AT-QW-92①、E2E-QW-32(a)、E2E-QW-36 |
+| MU-QW-61 | 誤改 `_binding_key` 平手規則（改取剩餘分鐘較短） | AT-QW-92④ |
+| MU-QW-62 | `--pace` 的 QW 行缺席，或 `quota_gate` import `sessionctl` | AT-QW-93、E2E-QW-36 |
+| MU-QW-63 | realverify 前置額度閘拿掉（或不看 `spends_quota`） | AT-QW-94①④、E2E-QW-35(a) |
+| MU-QW-64 | `run_claude` 撞牆仍判 fail；或反向——rc≠0 一律判 env（吞掉真缺陷） | AT-QW-95①②③④、E2E-QW-35(b)(c) |
+| MU-QW-65 | schema `/1` 舊檔樣本不汰除（視為乾淨） | AT-QW-87⑤、E2E-QW-31 |
+
+### 8.5 逐功能 E2E 覆蓋（r9；每個新 REQ ≥1 個真機 E2E）
+| REQ | E2E | REQ | E2E | REQ | E2E |
+|---|---|---|---|---|---|
+| 70 | 31、32 | 75 | 34 | 80 | 35 |
+| 71 | 31 | 76 | 34 | 81 | 35 |
+| 72 | 32 | 77 | 34 | | |
+| 73 | 33 | 78 | 32、36 | | |
+| 74 | 31、33 | 79 | 36 | | |
+
+覆蓋率 12／12。**照實揭露的結構性限制**：E2E-QW-32(b) 在 W11c① 上線前、E2E-QW-36 的 QW 行在 W6 前結構上造不出，列為「依賴上線序的 ENV-NOT-YET」，不算 PASS 也不作整案 FAIL，上線序到位後補跑；E2E-QW-35(b) 的字樣分支受 DES OI-g 約束；MU-QW-61 只有 AT 必紅（呈現層規則回歸，E2E 結構上不涉及平手規則）。

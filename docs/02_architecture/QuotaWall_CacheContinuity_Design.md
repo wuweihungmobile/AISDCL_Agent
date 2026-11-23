@@ -7,6 +7,7 @@
 > 輸入（皆在 sid 4a45bc75 的 scratchpad，收尾窗口把關鍵段落抄進證據檔）：R218 Architect／SA 報告 `r218_architect_report.md`／`r218_sa_report.md`（下稱 **ARC**／**SA**）；QA FAIL 報告 `r218_specqa_report.md`（下稱 **QA**）、第二輪 `r218_specqa2_report.md`（下稱 **QA2**）、第三輪 `r218_specqa3_report.md`（下稱 **QA3**）；R218-C Architect／SA 報告 `r218c_architect_report.md`／`r218c_sa_report.md`（下稱 **CARC**／**CSA**）。逐字稿＝`C:\Users\wuwei\.claude\projects\D--CursorProject-AISDCL-Agent\4a45bc75-afdb-4e86-82de-be508230e99b.jsonl`（下稱 **T**，行號＝jsonl 行號）。
 > 上游：`docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md`（下稱 **PRD**），修憲走 §16.5 (i)（附錄 A）。驗收：`docs/03_testing/contracts/TCS-QuotaWall-20261120.md`（下稱 **TCS**；前綴 `REQ-QW-`／`AT-QW-`／`E2E-QW-`／`MU-QW-`）。
 > 相容：R218-B `docs/02_architecture/RealVerify_SideEffect_Isolation_Design.md`（下稱 **SE**）的 L1 產品面拒絕、L2 副作用帳、居所轉送先於本稿落地（§12）。本稿新增的程式路徑在實作 commit 前不存在；落點依 `docs/02_architecture/Root_Layout_and_Module_Placement.md` §2。
+> **r9（2026-11-23，W12）**：只追加——附錄 H（撞五小時上限 RCA 的 W11a～e 逐項規格：擋派接線順序鎖、`L` 加在飛燒量、ping 樣本乾淨門檻與 schema 升版、閂鎖拆兩序列、`--pace` 標題補短窗最高帶、realverify 額度閘）、§12 表尾 W11b～e 四列（W11a 併 Q4）、§17.3；既有條文、編號、常數一字不動；TCS §8、PRD 修訂表 v2.1.27／§16.6 同步追加。
 
 ---
 
@@ -362,6 +363,11 @@ SE 產品面 L1 拒絕（喚醒對象合法性，PRD §11.9 R-VER-4）→ §7.2 
 | Q5 | 量測：M-K7、M-K8、M-K9（park 到點結局普查）、`--calibrate-quotawall` | 新：`tools/lib/wastecensus/sections_wall.py`、`tools/tests/test_waste_census_wall.py`；改：`wastecensus/{sections_keep,keep_load,report}.py`、`tools/probe/waste_census.py`（旗標分派） | Q1（事件名常數；r5：wastecensus 直接 import `lib.sessionctl.qw_schema`——葉模組只依標準庫、套件 `__init__` 只補 `sys.path`，無循環；QA3 P3-1） | 與 Q2、Q3 並行 |
 | Q6 | RealVerify 家族 `quotawall`（TCS §4 全部）＋`cases.json`；**另含 SE 的 E2E-SE-17 案例程式**（落在 `cases/sideeffect.py`，SE §10.2 第 4 項，主控確認；SE S7 的 OI 於本包收尾結案） | 新：`tools/lib/realverify/cases/quotawall.py`；改：`tools/lib/realverify/cases/sideeffect.py`（只加 E2E-SE-17）、`docs/06_quality/RealVerify_Protocol/cases.json` | Q2～Q5 commit、SE S6 commit | 單人（cases 單一持有） |
 | Q7 | 收尾：棘輪重釘（新 2 測試檔）、`Root_Layout` §3、ADR-XPLAT-004 新節（編號現查；R217 C3 預留 §2.20、SE S7 另佔一節）、`WorkProgress_Axis_Design.md` §7.1 與 D-14 追加註記（指向本稿 §7.4）、X-7 追加註記、根 CLAUDE.md（守衛總表兩列、換 session SOP〈因額度停工走 park〉加主載具與雙憑證、〈反事後諸葛〉加雙憑證、速查表加 `sessionctl quotawall`）、缺陷帳本 DEF（22:42 事件 P1、映像白名單、字面 rc、失敗靜默，現查最大號＋1）、PRD §16.6 本列 OI 回填、E2E 全跑入帳、**上線閘（S-15）：真本機 `waste_census --calibrate-quotawall` 三鍵有值並寫進 `env.shared`**、§17 理論洞與 OI 清單抄進證據檔 | 收尾面（含 `env.shared`） | Q1～Q6 | 單人 |
+| W11b | （r9，附錄 H.3）`pace_line` 標題補「短窗最高帶」欄（不改 `_binding_key`）；**後半**：planner `--pace` 加 `QUOTAWALL_PLAN` 一行（排 W6 之後） | 前半：`tools/lib/quota_messages.py`、`tools/tests/` 對應檔；後半：`tools/session_resume_planner.py`、`tools/tests/` 對應檔 | 前半無（Q4／W6 皆不碰）；後半＝W6 commit | 前半與 W11d／W11e 並行；後半單人（守衛面） |
+| W11c | （r9）①`L` 加 `burn_live×min(D,T_OBS)`（`T_OBS＝30` 住 `qw_calc`）；②在飛區間 ping Δ 不入帳；③乾淨樣本 ≥3 且 ≤校準×3 才採用量測值、`kw_ledger` schema `/1`→`/2`、`ping_cost_outlier` 痕跡 | `tools/lib/sessionctl/{qw_calc,qw_plan,kw_wake,kw_ledger,qw_schema,roster}.py`、`tools/tests/test_sessionctl_{quotawall,keepwarm}.py` | Q1、Q2 commit；**②③須不晚於 W11a（同 commit 或更早）**；① 待 DES 凍結後實作，且先於 Q7 校準；**上線序（QA W13 P2-3 主控裁決）：{②③＋W11a（Q4）} → ① → W11b／W11d／W11e；① 不等 W11b／d／e**（① 才是擋下 10:02 事故的那一項） | ②③與 Q4 同 commit 或先；① 單人；W11d／W11e 並行（檔不相交，`kw_ledger` 同被 Q2 持有故在 Q2 後） |
+| W11d | （r9）watch／keepwarm 額度閂鎖拆兩條序列（原始讀數 prepare＜halt；計畫 nodispatch＜close）；新派工（N 增）且 stage≥nodispatch 重新觸發；事件文案依來源分開 | `tools/lib/sessionctl/{watch_wake,keepwarm,watch}.py`、`tools/tests/test_sessionctl_{watch,keepwarm}.py` | Q2 commit | 與 W11b 前半、W11e 並行（檔不相交；與 Q4 不同檔） |
+| W11e | （r9）realverify `spends_quota` 旗標、開跑前額度閘（整批 env `QUOTA-PREFLIGHT`）、`run_claude` 撞牆型失敗判 env（字樣實查後寫入、重用既有辨識） | `tools/lib/realverify/{runner,driver}.py`、`tools/lib/realverify/cases/*.py`（只加旗標）、`tools/tests/` 對應檔 | **Q6 commit 後串行**（cases 單一持有） | 與 W11b 前半、W11d 並行（檔不相交，但 `cases/` 在 Q6 後） |
+| （W11a） | 併入 **Q4**，不另開包：`sessionctl_guard.py`／`converge.py` 的 PreToolUse 呼叫 `quotawall.pretool_verdict`（AT-QW-83／84／96、E2E-QW-31／32(b)） | 同 Q4 | Q4 前置＋**W11c-②③ 不晚於本項** | 同 Q4（單人、主控親套） |
 
 **本節判準**：任兩包「並行」欄對稱；`quotawall.py`、`qw_schema.py`、`holder.py`、`seal.py` 的本稿改動只出現在 Q1 commit，**跨包欄名字面（`primary_wake_at`、`primary_source`、`backup_fire_at`、`close_stuck_window`、`desktop_notify`、`wake_at`、`target_source`、`session_switch_spawning`，r7 加保溫帳 `last_ping_pct`、`last_ping_at`、`ping_costs`，共十一個）只在 Q1 commit 新增、其他包只 import 常數**（AT-QW-61 以原始碼掃描鎖；判準限「字串常數整串等於欄名」，輸出格式字串如 `wake_at=`、`primary_wake_at=` 不算，QA3 P3-1）；兩支 hook 只在 Q4；`cases/**`／`cases.json` 只在 Q6；`sandbox_scope.SITES` 的 QW 四列只在 Q3；棘輪只在 Q7；`park_cli.py`、`handoff.py`、`session_resume_planner.py` 不早於 SE S2／S3 commit。
 
@@ -467,6 +473,10 @@ SE 產品面 L1 拒絕（喚醒對象合法性，PRD §11.9 R-VER-4）→ §7.2 
 | OI-d | macOS：心跳能否擋住閒置收回；mac 無自動開窗備援（S-14、§0.4-7） | 主控決定是否補 mac 開窗載具；E2E-QW-28 在 mac 宿主 PASS |
 | OI-e | 校準上線閘（S-15）區間不足時 | `--calibrate-quotawall` 三鍵有值並寫入 `env.shared` |
 | OI-f | E2E-SE-17（SE 站點的 L1 真機驗證，案例程式隨 Q6） | Q6 收尾結案 |
+
+### 17.3 r9 增補（2026-11-23 撞牆 RCA；規格住附錄 H）
+- **否決方案**（RCA §7 五項，WHY 見附錄 H.5）：調低 prepare／halt 門檻；改 `_binding_key` 平手規則；讓配速床與攤提也吃燒速；只靠提示詞約束子代理時序；把撞牆 FAIL 改成 skip。
+- **理論洞** TH-2、**OI** OI-g／OI-h：見附錄 H.6。
 
 ---
 
@@ -588,3 +598,73 @@ SE 產品面 L1 拒絕（喚醒對象合法性，PRD §11.9 R-VER-4）→ §7.2 
 | 計數 | REQ 61（不變；23／65／66 就地改）、AT 80→82、E2E 30（不變；30(c) 改、加 (e)）、MU 49→51；覆蓋 61／61；跨包欄名仍 11 | TCS 表頭、§5、§6、§7；PRD 修訂表 v2.1.24 列、§16.6 本列 |
 
 **本輪自查**：①新號 AT-QW-81／82、MU-QW-50／51 皆在 TCS 定義且被引用、無重號；②無新 REQ，改寫的 REQ-QW-23／65／66 各有 E2E（23→06、30(e)；65→07(c)、30；66→30）；③E2E-QW-30(c)(e) 不需人按鍵（重掛回合以 T 真實回合複本附加）、不燒真額度（T5 替身）、不真開窗（不走 spawn）；④PRD 只就地改本草案自有的 v2.1.24 修訂表列與 §16.6 列，對 HEAD `133c3a38` 的刪除行仍只在 R217 三個 hunk。
+
+---
+
+## 附錄 H：r9 增補——2026-11-23 撞五小時上限 RCA（W11a～e）逐項規格（r9；只追加，r8 以前每行不動）
+
+> 立案：掌舵者 2026-11-23 12:2x 貼撞牆畫面「以上的情況, 是否需要進行改善, 請進行分析改進!」（PRD §16.5 (i)，修訂表 v2.1.27 列、§16.6 2026-11-23 列）。輸入＝Opus RCA 報告 `w11_rca_report.md`（scratchpad；§0～§7）；主控親驗兩項關鍵證據：`tools/lib/quota_policy.py:647-652` `_binding_key` 平手取剩餘分鐘較長者；`~/.autosdd/traces/autosdd_session_switch.jsonl` 唯一一筆 `keepwarm_ping_cost delta=6.0 at 07:42:42`（同一毫秒 `watch_verdict agents=1`，即 S6 子代理在跑）。
+> 角色：SD。本節是 r8 凍結規格之後的**增補**：既有 S-／REQ-／AT- 編號、常數、判準全部不動，新判準只用新編號（REQ-QW-70～81、AT-QW-83～96、E2E-QW-31～36、MU-QW-52～65；TCS §8）。r8 S-3／S-25／REQ-QW-10／17／18 的相關句子由本節**加限定**（先於該句的新規則），不是改寫（H.3 逐項標示）。
+
+### H.1 暴露證據（根 CLAUDE.md〈守衛面准入〉：以下皆為本機真實事件，非構造）
+逐字稿 T＝`C:\Users\wuwei\.claude\projects\D--CursorProject-AISDCL-Agent\8feb3081-ccbc-469d-be8a-ec9e00ae3fad.jsonl`（行號＝seq）。
+
+| 證據 | 座標 | 證明什麼 |
+|---|---|---|
+| 07:43:05 watch `QUOTAWALL_PLAN=stage=close D=177 k=3 V=46 R=36 invariant=broken`，讀數僅 64% | T seq 494 | 誤報 close；成因＝`ping_costs=[6.0]`（W11c②③）；閂鎖被它鎖死（W11d） |
+| 08:43／09:28／09:52 三次保溫叫醒皆印 `invariant=broken V=40/34/28` 卻無額度事件 | T seq 711、739、768 | 單一序列閂鎖吃掉後續訊號（W11d） |
+| 10:00:02 讀數 five_hour 80%、seven_day 58%、reset 10:40 | `~/.autosdd/traces/quota_burn.jsonl` 10:00:02 列 | 重放輸入（E2E-QW-32） |
+| 10:02:43 背景 `realverify run --case RV-SE11`；10:02:47 `--pace` 印 band=notice、最緊＝seven_day；10:02:51～58 主控寫「短窗已降到注意帶」並派 Q3 | T seq 857、869、879、880 | 標題藏帶（W11b）；擋派判準未接 hook（W11a）；在飛燒量未入 L（W11c①） |
+| 10:21:15 watch `stage=wall R=0`；10:21:19 halt 標記；10:23 RV-SE11 的 RV-S1 rc=-9、W5 逾時 300 秒、KW1～4 失敗全判 FAIL | T seq 915；`traces/watch/8feb3081….quota.json`；`traces/halt_8feb3081….json`；scratchpad `se11_run.txt` | 撞牆型失敗被判 FAIL（W11e） |
+| 12:16:07 `WATCH_VERDICT=quota n=3 stage=nodispatch R=53 V=52 L=57`，原始讀數約 47%；文案卻寫「原始讀數已達 prepare」 | 主控提供之 watch 末行；`traces/keepwarm/8feb3081….json` `ping_costs=[6.0]` | 過度保守擋派區（讀數 47% 即生效）；文案假話（W11c③、W11d③） |
+| **12:20 主控派工被 rc 2 硬擋**：被停的 Q4／W6 **未驗證半成品**（`qw_guard.py`／`qw_prompt.py` 等）已被運作中的 `sessionctl_guard` 載入，以污染的 `ping_pp=6.0` 在短窗約 54% 時擋派（rc 2） | 主控 12:20 派工當回合（保全：tag `8feb3081-q4w6-halfwork-20261123`；副本 scratchpad `q4w6_halfwork\`） | **W11c②③ 必須先於或同於 W11a 上線**——否則 W11a 一接上就是這個事故的常態版；且**半成品被停時必須移出運作路徑**（H.2 規則 3） |
+
+### H.2 上線順序約束與運作路徑規則（規範性）
+1. **順序**：{W11c-②③ ＋ W11a（併入 Q4）**同時或更早**上線，同一 commit 或 ②③ 先} → {W11b ∥ W11d ∥ W11e} → W11c-① → Q7 校準 → W6 之後補 `--pace` 的 QW 行（W11b 後半）。
+2. **機械鎖**（REQ-QW-71）：只要 `sessionctl_guard` 的 PreToolUse 呼叫 `quotawall.pretool_verdict`，`ping_pp_eff` 的乾淨樣本門檻（H.3 W11c③）就必須存在；測試以行為斷言（AT-QW-84），不以字串掃描。WHY：擋派是 rc 2 硬擋，輸入污染的代價是工作被擋，不是出聲。
+3. **半成品不得留在運作路徑**：`tools/lib/sessionctl/**` 與 `.claude/hooks/**` 是**即載即生效**的（hook 每次工具呼叫重新 import 工作樹檔，不看「是否已 commit」）。任何被停、未經驗證的包，主控必須在停工當下以 `git stash create`＋tag 保全後**把半成品檔移出工作樹**（本事件的 tag 與副本即此做法）；只「不 commit」不算隔離。此規則寫進任務書範本（`w2_dev_common.md` 的收尾條款由主控在下次改版加註；本稿不改它）。
+
+### H.3 逐項規格
+#### W11a　擋派接線（併入 Q4；持有面＝Q4）
+- **判準**：`sessionctl_guard.py` PreToolUse 對主控（payload 無 `agent_id`）的 Agent／Task／Workflow 呼叫 `quotawall.pretool_verdict`（已存在，§6.1）；`nodispatch`／`close` ⇒ rc 2，訊息含階段、D、R、V、L、`calibrated`、ping_pp 來源（`measured`／`scaled`／`calibrated`）與確切步驟；`續派理由：<≥8 字>` 放行並記 `quotawall_override`；與收斂閘同時成立只出收斂閘訊息＋一行摘要（REQ-QW-10 原文）。fail-open 不變。
+- **常數**：無新增。**檔**：`.claude/hooks/sessionctl_guard.py`、`tools/lib/sessionctl/converge.py`（Q4 既有清單）；**序**：與 Q4 同包同 commit，且其上線前提＝W11c-②③（H.2-1／2）。**與進行中 WP 的持有面**：Q4（converge／forward／midwork／`tools/sessionctl.py`／兩支 hook／新 `qw_guard`／`qw_prompt`）本就持有；W6（parkprobe／parkearly／park／park_cli／briefline／planner）不碰。**重做**：被停的 Q4／W6 半成品不得直接 `git restore` 回來用，須從 tag 取出後逐檔重驗（形狀可參考 `qw_guard.py` 的 mute／inflight／idle／primary_gate／stop_notice 五函式，規格以本 DES §6 為準）。
+
+#### W11c　可行性算式與樣本污染（消除成因；持有面＝`qw_calc`／`qw_plan`／`kw_wake`／`kw_ledger`／`qw_schema`，不在 Q4／W6）
+- **① L 加在飛燒量**（對 r8 S-2「`L＝V＋AGENT_EST`」加限定）：`L ＝ V ＋ AGENT_EST ＋ burn_live × min(D, T_OBS)`；`burn_live ＝ BURN × N`，`N ＝` 在飛背景子代理數（`roster`）＋背景真 `claude` 行程數（`roster`／`procstop` 身分判準）；**`BURN` 在本式的語意＝每一個在飛單位的 pp／分（QA W13 P2-1 主控裁決：與 V 內 `detect×burn` 的「主控燒速」同一校準鍵、同一數值，但 N 不含主控本身——主控已由 V 承擔，不重複計；待派的那一支由 `AGENT_EST` 承擔，不計入 N）**。`BURN`、`AGENT_EST` 沿用 Q5 校準鍵 `AUTOSDD_QUOTAWALL_BURN_PP_PER_MIN`、`AUTOSDD_QUOTAWALL_AGENT_EST_PP`（**不新增鍵**）。`T_OBS＝30` 分鐘，新常數住 `qw_calc.py`，只准下修（WHY：不假設在飛者燒滿整個 D；30 分鐘≈一次 watch 偵測加一次收尾所需的觀察窗，過大會使晨間大 D 恆判 nodispatch）；`N＝0` ⇒ 與 r8 公式逐位相同（回歸）。`V` 不變、`close` 判準（R ≤ V）不變。與 Q7 校準有序依賴：**先改算式（DES 凍結、實作），再校準**。
+- **② 在飛區間的 ping 讀數差不入帳**（對 S-25 加限定）：`kw_wake.ping_cost` 在「相鄰兩次 ping 叫醒之間任一時刻有在飛子代理或背景 `claude` 行程」時不寫 `ping_costs`（與 S-25 既有的「有真工作／真人提示／換窗不記」並列，同一個 `clean` 判準）；判準取自逐字稿（兩叫醒時刻之間的 Agent／Task／Workflow `tool_use` 與其完成通知）＋兩端點 `roster` 快照，讀不到 ⇒ 視為不乾淨。
+- **③ 樣本採用門檻**（對 S-3／`qw_calc.ping_pp_eff` 加限定，修 n=1 覆蓋校準值）：`ping_pp_eff` 僅在**乾淨樣本 ≥ `MIN_CLEAN_SAMPLES`（3）** 且量測平均 **≤ 縮放／校準值 × `OUTLIER_X`（3）** 時該量測值才「合格」，`ping_pp_eff ＝ max(縮放／校準值, 合格量測均值)`，無合格量測 ⇒ 縮放／校準值（**QA W13 P2-2 主控裁決：保留 r8 S-25「只抬不降」，本項只收緊「何者算合格量測」，不取代 max 規則**——低於縮放值的量測不會降低估值，WHY：保溫預留偏高的代價是少派一支，偏低的代價是撞牆冷重寫）；超過上限者整批丟棄並落痕跡 `ping_cost_outlier`（含樣本、縮放值、倍數）。兩常數住 `qw_calc.py`，只准下修 `OUTLIER_X`、只准上修 `MIN_CLEAN_SAMPLES`。**schema 升版**：`kw_ledger.SCHEMA` `autosdd.keepwarm/1` → `/2`，`ping_costs` 每筆為 `{"pp":<數>,"clean":<bool>}`；讀到 `/1` 檔一律視為不乾淨（讀回 `[]`），既有污染樣本 `[6.0]` 即此汰除。`qw_schema.ping_costs(row)` 只回乾淨樣本的 pp（**跨包欄名仍十一個，不新增**）。
+- **檔**：`qw_calc.py`、`qw_plan.py`、`kw_wake.py`、`kw_ledger.py`、`qw_schema.py`、`roster.py`（只讀取介面）及對應 `tools/tests/test_sessionctl_{quotawall,keepwarm}.py`。**序**：②③先（H.2-1）；①待 DES 凍結後實作。**同批 hot-wire 風險**：`kw_ledger.py` 同被 Q2 持有，W11c 在 Q2 commit 之後做。
+
+#### W11d　watch／keepwarm 閂鎖拆兩條序列（結構正解；持有面＝`watch_wake`／`keepwarm.quota_latch`／`watch.py` 文案）
+- **判準**（對 REQ-QW-17「閂鎖四級」加限定）：閂鎖鍵改 `(序列, 級別, reset 分鐘)`，兩條序列各自閂鎖——**原始讀數序列** prepare＜halt、**計畫序列** nodispatch＜close；任一序列升級即重新觸發；同序列同級或較低級不出聲（原規則在序列內不變）。
+- **新派工重新評估**：閂鎖之後在飛代理數（含背景 claude 行程）增加，且當下 stage ≥ nodispatch ⇒ 重新觸發一次（閂鎖記 `n_latched`，只在 N 增加時再觸發；N 不增不連發）。
+- **事件文案依來源分開**（修 `watch.py` 寫死句）：原始讀數觸發 ⇒「短窗原始讀數 N% 已達 prepare」；計畫階段觸發 ⇒「額度牆判 nodispatch／close（R=…、L=…；ping_pp 來源=…）」；兩者同時 ⇒ 兩句並陳。**原始讀數未達 prepare 時，禁止出現「原始讀數已達」字樣**。`quota_disposal` 本已依階段分，不變。
+- **常數**：無新增。**閂鎖檔升 schema**（舊檔讀回視為無閂鎖，fail-open）。**序**：W11b ∥ W11d ∥ W11e 三者檔不相交可並行；W11d 不與 Q4（`converge`／hook）同檔，但 `watch.py` 同被 Q2 持有，Q2 commit 後做。
+
+#### W11b　`--pace` 標題補「短窗最高帶」（結構正解，呈現；持有面＝`tools/lib/quota_messages.py`）
+- **判準**：`quota_messages.pace_line` 在「gate 軸中最高帶 ≠ binding 帶」時，標題行補一欄 `｜短窗=<band> five_hour <pct>% 剩 <N> 分`（五小時窗；週軸不補）；兩者相同則不補。**不改 `_binding_key`**（`tools/lib/quota_policy.py:647-652`；R59 的 arm／escalate 語意靠平手規則，WHY 見 H.5）。無新常數。
+- **後半（排 W6 之後）**：`--pace` 另印一行 QuotaWall（`QUOTAWALL_PLAN=…`），由 `tools/session_resume_planner.py` 呼叫 `sessionctl.quotawall.plan_lines`；**`quota_gate` 不得 import `sessionctl`**（避免依賴成環，AT-QW-93 以 AST 鎖）；量不到 ⇒ 不印、不報錯（fail-open）。planner 是 W6 持有面 ⇒ 後半必須在 W6 commit 之後單人做。
+- **檔**：前半 `quota_messages.py`＋`tools/tests/` 對應檔（Q4／W6 皆不碰，可與 W11d／e 並行）；後半 `tools/session_resume_planner.py`（守衛面，暴露證據＝H.1 seq 869）。
+
+#### W11e　realverify 額度閘（消除成因；持有面＝`tools/lib/realverify/runner.py`、`driver.py`、`cases/*.py` 旗標；排 Q6 之後）
+- **① 開跑前額度閘**：`Case` 加旗標 `spends_quota`（會呼叫 `run_claude` 或互動開窗者）；本批含此類案例，且 `qw_plan.stage ∈ {nodispatch, close, wall}` 或短窗原始讀數 ≥ prepare 門檻 ⇒ **整批判 env**，訊息 `QUOTA-PREFLIGHT`（含階段、R、reset），**一個 claude 行程都不起**。量不到 ⇒ 放行（fail-open，與 plan 一致）。
+- **② 撞牆型失敗判 env**：`driver.run_claude` 在 rc≠0 或逾時，且（輸出含 harness 撞額度字樣，**或**本機 halt 標記時間晚於該案例開跑時刻）⇒ 拋 `EnvMissing("quota-wall")`，判 env、不判 fail。`AssertionError` 仍判 fail（真缺陷不得被吞）；無字樣且 halt 標記早於開跑 ⇒ 維持 fail。
+- **字樣來源（不得猜）**：harness 撞額度原文字樣常數住 `driver.py`，內容必須由實作棒**實查後寫入**：①既有判準 `quota_limits.unhandled_limit_event`／`quotawall.wall_state`（`<synthetic>` 限額記錄、最後切斷通知）已辨識的字串為單一真相源，**重用而不複製**；②再從 2026-11-23 10:21 撞牆的主控逐字稿與 scratchpad `se11_run.txt`（RV-S1 rc=-9、W5 逾時、KW1～4 種子回合失敗）實取 stdout／stderr 原文落進證據檔；實查不到的字樣一律不寫、只靠 halt 標記時間判（寧可判 fail 也不憑空造字樣）。
+- **常數**：字樣表（實查後）；無新數值。**序**：Q6（只碰 `cases/`）commit 後串行做；案例旗標改 `cases/*.py` 與 Q6 同一持有面，必須在其後。
+
+### H.4 §12 工作包表加列（見 §12 表尾新增四列；W11a 併入 Q4，不另開包）
+W11b／W11c／W11d／W11e 與進行中 WP 的持有面關係見上；Q4 持有 `converge`／`forward`／`midwork`／`tools/sessionctl.py`／兩支 hook／`qw_guard`／`qw_prompt`，W6 持有 `parkprobe`／`parkearly`／`park`／`park_cli`／`briefline`／`planner`——W11c／d／e 與兩者檔不相交，W11b 後半碰 planner 故排 W6 後。共通：並行包不重釘棘輪、不寫帳本、不改 CI paths；棘輪與 `Root_Layout` 落點仍只在 Q7（W11 的新常數與模組無新增檔：落點表不變）。
+
+### H.5 否決方案（RCA §7 逐項；§17.3 同列，WHY 住此）
+| 方案 | 否決 WHY |
+|---|---|
+| 調低 prepare 或 halt 門檻 | 違反「週額度用到 100%」與 D-B「額度照樣用到接近滿」；只是把撞牆提前，成因（看不到燒速、樣本污染）仍在 |
+| 改 `_binding_key` 平手規則 | 連動 `reset_branch` 的 arm／escalate（R59 同型事故）；本病只在呈現層，補一欄即足 |
+| 讓配速床、攤提也吃燒速 | 同一件事變成第二個家；燒速可行性只放在 QW 的 L 一處（W11c①） |
+| 只靠提示詞約束子代理時序 | 本事件 Q3 已證無效（10:30 前只讀的約束被無視）；有先後依賴就用派工順序保證 |
+| 把撞牆 FAIL 改成 skip | Rule 12：ENV 必須出聲，不得變綠；故判 env（出聲、不算 PASS）而非 skip |
+
+### H.6 理論洞與 OI（根 CLAUDE.md〈守衛面准入〉）
+- TH-2（理論洞，只登記）：`MIN_CLEAN_SAMPLES＝3` 在低頻保溫（一天 < 3 次乾淨 ping）下量測值長期不被採用、恆用縮放／校準值。為何不修：縮放值已是保守側且 Q7 校準列上線閘；再開症狀＝連續 3 天乾淨樣本 < 3 且校準值偏離實測 > 3 倍（附 `ping_cost_outlier` 痕跡）。
+- OI-g：W11e②「harness 撞額度原文字樣」的實查結果入證據檔前不得宣稱 E2E-QW-35(b) 已驗字樣分支；承接＝W11e 實作棒附證據檔座標。
+- OI-h：W11a 真機 hook 畫面是否顯示 rc 2 訊息（沿用〔OI-20261120-010〕待掌舵者目視）。
