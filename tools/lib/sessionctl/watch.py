@@ -19,7 +19,7 @@ from pathlib import Path
 import endurance_env
 import unattended_authz
 
-from . import holder, keepwarm, procstop, qw_plan, roster, switch, watch_wake, watchlock
+from . import cutvoice, holder, keepwarm, procstop, qw_plan, roster, switch, watch_wake, watchlock
 
 #: 痕跡事件名；測試斷言它等於 supervision 的 `EV_WATCH_VERDICT`（兩邊各自定義、不互 import）。
 EV_WATCH_VERDICT = "watch_verdict"
@@ -349,6 +349,7 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
                 if event == "quota":
                     how = watch_wake.quota_disposal(band) or how
                 print(f"處置：{how}", file=out)
+                out.write(cutvoice.watch_text(agents, sid, transcript(), projects_dir))  # CTL-20
                 switch.trace(EV_WATCH_VERDICT, sid=sid, verdict=event, agents=len(agents), **extra)
                 print(f"WATCH_VERDICT={event} n={len(agents)}", file=out, flush=True)
                 return 0

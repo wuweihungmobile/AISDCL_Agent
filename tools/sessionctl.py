@@ -62,9 +62,9 @@ def main(argv: list[str] | None = None) -> int:
         list(sys.argv[1:] if argv is None else argv))
     verb, rest = (args[0], args[1:]) if args else ("", [])
     if verb == "handoff":
-        from lib.sessionctl import handoff
+        from lib.sessionctl import ackhook, handoff
 
-        return handoff.cli(rest)
+        return ackhook.after_handoff(rest, handoff.cli(rest))  # W4b：ack 成功後撤原 session 的 park
     if verb in ("status", "stop"):
         from lib.sessionctl import roster
 

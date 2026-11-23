@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable, Mapping
 from datetime import datetime
 
-from . import roster
+from . import cutvoice, roster
 
 ORPHAN_MAX_AGE_SECONDS = roster.RESIDUE_MAX_AGE_SECONDS  # 同名冊：滿壽命的殘局不再公告
 
@@ -44,13 +44,14 @@ def orphan_line(sid: str | None, env: Mapping | None = None, *,
                    and not r.get("sandbox") and _fresh(r, at)]
         if not orphans:
             return ""
-        cut = sum(1 for r in orphans if r.get("kind") == "usage_limit")
+        cut = cutvoice.orphan_count(orphans)  # REQ-CTL-20：名冊列不帶 kind，改讀代理逐字稿尾端判
         text = (f"sessionctl：本 repo 上一個 session 有 {len(orphans)} 支背景代理未收尾（殘局，"
                 "記錄停在那裡，不是還在燒額度）")
         if cut:
             text += f"，其中 {cut} 支被額度切斷"
         return (f" {text}；看清單：python tools/sessionctl.py status（交接包第 12 欄有細節）。"
-                "新 session 不假設 claude -r 能接回在飛代理，要重做請派新代理＋短任務書。")
+                "新 session 不假設 claude -r 能接回在飛代理，要重做請派新代理＋短任務書。"
+                + cutvoice.brief_text(orphans, sid))
     except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律
         return ""
 

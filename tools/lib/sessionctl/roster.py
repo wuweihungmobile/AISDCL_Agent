@@ -415,6 +415,14 @@ def is_supervision_shell(task: dict) -> bool:
 
 
 def stop_message(payload: dict, *, env=None, now=None) -> str:
+    """Stop 事件文字＝在跑的背景代理（`_running_text`）＋被切清單（REQ-CTL-20）。"""
+    from . import cutvoice  # noqa: PLC0415 — lazy：cutvoice 反向 import 本檔
+
+    return "\n".join(t for t in (_running_text(payload, env=env, now=now),
+                                 cutvoice.stop_text(payload, env=env, now=now)) if t)
+
+
+def _running_text(payload: dict, *, env=None, now=None) -> str:
     """Stop 事件文字（D7a）：本回合結束時仍在跑的背景代理。優先讀 payload 的 `background_tasks`，
     缺席才退回 `running()` 讀檔；沒有就回空字串。只出聲、不阻斷。
 

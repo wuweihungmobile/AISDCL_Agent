@@ -214,7 +214,10 @@ def _cmd_done(opts, sid: str, env, S: dict, now: datetime) -> int:
     return 0
 
 
-def _cmd_cancel(sid: str, S: dict) -> int:
+def cancel_marker(sid: str, S: dict | None = None, *, event: str = "cancel") -> int:
+    """撤銷 `sid` 的 park：逐 job 驗證拆除後標記 `cancelled`（`event` 記進 outcome）。
+    `park --cancel`（`event="cancel"`）與 `ackhook.on_ack`（`event="acked"`，D-CT-12）共用。"""
+    S = S or {}
     marker = park.read_marker(sid)
     if marker is None:
         print("無 park 標記")
@@ -223,7 +226,7 @@ def _cmd_cancel(sid: str, S: dict) -> int:
         if not _disarm_verified(job["label"], S):
             _err(f"❌ {job['label']} 沒有真的被移除（仍在排程器裡）")
             return 1
-    _settle(marker, "cancelled", "cancel")
+    _settle(marker, "cancelled", event)
     switch.trace("park_cancelled", sid=sid, labels=[j["label"] for j in marker["jobs"]])
     print("park 已取消")
     return 0
@@ -379,7 +382,7 @@ def run(argv: list[str], *, env=None, now: datetime | None = None,
     if opts.fire:
         return _cmd_fire(opts, sid, env, S, clock)
     if opts.cancel:
-        return _cmd_cancel(sid, S)
+        return cancel_marker(sid, S)
     if opts.status:
         return _cmd_status(opts, sid, S)
     if opts.done:
