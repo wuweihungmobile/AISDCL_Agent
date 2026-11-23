@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import functools
 import json
+import os
+import signal
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -359,8 +362,15 @@ def wait_ready(ctx: CaseContext, runner: Runner, timeout_s: float = 420.0) -> di
 
 
 def kill_pid(pid: int) -> None:
-    """`taskkill /F /PID <pid>`（**不帶 /T**：只殺主人行程本身，TCS E2E-SE-02）。"""
-    subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, creationflags=NOWIN, check=False)  # noqa: S603,S607
+    """強殺 `pid`（**不帶 /T**：只殺主人行程本身，TCS E2E-SE-02）。Windows＝`taskkill /F /PID`；
+    POSIX＝`SIGKILL`（`taskkill` 在對面平台是 FileNotFoundError，故平台分支）。"""
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, creationflags=NOWIN, check=False)  # noqa: S603,S607
+    else:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
 
 def pid_alive(pid: int) -> bool:

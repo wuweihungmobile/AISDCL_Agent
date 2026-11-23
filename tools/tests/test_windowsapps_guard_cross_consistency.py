@@ -1381,6 +1381,17 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "非呼叫：`WATCH_CMD = \"python tools/sessionctl.py watch\"` 是組進出聲訊息、給主控"
         "照抄的指令前綴，本行程只輸出文字、不 spawn；與同表 `park.py` 同型"
     ),
+    "tools/lib/sessionctl/qw_verdict.py": (
+        "非呼叫：`python tools/sessionctl.py keepwarm／handoff／park` 是組進 watch 額度閂鎖處置表、"
+        "給主控照抄的指令字樣（R218 QuotaWall 判決文案），本行程只輸出文字、不 spawn；"
+        "與同表 `keepwarm.py`／`park.py`／`seal.py` 同型"
+    ),
+    "tools/lib/realverify/cases/sideeffect_sites.py": (
+        "非呼叫：`--check` 的 JSON 資料 `{\"argv\": [\"python\", \"-c\", \"pass\"]}`（寫進沙盒 OIR 的"
+        "check 列，真機案例 E2E-SE-06 的素材）；列內 argv 由 openitems 驅動器的 `console_run` 在 "
+        "spawn 前把 `python` 換成當前直譯器絕對路徑，裸名不經 PATH 解析；與同表 "
+        "`tools/probe/openitems_drive_e2e.py`／`tools/lib/openitems/drive.py` 同型"
+    ),
     "tools/lib/sessionctl/keepwarm.py": (
         "非呼叫：`CMD = \"python tools/sessionctl.py keepwarm\"` 是組進 Stop 保溫閘推回訊息、給主控"
         "照抄的指令前綴，本行程只輸出文字、不 spawn；與同表 `supervise.py`／`park.py` 同型"

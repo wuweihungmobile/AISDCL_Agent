@@ -37,10 +37,23 @@ sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 import endurance_env  # noqa: E402
 import sandbox_scope as ss  # noqa: E402
 import sched_isolation as si  # noqa: E402
+import sentinel_lifecycle as SL  # noqa: E402  # DEF-200-446：模組級圍籬原語
 
 import session_resume_planner as planner  # noqa: E402
 
-NOW = datetime.now().astimezone().replace(microsecond=0)
+_MODULE_FENCES: list[dict] = []  # 模組級圍籬 handle 堆疊（後進先出）
+
+
+def setUpModule() -> None:
+    """本檔呼叫 `planner.main`（配速契約寫端）：單模組直跑也不得碰真實 TEMP／快取目錄。"""
+    _MODULE_FENCES.append(SL.fence_enter())
+
+
+def tearDownModule() -> None:
+    SL.fence_exit(_MODULE_FENCES.pop())
+
+
+NOW =datetime.now().astimezone().replace(microsecond=0)
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -245,7 +258,8 @@ class PlannerWiringTest(_Tmp):
                 plan, state, NOW + timedelta(minutes=15), planner.SENTINEL_TICK)
         self.assertEqual(got, (si.RC_REGISTER_REFUSED, ""))
         backend.arm.assert_not_called()
-        self.assertNotIn("RELAY", plan.read_text(encoding="utf-8"), "拒絕時不寫狀態塊")
+        written = plan.read_text(encoding="utf-8").splitlines()
+        self.assertFalse([ln for ln in written if "RELAY" in ln], "拒絕時不寫狀態塊")
         self.assertEqual(trace.call_args.args[0], "sideeffect_refused")
 
     def test_sentinel_tick_in_a_dead_sandbox_refuses_before_any_log_or_probe(self) -> None:

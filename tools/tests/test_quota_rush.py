@@ -430,7 +430,8 @@ class StaticLocksTest(unittest.TestCase):
             "tools/lib/resume_route.py": (1, 0),
             "tools/lib/session_brief.py": (2, 0),
             "tools/lib/sessionctl/park.py": (1, 0),
-            "tools/lib/sessionctl/park_cli.py": (1, 0),
+            "tools/lib/sessionctl/park_reset.py": (1, 0),  # R218 Q3：park 取 reset 的政策站點（自 park_cli 搬出）
+            "tools/lib/sessionctl/qw_plan.py": (0, 1),  # R218 Q1：只讀 prepare_pct（戳記只墊高水位、不動門檻值）
             "tools/lib/wastecensus/resume.py": (1, 0),
             "tools/lib/wastecensus/pace_replay.py": (1, 0),  # R217 A7：回放經 policy_env
             "tools/lib/quota_burndown.py": (0, 1),   # env 由 gate 傳入（policy_env 的產物）

@@ -16,6 +16,8 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from lib.win_spawn import quiet_python
+
 from .. import leases, sched
 from ..sandbox import projects_dir, real_autosdd, slug_of
 from . import CaseContext, case
@@ -23,6 +25,9 @@ from .sessionctl_park import PY, ps
 from .sideeffect_lib import NOWIN, SPEC_ENV, arm_park, new_box, now
 
 HOLD_DEFAULT_S = 1500  # 父案例沒來砍時的自然結束上限（25 分，小於租約 30 分）
+# 直接登記的「未記帳」排程工作的 Action 載具：走 GUI 子系統（pythonw），即便到點觸發也不在桌面畫 console
+# 視窗（`test_check_hooks_liveness` 的排程 Action 判準認 `quiet_python` 賦值來源）。
+ACTION_PY = quiet_python()
 
 
 def load_spec() -> dict:
@@ -38,7 +43,14 @@ def write_ready(spec: dict, **info) -> None:
     path = Path(spec["ready"])
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps({"pid": os.getpid(), **info}, ensure_ascii=False), encoding="utf-8", newline="\n")
-    os.replace(tmp, path)
+    for attempt in range(20):  # Windows：父案例輪詢時可能正開著舊檔 ⇒ os.replace 會 PermissionError（WinError 5），短暫重試
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.1)
 
 
 def hold(spec: dict) -> None:
@@ -73,7 +85,7 @@ def rv_se_seed(ctx: CaseContext) -> None:
     sleeper = subprocess.Popen([PY, "-c", "import time; time.sleep(3600)", sb.sid], cwd=str(sb.root),  # noqa: S603
                                creationflags=NOWIN)
     unacct = f"AutoSDD_RVunacct_{sb.sid[:8]}"
-    rc, out = ps(f"$a = New-ScheduledTaskAction -Execute '{PY}' -Argument '-c \"pass\" \"{sb.root}\"'; "
+    rc, out = ps(f"$a = New-ScheduledTaskAction -Execute '{ACTION_PY}' -Argument '-c \"pass\" \"{sb.root}\"'; "
                  f"$t = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(90)); "
                  f"Register-ScheduledTask -TaskName '{unacct}' -Action $a -Trigger $t -Force | Out-Null")
     ctx.check(rc == 0, f"直接登記未記帳工作失敗 rc={rc} {out[:200]}")
@@ -99,7 +111,7 @@ def rv_se_leak(ctx: CaseContext) -> None:
     probe.parent.mkdir(parents=True, exist_ok=True)
     probe.write_text("rv sideeffect leak probe\n", encoding="utf-8", newline="\n")
     task = f"AutoSDD_RVleak_{sb.sid[:8]}"
-    rc, out = ps(f"$a = New-ScheduledTaskAction -Execute '{PY}' -Argument '-c \"pass\" \"{sb.root}\"'; "
+    rc, out = ps(f"$a = New-ScheduledTaskAction -Execute '{ACTION_PY}' -Argument '-c \"pass\" \"{sb.root}\"'; "
                  f"$t = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(90)); "
                  f"Register-ScheduledTask -TaskName '{task}' -Action $a -Trigger $t -Force | Out-Null")
     ctx.check(rc == 0, f"登記外洩探針工作失敗 rc={rc} {out[:200]}")

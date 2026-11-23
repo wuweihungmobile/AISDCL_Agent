@@ -18,6 +18,21 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOK = _REPO_ROOT / ".claude" / "hooks" / "check_pending_handoff.py"
+
+
+def _hermetic_project_dir(tmp: Path) -> Path:
+    """`.claude/hooks/check_pending_handoff.py` 的 OIR 完成閘讀 `CLAUDE_PROJECT_DIR` 下的帳本。
+
+    子行程若指向真 repo，輸出會隨本機 OIR 帳本狀態（人工清單滿、undriven）而變——測試不密閉。
+    這裡給一個只含 params.json 副本與空帳本的 tmp 專案根，讓完成閘走真讀取路徑、但狀態確定。
+    """
+    root = tmp / "oir-root"
+    params = root / "docs" / "06_quality" / "OpenItems_Protocol"
+    params.mkdir(parents=True, exist_ok=True)
+    shutil.copy(_REPO_ROOT / "docs" / "06_quality" / "OpenItems_Protocol" / "params.json",
+                params / "params.json")
+    (root / "docs" / "06_quality" / "OpenItems_Event_Ledger.jsonl").write_text("", encoding="utf-8")
+    return root
 _SIBLING = _REPO_ROOT / ".claude" / "hooks" / "check_claim_provenance.py"
 _SETTINGS = _REPO_ROOT / ".claude" / "settings.json"
 
@@ -186,7 +201,8 @@ class TestStopHookWiring(unittest.TestCase):
                               "transcript_path": transcript or str(self.transcript)})
         child = {k: v for k, v in os.environ.items()
                  if k not in ("AUTOSDD_UNATTENDED", "AUTOSDD_HANDOFF_GUARD_OFF")}
-        child.update({"CLAUDE_PROJECT_DIR": str(_REPO_ROOT), "PYTHONUTF8": "1",
+        child.update({"CLAUDE_PROJECT_DIR": str(_hermetic_project_dir(self.tmp)),
+                      "PYTHONUTF8": "1",
                       "AUTOSDD_TRACE_DIR": str(self.tmp / "tr"), **(env or {})})
         return subprocess.run([sys.executable, str(_HOOK)], input=payload, capture_output=True,
                               text=True, encoding="utf-8", errors="replace", timeout=60, env=child)
@@ -312,7 +328,8 @@ class TestMidworkStopWiring(unittest.TestCase):
             doc["background_tasks"] = tasks
         child = {k: v for k, v in os.environ.items()
                  if k not in ("AUTOSDD_UNATTENDED", "AUTOSDD_HANDOFF_GUARD_OFF")}
-        child.update({"CLAUDE_PROJECT_DIR": str(_REPO_ROOT), "PYTHONUTF8": "1",
+        child.update({"CLAUDE_PROJECT_DIR": str(_hermetic_project_dir(self.tmp)),
+                      "PYTHONUTF8": "1",
                       "AUTOSDD_TRACE_DIR": str(self.tmp / "tr"), **(env or {})})
         return subprocess.run([sys.executable, str(_HOOK)], input=json.dumps(doc),
                               capture_output=True, text=True, encoding="utf-8", errors="replace",

@@ -61,8 +61,8 @@ def carriage(repo_root, env: Mapping[str, str], now: datetime,
     （rc≠0、無 NextRunTime，大聲失敗）。正式目標：只轉送顯式且在允許值內者，無顯式值 ⇒ 空。"""
     home = sandbox_scope.sandbox_home(repo_root)
     pairs = endurance_env.job_env_argv(env, sandbox=home is not None)
-    flags = zip(pairs[::2], pairs[1::2], strict=True)
-    argument = "".join(f' {flag} "{pair}"' for flag, pair in flags)
+    # 不用 zip(strict=)：py3.9 無此參數
+    argument = "".join(f' {pairs[i]} "{pairs[i + 1]}"' for i in range(0, len(pairs) - 1, 2))
     expire = sandbox_scope.job_expiry(home, now)
     if expire is None:
         return Carriage(argument)

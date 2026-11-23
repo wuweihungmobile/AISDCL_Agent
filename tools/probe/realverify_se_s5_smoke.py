@@ -40,11 +40,16 @@ def sweep() -> str:
 
 
 def alive(pid: int) -> bool:
-    out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, check=False).stdout  # xplat-ok: Windows 專屬真機 smoke（tasklist）  # noqa: E501
+    if sys.platform != "win32":
+        raise SystemExit("本 smoke 只在 Windows 跑（tasklist／taskkill）")
+    out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, check=False).stdout  # noqa: E501
     return str(pid) in out
 
 
 def main() -> int:
+    if sys.platform != "win32":
+        print("本 smoke 只在 Windows 跑（tasklist／taskkill）；S5_SMOKE_VERDICT=skip")
+        return 2
     results: list[tuple[str, bool, str]] = []
     task = f"AutoSDD_RV_s5smoke_{int(time.time()) % 100000}"
     bystander = sandbox.Sandbox.create(probe_hook=False)  # 主人＝本行程（存活）
@@ -53,7 +58,7 @@ def main() -> int:
                                  stdout=subprocess.PIPE, text=True)
         line = owner.stdout.readline().split()
         root, sleeper = Path(line[1]), int(line[2])
-        subprocess.run(["taskkill", "/F", "/PID", str(owner.pid)], capture_output=True, check=False)  # xplat-ok: Windows 專屬真機 smoke（taskkill 殺主人）  # noqa: E501
+        subprocess.run(["taskkill", "/F", "/PID", str(owner.pid)], capture_output=True, check=False)  # noqa: E501
         owner.wait(timeout=20)
         before = (root.exists(), alive(sleeper), sched.read_back(task) is not None)
         results.append(("kill 後三者皆在", before == (True, True, True), str(before)))

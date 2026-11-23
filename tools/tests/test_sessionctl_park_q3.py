@@ -62,7 +62,7 @@ def _write_trace(fence: _Fence, event: str, **fields) -> None:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-class CredentialPackageLiveTest(_Fence):
+class CredentialPackageLiveTest(_Fence, unittest.TestCase):
     """tools/lib/sessionctl/park.py::credential_ok：標記的交接包仍 live（REQ-QW-31；MU-QW-26）。"""
 
     def test_at_qw_39_resumed_and_acked_packages_invalidate_the_credential(self) -> None:
@@ -81,7 +81,7 @@ class CredentialPackageLiveTest(_Fence):
         self.assertTrue(park.credential_ok(_marker("DONE", why="沒有任何剩餘的工作"), NOW)[0])
 
 
-class YieldTest(_Fence):
+class YieldTest(_Fence, unittest.TestCase):
     """tools/lib/sessionctl/park_yield.py::decide：主載具讓路四分支（REQ-QW-32；AT-QW-41／64）。"""
 
     def setUp(self) -> None:
@@ -146,7 +146,7 @@ class YieldTest(_Fence):
         self.assertEqual((got["act"], got["reason"]), ("skip", "handed_over"))
 
 
-class ChainTest(_Fence):
+class ChainTest(_Fence, unittest.TestCase):
     """tools/lib/sessionctl/park_chain.py::run：失敗鏈
     （REQ-QW-34／38／44；AT-QW-45／65／69③／71）。"""
 
@@ -253,7 +253,7 @@ class ChainTest(_Fence):
         self.assertEqual(nums, [1, 2])
 
 
-class AnnounceTest(_Fence):
+class AnnounceTest(_Fence, unittest.TestCase):
     """tools/lib/sessionctl/park_announce.py::announce：終局出聲（REQ-QW-35；AT-QW-46／53）。"""
 
     def setUp(self) -> None:
@@ -297,7 +297,7 @@ class AnnounceTest(_Fence):
         self.assertEqual(os.environ.get("AUTOSDD_DESKTOP_NOTIFY"), before)
 
 
-class RegisterAndStatusTest(_Fence):
+class RegisterAndStatusTest(_Fence, unittest.TestCase):
     """tools/lib/sessionctl/park_register.py／park_status.py
     （REQ-QW-30／37／38；AT-QW-37／55／82）。"""
 
@@ -354,7 +354,7 @@ class RegisterAndStatusTest(_Fence):
                          "backup: absent(platform)")
 
 
-class TakeoverTest(_Fence):
+class TakeoverTest(_Fence, unittest.TestCase):
     """tools/lib/sessionctl/park_takeover.py::on_patrol：哨兵接手（REQ-QW-36；AT-QW-48／74）。"""
 
     def setUp(self) -> None:
@@ -457,7 +457,7 @@ class TakeoverTest(_Fence):
             self.assertIsNone(self.tick())
 
 
-class RegisterCliTest(_CliFence):
+class RegisterCliTest(_CliFence, unittest.TestCase):
     """tools/lib/sessionctl/park_cli.py::_cmd_park：QW 登記增量
     （REQ-QW-30／38；AT-QW-37／38／40／75／82）。
     WHY：標記必須記下登記當下的偏好（job 的環境帶不過去），備援排程在主載具預定醒來之後 10 分鐘。"""
@@ -553,7 +553,7 @@ class RegisterCliTest(_CliFence):
         self.assertTrue(any(ln.startswith("backup: next_run=") for ln in lines))
         self.assertIn("sentinel: armed", lines)
 
-class ForkSpawnSuccessTest(_Fence):
+class ForkSpawnSuccessTest(_Fence, unittest.TestCase):
     """tools/lib/sessionctl/park_spawn.py::finish 經 park_cli.spawn_resume(fork=True)
     （REQ-QW-48；AT-QW-72；MU-QW-38）。WHY：fork 的前提是舊窗還活著、會自己寫原逐字稿——
     把「原逐字稿變大」當成功＝兩個視窗都沒起來卻報成功（零駕駛）。"""
@@ -620,7 +620,7 @@ class ForkSpawnSuccessTest(_Fence):
         self.assertEqual(self.mark_resumed.call_count, 1)
 
 
-class FireL1RefusalNeverReadsThePrimaryTest(_CliFence):
+class FireL1RefusalNeverReadsThePrimaryTest(_CliFence, unittest.TestCase):
     """tools/lib/sessionctl/park_cli.py::_cmd_fire（AT-QW-69①）：L1 拒絕早於讀 holder、讓路、spawn；
     標記 `refused`、無 park_attempt／handback／佇列。"""
 
