@@ -157,7 +157,8 @@ class FireSiteTest(_SeFence):
         def resume(sid, path, **kw):
             self.resume_calls.append(kw)
             return self.resume_rc
-        seams = {"backend": self.backend, "spawn": spawn, "resume": resume,
+        seams = {"backend": self.backend, "spawn": spawn, "resume": resume, "platform": "win32",
+                 "sessions_dir": self.tmp / "sessions", "notify": lambda *_a: 0,
                  "transcript": lambda _s: self.transcript}
         err = io.StringIO()
         with mock.patch.object(park_cli, "_REPO", repo), contextlib.redirect_stderr(err), \
@@ -286,9 +287,10 @@ class FireSiteTest(_SeFence):
                 self.assertEqual((len(self.spawn_calls), len(self.resume_calls)),
                                  (1, 0) if route == "FRESH" else (0, 1))
                 self.assertEqual(list(self.bdir.iterdir()), [])
-                self.assertFalse({"park_spawn_failed", "park_resume_failed"} & set(self.names()))
+                self.assertFalse(
+                    {"park_chain_failed", "park_failure_announced"} & set(self.names()))
         self.marker(pkg)
-        self.spawn_rc = 1
+        self.spawn_rc = self.resume_rc = 1  # QW Q3：兩條路都失敗才是 failed（另一路也要失敗）
         with mock.patch.object(park_cli, "_fire_route", return_value=(park.FIRE_FRESH, "t", None)):
             rc, _e = self.fire(self.home, pkg, "--claude", exe)
         self.assertEqual((rc, park.read_marker(SID)["status"]), (1, "failed"))
@@ -303,7 +305,8 @@ class FireSiteTest(_SeFence):
         self.marker(pkg)
         rc, err = self.fire(self.prod, pkg)
         self.assertEqual((rc, err), (0, ""))
-        self.assertEqual(self.names(), ["park_job_start", "park_route", "park_spawned"])
+        self.assertEqual(self.names(), ["park_job_start", "park_route", "session_switch_spawning",
+                                        "park_attempt", "park_spawned"])  # QW Q3 重釘
         self.assertEqual(park.read_marker(SID)["status"], "fired")
         self.assertEqual(self.spawn_calls, [{}])
 
@@ -359,6 +362,29 @@ class SpawnSiteTest(_SeFence):
         self.assertEqual(rc, 1)  # 行程「已不在」＝一般失敗，不是 L1 拒絕
         self.assertEqual(runner.call_args.args[0][0], exe)
 
+    def test_at_se_39_fork_resume_is_a_gated_spawn_site_that_carries_the_fork_flag(self) -> None:
+        """park_cli.spawn_resume(fork=True)（隨 QW Q3 落地）：無租約 ⇒
+        rc＝RC_SIDEEFFECT_REFUSED（以常數
+        比對）、reason＝sandbox_no_lease、runner 0 次；有租約且給家目錄內替身 ⇒ argv 含
+        `-r <sid> --fork-session`（`leases` 的命令列比對據此認得它）。"""
+        pkg = self.package(self.home)
+        base = {"platform_name": "win32", "env": self.spawn_env(), "repo": self.home,
+                "projects_dir": self.tmp / "proj", "alive": lambda _p: False,
+                "sleep": lambda _s: None, "wait_seconds": 0, "fork": True}
+        runner = mock.Mock(side_effect=AssertionError("runner 不得被呼叫"))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = park_cli.spawn_resume(SID, pkg, runner=runner, **base)
+        self.assertEqual(rc, RC10)
+        self.assertIn("sandbox_no_lease", err.getvalue())
+        runner.assert_not_called()
+        self.lease()
+        exe = str(self.home / "bin" / "claude.exe")
+        runner = mock.Mock(return_value=(0, "", 4242))
+        with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+            park_cli.spawn_resume(SID, pkg, runner=runner, claude=exe, **base)
+        argv = runner.call_args.args[0]
+        self.assertEqual(argv[:4], [exe, "-r", SID, "--fork-session"])
     def test_unattended_fence_and_l1_are_independent(self) -> None:
         """handoff.spawn：無人旗標先拒絕（rc 1，舊行為不變）；L1 不依賴它（無旗標時才由 L1 拒絕 rc
         10）。"""
@@ -492,7 +518,8 @@ class RegisterSiteTest(_SeFence):
         self.assertNotIn("expire_at", calls[1])
 
     def test_rearm_inside_a_job_is_gated_and_keeps_the_fence(self) -> None:
-        """oldwin_park.py::_rearm：沙盒無租約 ⇒ False、不 arm、舊標記不動；有租約 ⇒ 重排並把 job
+        """oldwin_park.py::_rearm：沙盒無租約 ⇒ `refused`、不 arm、舊標記不動；
+        有租約 ⇒ `ok` 並把 job
         環境與
         自毀時刻帶過去（否則重試 job 會掉出沙盒圍籬）。"""
         pkg = self.package(self.home)
@@ -502,10 +529,10 @@ class RegisterSiteTest(_SeFence):
         S = {"arm": self.arm}
         with mock.patch.object(park_cli, "_REPO", self.home), \
                 contextlib.redirect_stderr(io.StringIO()):
-            self.assertFalse(oldwin_park._rearm(SID, pkg, when, env, _now(), S))
+            self.assertEqual(oldwin_park._rearm(SID, pkg, when, env, _now(), S), "refused")
             self.assertEqual(self.armed, [])
             self.lease()
-            self.assertTrue(oldwin_park._rearm(SID, pkg, when, env, _now(), S))
+            self.assertEqual(oldwin_park._rearm(SID, pkg, when, env, _now(), S), "ok")
         self.assertIsNotNone(self.armed[0]["expire_at"])
         self.assertIn("--job-env", self.armed[0]["argv"])
 
@@ -644,7 +671,7 @@ class EntryAndRegistryTest(unittest.TestCase):
         （漏接線或漏登記皆紅；登記的類別與實際呼叫的接點一致）。"""
         import ast
         rows = [s for s in sandbox_scope.SITES if s.module.startswith("lib.sessionctl.")]
-        self.assertEqual(len(rows), 6)
+        self.assertEqual(len(rows), 8)  # 6＋QW Q3 的 park_announce（notify）／park_takeover（tick）
         for site in rows:
             path = _ROOT / "tools" / (site.module.replace(".", "/") + ".py")
             tree = ast.parse(path.read_text(encoding="utf-8"))

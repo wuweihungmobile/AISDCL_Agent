@@ -41,8 +41,12 @@ def _duplicate_refusals(path: Path, now: datetime, alive, created_of=None) -> li
             continue
         at, pid = rec.get("at"), rec.get("pid")
         age = now.timestamp() - (procstop.parse_iso(at) or now.timestamp())  # 驗不到時間＝剛開過
-        if (alive(pid) and not procstop.pid_reused(pid, at, created_of)
-                or age < SPAWN_DEDUP_SECONDS):
+        live = alive(pid) and not procstop.pid_reused(pid, at, created_of)
+        if rec.get("ok") is False:  # S-21：失敗列只在行程仍活時才擋；行程已死＝可再試（哨兵接手）
+            if live:
+                out.append(f"同一交接包已 spawn 過（pid={pid}，at={at}）⇒ 先檢視既有新視窗")
+            continue
+        if live or age < SPAWN_DEDUP_SECONDS:
             out.append(f"同一交接包已 spawn 過（pid={pid}，at={at}）⇒ 先檢視既有新視窗")
     return out
 

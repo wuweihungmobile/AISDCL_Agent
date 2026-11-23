@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -34,8 +35,11 @@ from lib.sessionctl import (  # noqa: E402
 )
 
 NOW = datetime(2026, 11, 19, 12, 0, 0, tzinfo=UTC)
-OLD = "d4ed2654-9181-4df1-a6e6-2d712956e23b"
-NEW = "c3d4e5f6-0000-4000-8000-000000000001"
+#: REQ-QW-47：本檔每個測試 sid 都含這個標記
+#: （真 `~/.autosdd/traces/oldwin/events.jsonl` 若出現它＝測試漏圍籬）
+OLDWIN_TEST_SID_MARK = "oldwintest01"
+OLD = f"d4ed2654-9181-4df1-a6e6-{OLDWIN_TEST_SID_MARK}"
+NEW = f"c3d4e5f6-0000-4000-8000-{OLDWIN_TEST_SID_MARK}"
 PID = 15660
 FT = winproc.epoch_to_filetime(NOW.timestamp() - 7200)  # 舊視窗兩小時前建立
 
@@ -163,6 +167,8 @@ class Base(unittest.TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
+        # REQ-QW-47 圍籬：痕跡目錄必為 tmp（寫入全落 tmp，不污染真 ~/.autosdd/traces/oldwin）
+        self.assertEqual(Path(os.environ["AUTOSDD_TRACE_DIR"]).parent, self.dir)
         self.env = {"AUTOSDD_HANDOFF_DIR": str(self.dir / "handoff")}
         self.pkg = self.dir / "handoff" / f"{OLD}_20261119T110000Z.md"
         self.pkg.write_text(f"sid={OLD}\n", encoding="utf-8")
@@ -532,7 +538,8 @@ class R217VetoTest(Base):
         self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["handoff"], str(self.pkg))
         self.assertEqual(len(oldwin.events("oldwin_keep_veto")), 1)
         self.assertIsNone(
-            oldwin.record_keep_veto("no-package-sid", "t.jsonl", self.env, NOW), "(b)"
+            oldwin.record_keep_veto(f"no-package-{OLDWIN_TEST_SID_MARK}", "t.jsonl", self.env,
+                                    NOW), "(b)"
         )
         res = self.eligible()
         self.assertEqual((res["ok"], res["reason"]), (False, "kept_by_user"), "(c)")
@@ -627,44 +634,39 @@ class R217ParkGateTest(Base):
         S.update(extra)
         return S
 
-    def test_at_wp_71_close_before_resume_and_a_busy_window_is_never_doubled(self) -> None:
-        """(a) 五條件成立 ⇒ 關閉並回 go（呼叫端接著才 resume，順序＝先關後開）；(b) ② 不成立（busy）
-        ⇒ 不關、
-        不 resume、park 自己的到點排程重排（retry）。MU-WP-20：不查就會在舊窗還活著時開第二個同 sid
-        視窗。"""
+    def test_at_qw_43_live_cli_window_is_forked_unless_stuck_and_opted_in(self) -> None:
+        """QW Q3 改語意（DES §7.4，R-3）：同 sid 活著的互動舊窗 ⇒ `fork`（不關、舊窗保留）；
+        只有呼叫端判卡死並傳 `stuck_close=True` 且 R217 五條件成立時才關窗、關成功才
+        `go`；五條件缺一
+        ⇒ 不關、仍 fork。無活窗 ⇒ go（普通 -r）。"""
         self.marker()
         api = FakeApi(_tree())
         gate = oldwin_park.resume_gate(OLD, self.pkg, self.env, NOW, self.seams(api))
-        self.assertEqual(
-            (gate["act"], sorted(api.terminated)), ("go", sorted([PID, 101, 102, 104]))
-        )
+        self.assertEqual((gate["act"], api.terminated), ("fork", []))
+        closed = oldwin_park.resume_gate(OLD, self.pkg, self.env, NOW, self.seams(api),
+                                         stuck_close=True)
+        self.assertEqual((closed["act"], sorted(api.terminated)),
+                         ("go", sorted([PID, 101, 102, 104])))
         self.setUp()
-        self.registry(status="busy")
+        self.registry(status="busy")  # 五條件之② 不成立
         self.marker()
-        armed: list = []
         api2 = FakeApi(_tree())
-        gate2 = oldwin_park.resume_gate(OLD, self.pkg, self.env, NOW, self.seams(api2, armed))
-        self.assertEqual((gate2["act"], api2.terminated, len(armed)), ("retry", [], 1))
-        self.assertEqual(oldwin.retry_count(self.pkg), 1)
-        self.assertEqual(len(park.read_marker(OLD)["jobs"]), 1)
+        gate2 = oldwin_park.resume_gate(OLD, self.pkg, self.env, NOW, self.seams(api2),
+                                        stuck_close=True)
+        self.assertEqual((gate2["act"], api2.terminated), ("fork", []))
+        (self.dir / "sessions" / f"{PID}.json").unlink()
+        gate3 = oldwin_park.resume_gate(OLD, self.pkg, self.env, NOW, self.seams(api2))
+        self.assertEqual(gate3["act"], "go")
 
-    def test_at_wp_88_four_blocked_attempts_rearm_exactly_three_times_then_fail(self) -> None:
-        """(b) ② 連續不成立 4 次：park 重排恰 3 次、第 4 次到點回 fail（呼叫端寫 failed handback）、
-        不再重排。"""
-        self.registry(status="busy")
+    def test_at_qw_47_the_22_42_incident_forks_instead_of_failing_on_image(self) -> None:
+        """2026-11-20 22:42 重建：活 `cli` 窗、映像 `claude.exe.old.<ts>.<pid>`、F4＝RESUME ⇒ 不呼叫
+        terminate、fork（不再因 image_not_allowed 失敗）。"""
         self.marker()
-        armed: list = []
-        acts = []
-        for n in range(4):
-            if n:  # 每次到點都是新的排程名（含觸發分鐘）；模擬 park 把標記的 job 換成最新那個
-                self.marker(label=armed[-1][0])
-            acts.append(
-                oldwin_park.resume_gate(
-                    OLD, self.pkg, self.env, NOW, self.seams(FakeApi(_tree()), armed)
-                )["act"]
-            )
-        self.assertEqual((acts, len(armed)), (["retry", "retry", "retry", "fail"], 3))
-
+        procs = _tree()
+        procs[PID]["image"] = "claude.exe.old.1795116108051.41752"
+        api = FakeApi(procs)
+        gate = oldwin_park.resume_gate(OLD, self.pkg, self.env, NOW, self.seams(api))
+        self.assertEqual((gate["act"], api.terminated), ("fork", []))
     def test_at_wp_88_a_live_sdk_cli_process_is_a_live_driver_and_a_veto_skips(self) -> None:
         """(d) 同 sid 有活著的 `entrypoint=sdk-cli` 行程 ⇒ skip（不關不開）；(e) 否決成立 ⇒
         `skip(kept_by_user)`、
@@ -741,8 +743,9 @@ class R217ParkGateTest(Base):
         self.assertEqual((rc, resumed), (0, []))
         self.assertEqual(park.read_marker(OLD)["outcome"]["event"], "spawned")
 
-    def test_the_park_cli_fire_runs_the_gate_before_resume(self) -> None:
-        """`_cmd_fire` 整條：舊窗可關 ⇒ 先關（假 api 的 terminate）再 resume（呼叫順序斷言）。"""
+    def test_the_park_cli_fire_forks_a_live_window_instead_of_closing_it(self) -> None:
+        """`_cmd_fire` 整條：活 `cli` 舊窗 ⇒ 不關（假 api 的 terminate 0 次）、
+        `resume` 以 fork 呼叫。"""
         marker = self.marker()
         label = marker["jobs"][0]["label"]
         self.set_ack(False)
@@ -757,16 +760,17 @@ class R217ParkGateTest(Base):
         )
         calls: list = []
         api = FakeApi(_tree())
-        original = api.terminate
-        api.terminate = lambda h: (calls.append("close"), original(h))[1]
         S = self.seams(
             api,
             transcript=lambda sid: transcript,
             alive=lambda pid: False,
-            resume=lambda *a, **k: calls.append("resume") or 0,
-            spawn=lambda pkg: calls.append("SPAWN") or 0,
+            resume=lambda *a, **k: calls.append(("resume", k.get("fork"))) or 0,
+            spawn=lambda pkg, **k: calls.append(("SPAWN", None)) or 0,
             disarm=lambda name: 0,
             jobs=lambda prefix: [],
+            platform="win32",
+            preflight=lambda *a, **k: [],
+            notify=lambda *a: 0,
         )
         rc = park_cli.run(
             [
@@ -786,9 +790,7 @@ class R217ParkGateTest(Base):
             seams=S,
         )
         self.assertEqual(rc, 0)
-        self.assertEqual([c for c in calls if c in ("close", "resume")][-1], "resume")
-        self.assertEqual(calls[0], "close", f"先關後開：{calls}")
-
+        self.assertEqual((calls, api.terminated), ([("resume", True)], []))
 
 class R217PidReuseSpawnTest(Base):
     def test_at_wp_78_a_reused_pid_no_longer_blocks_a_legitimate_spawn(self) -> None:
@@ -1214,6 +1216,25 @@ class R218F7HandoverClosingRuleTest(unittest.TestCase):
     def test_spawn_output_tells_the_old_window_to_only_point_to_the_new_one(self) -> None:
         self.assertIn("決定請到新視窗回答", handoff.HANDOVER_CLOSING_RULE)
         self.assertIn("不要重列待決事項", handoff.HANDOVER_CLOSING_RULE)
+
+
+class QwOldwinFenceTest(Base):
+    """tools/tests/test_sessionctl_oldwin.py 本檔的圍籬（REQ-QW-47、AT-QW-54）：痕跡目錄在 tmp、
+    每個 sid 字面都帶 `OLDWIN_TEST_SID_MARK`。WHY：2026-11-20 前的測試把 `oldwin_*` 事件寫進真
+    traces，M-K9 普查因此把測試 sid 當成真事件。"""
+
+    def test_at_qw_54_every_sid_literal_carries_the_mark_and_writes_land_in_tmp(self) -> None:
+        import ast
+
+        self.assertTrue(str(oldwin._dir(write=True)).startswith(str(self.dir)))  # noqa: SLF001
+        oldwin.event("oldwin_fence_probe", sid=OLD)
+        self.assertTrue(oldwin.events("oldwin_fence_probe"))
+        tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+        uuid_like = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-z]{12}")
+        bad = [n.value for n in ast.walk(tree)
+               if isinstance(n, ast.Constant) and isinstance(n.value, str)
+               and uuid_like.search(n.value) and OLDWIN_TEST_SID_MARK not in n.value]
+        self.assertEqual(bad, [], "sid 字面必須由 OLDWIN_TEST_SID_MARK 組成")
 
 
 if __name__ == "__main__":

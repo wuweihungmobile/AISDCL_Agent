@@ -104,6 +104,9 @@ import unattended_authz  # noqa: E402  # DEF-200-575：無人回合時間邊界�
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
 from lib.sessionctl import modelmix, switch  # noqa: E402  # 選路判準（WP0）；--pace 模型建議（D8）
 from lib.sessionctl import park as sessionctl_park  # noqa: E402  # park 標記讓路（ADR §2.17 D7）
+from lib.sessionctl import (  # noqa: E402  # QW §7.6 哨兵接手 park 失敗
+    park_takeover as sessionctl_takeover,
+)
 from probe.audit_session import project_transcript_dir  # noqa: E402
 
 #: 任務書預設落點＝系統暫存。刻意不落在 repo 內：`tools/tests/test_platform_neutral_paths.py`
@@ -1421,6 +1424,7 @@ def _sentinel_tick(args) -> int:
     plan = Path(args.plan or "unknown")
     log = endurance_log_path(plan)
     if (refused := sched_isolation.tick_gate(_REPO_ROOT, "_sentinel_tick", args.task_name, switch.trace)) is not None: _schtasks_remove(args.task_name); return refused  # noqa: E501,E701,E702 — DES S2 到點首判（巡邏只讀檔，exe 不判；探測分支交棒 `_resume_tick`，那裡帶 exe 再判）；在 `sentinel_woken` 之前，理由同 `_resume_tick`
+    sessionctl_takeover.on_patrol(plan.stem, log)  # QW §7.6：先於 sentinel_woken（讀上次巡邏）
     append_log(log, "sentinel_woken", plan=str(plan))
     try:
         text, read_fault = (plan.read_text(encoding="utf-8") if plan.is_file() else ""), ""

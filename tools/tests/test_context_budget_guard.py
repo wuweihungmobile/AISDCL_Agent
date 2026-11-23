@@ -15948,6 +15948,27 @@ class SimulationProbeSelftestTest(unittest.TestCase):
                 self.assertIn(phrase, done.stdout, probe)
 
 
+class SentinelParkTakeoverWiringTest(unittest.TestCase):
+    """tools/session_resume_planner.py::_sentinel_tick：每次巡邏呼叫哨兵接手 park 失敗
+    （QW Q3，REQ-QW-36；判準本體與行為測試在 test_sessionctl_park_q3.py::TakeoverTest）。"""
+
+    def test_the_patrol_calls_the_park_takeover_before_it_logs_the_wake(self) -> None:
+        """WHY 在 `sentinel_woken` 之前：接手讀「上次巡邏」＝日誌裡最後一筆 `sentinel_woken`，先寫了
+        本次的就會把本次當成上次、永遠判「失敗早於上次巡邏」。接線漏掉＝park 失敗沒有第二道網。"""
+        tree = ast.parse((_REPO_ROOT / "tools" / "session_resume_planner.py").read_text(
+            encoding="utf-8"))
+        func = next(n for n in ast.walk(tree)
+                    if isinstance(n, ast.FunctionDef) and n.name == "_sentinel_tick")
+        calls = sorted(((n.lineno, n) for n in ast.walk(func) if isinstance(n, ast.Call)),
+                       key=lambda pair: pair[0])
+        takeover = [ln for ln, n in calls if isinstance(n.func, ast.Attribute)
+                    and n.func.attr == "on_patrol"]
+        woke = [ln for ln, n in calls if isinstance(n.func, ast.Name)
+                and n.func.id == "append_log" and n.args and len(n.args) > 1
+                and isinstance(n.args[1], ast.Constant) and n.args[1].value == "sentinel_woken"]
+        self.assertTrue(takeover and woke, (takeover, woke))
+        self.assertLess(takeover[0], woke[0])
+
 def tearDownModule() -> None:
     """把測試期間累積、卻沒有任何斷言在讀的模型訊息**排掉**（R91）。
     史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§64。"""

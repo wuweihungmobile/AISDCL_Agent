@@ -231,7 +231,15 @@ def credential_ok(marker: dict | None, now: datetime) -> tuple[bool, str]:
         return False, "標記已過 valid_until"
     if marker.get("route") == ROUTE_DONE:
         return True, "DONE 標記有效"
-    jobs = [j for j in marker.get("jobs") or [] if j.get("role") == "primary"]
+    if marker.get("pkg"):  # QW REQ-QW-31：交接包已被接手／自續跑／過期 ⇒ 到點不會有動作，不是憑證
+        import os  # noqa: PLC0415
+
+        from . import handoff  # noqa: PLC0415 — lazy：handoff 重，且反向依賴本檔
+
+        state = handoff._state(Path(marker["pkg"]), now, os.environ)  # noqa: SLF001
+        if state != "live":
+            return False, f"交接包已不是 live（{state}）"
+    jobs =[j for j in marker.get("jobs") or [] if j.get("role") == "primary"]
     if jobs and str(jobs[0].get("credential") or "").strip():
         return True, "H 排程憑證有效"
     return False, "H 標記沒有排程憑證"

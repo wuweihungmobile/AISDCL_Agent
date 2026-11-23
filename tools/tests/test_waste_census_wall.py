@@ -436,14 +436,20 @@ class SchemaDisciplineTest(unittest.TestCase):
     def test_park_events_exist_in_park_cli_and_the_rest_in_the_design(self) -> None:
         """WHY：park_cli 已產出的事件名逐字在原始碼；Q3／Q4 尚未落地的（讓路、失敗鏈、靜音）
         至少逐字在設計稿的痕跡清單，量測與設計不能各說各話。"""
-        src = [line for line in _PARK_CLI.read_text(encoding="utf-8").splitlines()]
+        # Q3 把到點流程拆進 park_fire／park_chain／park_yield：事件名住它們，不再全在 park_cli
+        src = [line for name in ("park_cli", "park_fire", "park_chain", "park_yield")
+               for line in _PARK_CLI.with_name(f"{name}.py").read_text(
+                   encoding="utf-8").splitlines()]
         for name in (sw.EV_JOB_START, sw.EV_ROUTE, sw.EV_RESUMED, sw.EV_SPAWNED,
                      sw.EV_SKIPPED, sw.EV_ARMED, sw.EV_CANCELLED, sw.EV_DONE):
             self.assertTrue(any(f'"{name}"' in line for line in src), name)
-        for name in (sw.EV_RESUME_FAILED, sw.EV_SPAWN_FAILED):  # 以 done/failed 變數形態出現
-            self.assertTrue(any(name in line for line in src), name)
+        # Q3 起失敗不再各記一個事件名，改 `park_attempt`＋`park_chain_failed`；
+        # 舊事件名只留在歷史列的
+        # 判讀（見本檔「舊格式失敗」案例），不再要求原始碼產出
+        for name in (sw.EV_YIELD, sw.EV_CHAIN_FAILED):
+            self.assertTrue(any(f'"{name}"' in line for line in src), name)
         doc = _DOC.read_text(encoding="utf-8").splitlines()
-        for name in (sw.EV_YIELD, sw.EV_CHAIN_FAILED, sw.EV_STOP_MUTED):
+        for name in (sw.EV_STOP_MUTED,):
             self.assertTrue(any(f"`{name}`" in line for line in doc), name)
 
 

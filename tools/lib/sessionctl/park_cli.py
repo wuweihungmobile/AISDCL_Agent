@@ -2,7 +2,8 @@
 
 流程順序是契約（測試以呼叫序列斷言）：政策閘 → 讀 reset → 交接包 finalize＋spawn 預演 → 取代舊標記
 → 登記排程拿憑證 → 寫標記（寫失敗即回滾排程）。拿不到憑證一律不寫標記、不宣稱已排程。
-job 本體 `--fire` 先查有沒有人在動（只信對話記錄，不信檔案 mtime）再 `handoff.spawn`。
+job 本體 `--fire` 先查有沒有人在動（只信對話記錄，不信檔案 mtime）、再讓路主載具，最後走失敗鏈
+（本檔只留 L1 站點首判，其餘在 `park_fire`／`park_chain`；QuotaWall R218 Q3）。
 排程只經 `engine_resume_job.arm_oneshot`／`schedule_backend.select()`，本檔不含任何排程器原語。
 """
 from __future__ import annotations
@@ -15,7 +16,17 @@ from pathlib import Path
 
 import sandbox_scope
 
-from . import handoff, park, park_reset, se_gate, switch
+from . import (
+    handoff,
+    park,
+    park_fire,
+    park_register,
+    park_reset,
+    park_spawn,
+    park_status,
+    se_gate,
+    switch,
+)
 
 PARK_CMD = park.PARK_CMD
 _REPO = Path(__file__).resolve().parents[3]
@@ -101,7 +112,7 @@ def _cmd_park(opts, sid: str, env, S: dict, now: datetime) -> int:
         _err(text)
         switch.trace("park_refused", sid=sid, why=text, code=rc)
         return rc
-    reset, axis, skew, rc = park_reset.resolve(opts, sid, S, now)
+    reset, axis, skew, rc = park_reset.resolve(opts, sid, S, now, env)
     if rc:
         return rc
     pkg = _pick_package(sid, opts, env)
@@ -121,9 +132,10 @@ def _cmd_park(opts, sid: str, env, S: dict, now: datetime) -> int:
         return _RC_PRECOND
     import engine_resume_job as erj  # noqa: PLC0415
 
-    fire = erj.fire_time(reset, skew, now)
-    route, reason = park.park_route((fire - now).total_seconds(), unattended=False, mode="auto",
-                                    carrier_ok=True)
+    primary = erj.fire_time(reset, skew, now)  # 主載具預定醒來；備援排程在其後 BACKUP_GRACE_MIN
+    fire = park_register.backup_time(primary)
+    route, reason = park.park_route((primary - now).total_seconds(), unattended=False,
+                                    mode="auto", carrier_ok=True)
     reg = se_gate.register("park_cli._cmd_park", repo=_REPO, pkg=pkg, fire=fire, env=env,
                            sid=sid, claude=opts.claude)
     if reg.rc:
@@ -145,7 +157,8 @@ def _cmd_park(opts, sid: str, env, S: dict, now: datetime) -> int:
               "fire_at": fire.isoformat(), "axis": axis, "pkg": str(pkg), "why": opts.why,
               "valid_until": (fire + timedelta(seconds=park.YIELD_GRACE_SECONDS)).isoformat(),
               "jobs": [{"label": label, "role": "primary", "fire_at": fire.isoformat(),
-                        "credential": str(cred)}], "reason": reason, "outcome": None}
+                        "credential": str(cred)}], "reason": reason, "outcome": None,
+              **park_register.marker_fields(primary, fire, at_mode=bool(opts.at), env=env)}
     if opts.claude:
         marker["claude"] = opts.claude  # 供 QW §7.6 哨兵接手沿用同一執行檔（未給 ⇒ 標記逐字不變）
     ok, msg = park.write_marker(marker)
@@ -158,12 +171,13 @@ def _cmd_park(opts, sid: str, env, S: dict, now: datetime) -> int:
     switch.trace("park_armed", sid=sid, route=park.ROUTE_H, reason=reason,
                  fire_at=fire.isoformat(), reset_at=reset.isoformat(), labels=[label],
                  credentials=[str(cred)])
-    at_text = fire.isoformat(timespec="seconds")
+    sentinel = park_register.ensure_sentinel(sid, env, S, transcript=_transcript_or_none(sid, env),
+                                             claude=opts.claude)
     print(cred)
-    print(f"park 已掛好：到點（{at_text}）若這個 session 沒有人在動，就由新 session 帶交接包接手。"
-          "現在可以結束回合；不要請人回這個視窗接手。")
-    print(f"PARK_VERDICT=armed route=H sid={sid[:8]} fire_at={at_text} "
-          f"credential={str(cred).split('（')[0].strip()}")
+    print(f"park 已掛好：到點（{fire.isoformat(timespec='seconds')}）若這個 session 沒有人在動，"
+          "就由新 session 帶交接包接手。現在可以結束回合；不要請人回這個視窗接手。")
+    print("\n".join(park_register.verdict_lines(sid, primary, fire, cred, sentinel,
+                                                platform_name=S.get("platform"))))
     return 0
 
 
@@ -219,6 +233,7 @@ def _cmd_status(opts, sid: str, S: dict) -> int:
     marker = park.read_marker(sid)
     if marker is None:
         print("無 park 標記")
+        print("\n".join(park_status.lines(sid, None, S, platform_name=S.get("platform"))))
         return 0
     print(f"route={marker['route']} status={marker['status']} fire_at={marker['fire_at']} "
           f"valid_until={marker['valid_until']}")
@@ -231,30 +246,21 @@ def _cmd_status(opts, sid: str, S: dict) -> int:
             where = "量不到" if listed is None else "在" if job["label"] in listed else "不在"
             live = f"｜排程器中：{where}"
         print(f"  job {job['label']}｜憑證 {job['credential']}{live}")
+    print("\n".join(park_status.lines(sid, marker, S, platform_name=S.get("platform"))))
     return 0
-
-
-def _write_failed_handback(sid: str, pkg: Path, rc: int, route: str = park.FIRE_FRESH) -> None:
-    import resume_route  # noqa: PLC0415
-
-    what = "續跑原 session（claude -r）" if route == park.FIRE_RESUME else "spawn 新 session"
-    body = (f"## 做了什麼\npark 排程到點，{what}失敗（rc={rc}）。\n\n"
-            "## 驗了什麼\n標記 armed、交接包 live、舊 session 無人在動後才動手。\n\n"
-            f"## 卡在哪\n{route} 路 rc={rc}（原因見 autosdd_session_switch 痕跡）。\n\n"
-            f"## 下一步指令\n`claude -r {sid}` 手動回舊 session，或 "
-            f"`python tools/sessionctl.py handoff --spawn {pkg}`。\n")
-    try:
-        path = resume_route.handback_report(f"{sid}_park_failed")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body, encoding="utf-8", newline="\n")
-    except OSError:
-        pass
 
 
 def _find_transcript(sid: str, env):
     import harness_feed  # noqa: PLC0415
 
     return harness_feed.pick_transcript(handoff._project_dir(_REPO), sid, env)[0]
+
+
+def _transcript_or_none(sid: str, env):
+    try:
+        return _find_transcript(sid, env)
+    except Exception:  # noqa: BLE001 — 哨兵武裝的逐字稿只是輔助參數
+        return None
 
 
 def _fire_route(transcript, env, now: datetime) -> tuple[str, str, int | None]:
@@ -274,17 +280,20 @@ def _fire_route(transcript, env, now: datetime) -> tuple[str, str, int | None]:
 
 RESUME_PROMPT = ("park 排程到點（額度已 reset）：續跑停工前的工作。停工前封存的交接包在 {pkg}"
                  "（供參考；以本 session 的上下文為主）。{rules}")
+FORK_PROMPT_TAIL = ("你是從舊視窗 fork 出來的新 session（舊視窗仍開著、已交棒）：先 "
+                    "`{cmd} --ack {pkg}`"
+                    "，再接手。")
 
 
 def spawn_resume(sid: str, pkg, *, runner=None, platform_name: str | None = None, env=None,
                  repo: Path | None = None, projects_dir: Path | None = None, alive=None, sleep=None,
-                 wait_seconds: float = handoff.SPAWN_WAIT_SECONDS,
-                 claude: str | None = None) -> int:
-    """F4 的 RESUME 路：另開可見互動視窗 `claude -r <sid> <提示>` 續原 session。成功憑證＝行程
-    存活**且**原逐字稿變大（或專案目錄出現新檔）；沒出現就照實回非零，不報成功。
+                 wait_seconds: float = handoff.SPAWN_WAIT_SECONDS, claude: str | None = None,
+                 fork: bool = False) -> int:
+    """F4 的 RESUME 路：另開可見互動視窗 `claude -r <sid> <提示>` 續原 session；`fork=True`（同 sid
+    有活著的互動舊窗，QW §7.4）加 `--fork-session`，舊窗保留。成功憑證見 `park_spawn.finish`
+    （普通＝行程活且原逐字稿變大；fork＝行程活且出現 stem ≠ 原 sid 的新逐字稿）。
     非 Windows／模式非 auto／無人窗口一律不外呼（同 `handoff.spawn` 的圍籬）。"""
     import subprocess  # noqa: PLC0415
-    import time  # noqa: PLC0415
 
     env = os.environ if env is None else env
     if env.get(park.UNATTENDED_ENV):
@@ -303,38 +312,23 @@ def spawn_resume(sid: str, pkg, *, runner=None, platform_name: str | None = None
     before = {p.name for p in proj.glob("*.jsonl")} if proj.is_dir() else set()
     size0 = tpath.stat().st_size if tpath.is_file() else 0
     prompt = RESUME_PROMPT.format(pkg=pkg, rules=switch.FRESH_HARD_RULES)
+    if fork:
+        prompt += FORK_PROMPT_TAIL.format(cmd=handoff._CMD, pkg=pkg)  # noqa: SLF001
+    started = datetime.now().astimezone()
     flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10)
+    argv = [claude or "claude", "-r", sid, *(["--fork-session"] if fork else []), prompt]
     rc, out, pid = (runner or handoff.build.default_runner)(
-        [claude or "claude", "-r", sid, prompt], cwd=str(repo), env=handoff.washed_env(env),
-        creationflags=flags, wait=False)
+        argv, cwd=str(repo), env=handoff.washed_env(env), creationflags=flags, wait=False)
     if rc != 0 or pid is None:
         _err(f"❌ 續跑視窗開啟失敗（rc={rc}）{out}")
         return 1
-    sleep, alive = sleep or time.sleep, alive or handoff._alive
-
-    def grew() -> bool:
-        return (tpath.is_file() and tpath.stat().st_size > size0) or bool(
-            handoff._new_files(proj, before))
-
-    deadline = time.monotonic() + wait_seconds
-    ok = grew()
-    while not ok and time.monotonic() < deadline and alive(pid):
-        sleep(1)
-        ok = grew()
-    up = alive(pid)
-    switch.trace("session_resume_spawned", sid=sid, pid=pid, handoff=str(pkg), ok=ok and up)
-    if not (ok and up):
-        _err(f"❌ 已起行程 pid={pid} 但{'逐字稿未增長' if up else '行程已不在'}"
-             f"（{wait_seconds:g}s 內）⇒ 不報成功；請自行檢視新視窗。")
-        return 1
-    from . import seal  # noqa: PLC0415
-    seal.mark_resumed(pkg)  # 同 sid 自續跑不算交棒：作廢封存（失敗不影響續跑結果，見 mark_resumed）
-    print(f"✅ 已續跑原 session（pid={pid}，claude -r {sid[:8]}）。")
-    return 0
+    return park_spawn.finish(sid, pkg, pid, fork=fork, proj=proj, tpath=tpath, size0=size0,
+                             before=before, started=started, alive=alive, sleep=sleep,
+                             wait_seconds=wait_seconds)
 
 
 def _cmd_fire(opts, sid: str, env, S: dict, clock) -> int:
-    """job 本體（排程呼叫，勿手動）：先查再 spawn；結局只有 skipped／fired／failed 三種。"""
+    """job 本體（排程呼叫，勿手動）：L1 首判（拒絕＝終局 refused）後交 `park_fire.run`。"""
     label, pkg, now = opts.job or "", Path(opts.pkg or ""), clock()
     try:
         late = (now - datetime.fromisoformat(opts.fire_at)).total_seconds()
@@ -350,64 +344,7 @@ def _cmd_fire(opts, sid: str, env, S: dict, clock) -> int:
             _settle(marker, "refused", "sideeffect_refused", reason=refusal.reason)
         _disarm_verified(label, S)
         return 0
-
-    def finish(rc: int, status: str | None = None, event: str = "", **extra) -> int:
-        if marker is not None and marker["status"] == "armed" and status:
-            _settle(marker, status, event, **extra)
-        _disarm_verified(label, S)  # 自拆（失敗不影響 rc：job 一次性，下次也不會被標記認作 armed）
-        return rc
-
-    def skip(reason: str, **extra) -> int:
-        switch.trace("handoff_spawn_skipped", sid=sid, job=label, reason=reason, **extra)
-        return finish(0, "skipped", reason)
-
-    mine = marker is not None and label in {j["label"] for j in marker["jobs"]}
-    if not mine or marker["status"] != "armed":
-        return skip("cancelled" if marker and marker["status"] == "cancelled" else "not_armed")
-    if env.get(park.UNATTENDED_ENV):
-        return finish(_RC_REFUSED)
-    if pkg.with_suffix(".ack").exists():
-        return skip("acked")
-    row = next((r for r in handoff.list_handoffs(env=env) if r["path"] == pkg), None)
-    if row is None or row["state"] != "live":
-        return skip("expired")
-    import transcript_activity  # noqa: PLC0415
-
-    find = S.get("transcript") or (lambda s: _find_transcript(s, env))
-    transcript = find(sid)
-    driver = transcript_activity.live_driver(transcript, now)
-    if driver is not None:
-        return skip("live_driver", driver_kind=driver["kind"], driver_at=driver["timestamp"])
-    if handoff._duplicate_refusals(pkg, now, S.get("alive") or handoff._alive):
-        return skip("spawned")  # forward／--spawn 已開出新 session、對方還沒 ack：不再動舊 sid
-    claude_kw = {"claude": opts.claude} if opts.claude else {}  # 每次 spawn 嘗試同一執行檔（D-14）
-    route, why, held = _fire_route(transcript, env, now)
-    switch.trace("park_route", sid=sid, job=label, route=route, why=why, ctx=held)
-    if route == park.FIRE_RESUME:
-        from . import oldwin_park  # noqa: PLC0415 — lazy：舊視窗處置只有 job 本體需要
-
-        gate = oldwin_park.resume_gate(sid, pkg, env, now, S)  # 先關舊窗再開，不讓同 sid 有兩個行程
-        if gate["act"] == "retry":
-            _disarm_verified(label, S)  # park 已把自己的到點排程重排到下一個觸發時刻
-            return 0
-        if gate["act"] == "skip":
-            return skip(gate["reason"])
-        if gate["act"] == "fail":
-            _write_failed_handback(sid, pkg, 1, route)
-            return finish(1, "failed", "park_resume_failed", spawn_rc=1, route=route)
-        rc = (S.get("resume") or spawn_resume)(sid, pkg, env=env, **claude_kw)
-        done, failed = "park_resumed", "park_resume_failed"
-    else:
-        rc = (S.get("spawn") or handoff.spawn)(pkg, **claude_kw)
-        done, failed = "park_spawned", "park_spawn_failed"
-    if rc == sandbox_scope.RC_SIDEEFFECT_REFUSED:  # spawn 站點 L1 拒絕＝終局，不算失敗、不走另一路
-        return finish(0, "refused", "sideeffect_refused", route=route)
-    if rc == 0:
-        switch.trace(done, sid=sid, job=label, pkg=str(pkg), rc=rc, route=route)
-        return finish(0, "fired", done)
-    switch.trace(failed, sid=sid, job=label, pkg=str(pkg), rc=rc, route=route)
-    _write_failed_handback(sid, pkg, rc, route)
-    return finish(1, "failed", failed, spawn_rc=rc, route=route)
+    return park_fire.run(opts, sid, env, S, clock, marker, label, pkg, now)
 
 
 def _parser() -> argparse.ArgumentParser:

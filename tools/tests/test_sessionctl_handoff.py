@@ -804,6 +804,56 @@ class SpawnTest(_Base):
                                disarm=lambda _s: 0, wait_seconds=0.0)
         self.assertEqual((rc, [c for c in runner.calls if not c["wait"]]), (1, []))
 
+    def trace_spawned(self, *, ok, seconds_ago: float, pid: int = 4321) -> None:
+        """手寫一列同一交接包的 `session_switch_spawned`（`ok=None` ＝舊格式無 ok 欄）。"""
+        rec = {"event": "session_switch_spawned", "handoff": str(self.pkg), "pid": pid,
+               "at": (NOW - timedelta(seconds=seconds_ago)).isoformat()}
+        if ok is not None:
+            rec["ok"] = ok
+        log = endurance_env.trace_dir() / "autosdd_session_switch.jsonl"
+        with log.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(rec) + "\n")
+
+    def test_at_qw_73_the_sentinel_is_disarmed_only_after_a_verified_spawn(self) -> None:
+        """handoff.py::spawn（S-21，REQ-QW-49）：①成功 ⇒ 解除 1 次，且解除當下成功痕跡已落（＝在驗證
+        之後）；②行程活但限時內無新逐字稿、③行程起來即死 ⇒ 不解除（哨兵保持武裝，
+        ＝QW §7.6 的接手者）、
+        rc 1。"""
+        seen: list[bool] = []
+
+        def disarm(_sid: str) -> None:
+            log = endurance_env.trace_dir() / "autosdd_session_switch.jsonl"
+            rows = [json.loads(x) for x in log.read_text(encoding="utf-8").splitlines()]
+            seen.append(any(r["event"] == "session_switch_spawned" and r.get("ok") is True
+                            for r in rows))
+
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = handoff.spawn(self.pkg, runner=self.good_runner(), platform_name="win32",
+                               env=self.env, now=NOW, repo=self.repo, projects_dir=self.proj,
+                               roster_mod=FakeRoster(), alive=lambda _p: True,
+                               sleep=lambda _s: None, disarm=disarm, wait_seconds=0.0)
+        self.assertEqual((rc, seen), (0, [True]))
+        for runner, alive in ((FakeRunner(), True), (self.good_runner(), False)):
+            self.disarmed.clear()
+            self.pkg = self.make(sid=SID, now=NOW + timedelta(minutes=5))
+            self.fill_main(self.pkg)
+            rc, _e = self.run_spawn(runner, alive=lambda _p, a=alive: a)
+            self.assertEqual((rc, self.disarmed), (1, []))
+
+    def test_at_qw_73_dedup_only_counts_successful_or_still_alive_spawns(self) -> None:
+        """spawn_dedup._duplicate_refusals（S-21）：④`ok=False` 且行程已死 ⇒ 不擋（可再試）；
+        ⑤`ok=True`（600 秒內）⇒ 擋；⑥`ok=False` 但行程仍活且未重用 ⇒ 擋；⑦舊格式無 ok 欄 ⇒ 擋。"""
+        cases = (("④", False, False, 0), ("⑤", True, False, 1), ("⑥", False, True, 1),
+                 ("⑦", None, False, 1))
+        for name, ok, alive, expect in cases:
+            with self.subTest(case=name):
+                log = endurance_env.trace_dir() / "autosdd_session_switch.jsonl"
+                log.unlink(missing_ok=True)
+                self.trace_spawned(ok=ok, seconds_ago=60)
+                got = handoff._duplicate_refusals(self.pkg, NOW, lambda _p, a=alive: a,
+                                                  lambda _p: None)
+                self.assertEqual(len(got), expect, got)
     def test_sec7_acked_package_is_never_spawned(self) -> None:
         """SEC-7：交接包已 ack（已被接手）⇒ 拒絕 spawn。"""
         self.assertEqual(handoff.ack(self.pkg), 0)

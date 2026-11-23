@@ -31,8 +31,21 @@ def _reset_from_at(opts, now: datetime):
     return at, ""
 
 
-def resolve(opts, sid: str, S: dict, now: datetime):
-    """`(reset, axis, skew, rc)`；`--at` 走明示時刻，否則取短窗軸達準備門檻者的 reset。"""
+def _close_stage(S: dict, sid: str, state, env, now: datetime) -> bool:
+    """QW §7.1：額度牆 plan 判 `close`（校準後的 V 帶）也算前置成立，不必先爬到準備門檻。
+    縫：`S["plan"]`；任何例外 ⇒ 不成立（照舊走準備門檻判準）。"""
+    try:
+        from . import quotawall  # noqa: PLC0415 — lazy：park 頂層不得 import quotawall 家族
+
+        fn = S.get("plan") or quotawall.plan
+        return fn(sid, None, env, now, read_quota=lambda _n: state).stage == quotawall.CLOSE
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def resolve(opts, sid: str, S: dict, now: datetime, env=None):
+    """`(reset, axis, skew, rc)`；`--at` 走明示時刻，否則取短窗軸達準備門檻者（或 plan 判 `close`）
+    的 reset。"""
     if opts.at:
         reset, text = _reset_from_at(opts, now)
         if reset is None:
@@ -46,6 +59,8 @@ def resolve(opts, sid: str, S: dict, now: datetime):
     pol = (S.get("policy") or (lambda: quota_policy.load_policy(quota_gate.policy_env())[0]))()
     hits = park.prepare_hits(state, pol, now)
     why_ok = len((opts.why or "").strip()) >= park.MIN_WHY_CHARS
+    if hits == [] and not why_ok and _close_stage(S, sid, state, env, now):
+        hits = park.measured_short(state, now)
     if hits == [] and why_ok:
         hits = park.measured_short(state, now)  # 未達門檻但主控判斷下一棒放不下
     reset = park.reset_of(hits) if hits else None

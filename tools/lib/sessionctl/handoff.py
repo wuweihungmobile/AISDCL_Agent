@@ -419,7 +419,6 @@ def spawn(path, *, runner=None, platform_name: str | None = None, env=None,
     if rc != 0 or pid is None:
         print(f"❌ 另開視窗失敗（rc={rc}）{out}", file=sys.stderr)
         return 1
-    (disarm or _disarm_sentinel)(sid)
     sleep, alive = sleep or time.sleep, alive or _alive
     deadline = time.monotonic() + wait_seconds
     fresh = _new_files(proj, before)
@@ -436,7 +435,8 @@ def spawn(path, *, runner=None, platform_name: str | None = None, env=None,
         print(f"❌ 已起行程 pid={pid} 但{'未見逐字稿' if up else '行程已不在'}"
               f"（{wait_seconds:g}s 內 {proj} 沒有新檔）⇒ 不報成功；請自行檢視新視窗。",
               file=sys.stderr)
-        return 1
+        return 1  # 失敗不解除哨兵：QW §7.6 的接手者（S-21）
+    (disarm or _disarm_sentinel)(sid)  # 驗證成功、成功痕跡已落之後才解除
     print(f"✅ 新 session 已起（pid={pid}，逐字稿 {fresh[0]}）。\n"
           "🔴 本 session 請於本回合收尾，之後不得再動工作樹（避免同工作樹雙駕駛）。\n"
           + HANDOVER_CLOSING_RULE + "\n" + CLOSE_OLD_WINDOW_HINT)

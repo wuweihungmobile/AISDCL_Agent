@@ -112,8 +112,9 @@ class FireRoutingEndToEndTest(_CliFence, unittest.TestCase):
             self.resumed.append(sid)
             return self.rc["resume"]
 
-        seams = {"backend": self.backend, "spawn": spawn, "resume": resume,
-                 "transcript": lambda _s: self.transcript}
+        seams = {"backend": self.backend, "spawn": spawn, "resume": resume, "platform": "win32",
+                 "preflight": lambda *_a, **_k: [], "sessions_dir": self.tmp / "sessions",
+                 "notify": lambda *_a: 0, "transcript": lambda _s: self.transcript}
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
             return park_cli.run(["--session-id", SID, "--fire", "--job", self.label, "--pkg",
@@ -156,19 +157,29 @@ class FireRoutingEndToEndTest(_CliFence, unittest.TestCase):
         self.assertEqual(self.fire(), 0)
         self.assertEqual((self.resumed, self.spawned), ([], [self.pkg]))
 
-    def test_a_failed_resume_writes_a_handback_naming_the_resume_route(self) -> None:
-        """續跑失敗 ⇒ 標記 failed、落 park_resume_failed、handback 寫明是續跑路失敗，rc 1；
-        不自動退回 spawn（舊視窗行程可能已起，雙開＝同一棵工作樹雙駕駛）。"""
+    def test_a_failed_resume_falls_back_to_the_handoff_spawn_and_records_both(self) -> None:
+        """QW Q3（DES §7.5）：續跑失敗 ⇒ 改試另一條路（交接包 spawn），逐次嘗試記實際 rc；
+        另一路成功 ⇒ fired。2026-11-20 22:42 事件的反面：只試一條路、失敗即靜默。"""
         self.transcript_with(170_000, hours_idle=5)
         self.rc["resume"] = 1
-        self.assertEqual(self.fire(), 1)
-        self.assertEqual(self.spawned, [])
-        self.assertEqual(park.read_marker(SID)["status"], "failed")
-        self.assertIn("park_resume_failed", self.events())
-        text = (self.bdir / f"{SID}_park_failed.md").read_text(encoding="utf-8")
-        self.assertIn("續跑原 session", text)
-        self.assertIn("RESUME 路 rc=1", text)
+        self.assertEqual(self.fire(), 0)
+        self.assertEqual((self.resumed, self.spawned), ([SID], [self.pkg]))
+        marker = park.read_marker(SID)
+        self.assertEqual(marker["status"], "fired")
+        self.assertEqual([(a["route"], a["rc"]) for a in marker["outcome"]["attempts"]],
+                         [("RESUME", 1), ("FRESH", 0)])
+        self.assertIn("park_spawned", self.events())
 
+    def test_both_routes_failing_writes_a_handback_that_lists_the_attempts(self) -> None:
+        """兩條路都失敗 ⇒ failed、`park_chain_failed`、handback 逐次列出嘗試與 rc，rc 1。"""
+        self.transcript_with(170_000, hours_idle=5)
+        self.rc["resume"] = self.rc["spawn"] = 1
+        self.assertEqual(self.fire(), 1)
+        self.assertEqual(park.read_marker(SID)["status"], "failed")
+        self.assertIn("park_chain_failed", self.events())
+        text = (self.bdir / f"{SID}_park_failed.md").read_text(encoding="utf-8")
+        self.assertIn("RESUME", text)
+        self.assertIn("rc=1", text)
 
 class _Runner:
     """假 runner：記下 argv／cwd／env／creationflags；回注定的 (rc, out, pid)。"""

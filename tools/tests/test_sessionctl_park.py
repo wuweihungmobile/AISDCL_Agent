@@ -558,6 +558,8 @@ class ParkCliTest(_CliFence):
         self.assertEqual(marker["jobs"][0]["credential"], self.CRED)
         self.assertTrue(marker["jobs"][0]["label"].startswith("AutoSDD_HandoffSpawn_798a7bf1_"))
         self.assertEqual(datetime.fromisoformat(marker["fire_at"]),
+                         datetime(2026, 11, 15, 20, 12, tzinfo=UTC))  # 備援＝主載具預定醒來＋10 分
+        self.assertEqual(datetime.fromisoformat(marker["primary_wake_at"]),
                          datetime(2026, 11, 15, 20, 2, tzinfo=UTC))
         self.assertTrue(self.armed[0]["interactive"])
         self.assertIn(self.CRED, out)
@@ -672,7 +674,7 @@ class ParkCliTest(_CliFence):
                 self.assertEqual(self.run_cli(*argv, quota=weekly)[0], 2)
         self.assertEqual(self.order, [])
         self.assertEqual(self.run_cli("--at", at, "--why", "週額度用完等重置", quota=weekly)[0], 0)
-        self.assertEqual(datetime.fromisoformat(park.read_marker(SID)["fire_at"]),
+        self.assertEqual(datetime.fromisoformat(park.read_marker(SID)["primary_wake_at"]),
                          datetime.fromisoformat(at).replace(second=0, microsecond=0)
                          + timedelta(minutes=1 if datetime.fromisoformat(at).second else 0))
 
@@ -695,7 +697,7 @@ class ParkCliTest(_CliFence):
         self.assertEqual(self.order, [])
         self.assertEqual(self.run_cli("--why", "下一棒約二十點放不下", quota=low)[0], 0)
         marker = park.read_marker(SID)
-        self.assertEqual(datetime.fromisoformat(marker["fire_at"]),
+        self.assertEqual(datetime.fromisoformat(marker["primary_wake_at"]),
                          datetime(2026, 11, 15, 20, 2, tzinfo=UTC))
         self.assertEqual((marker["axis"]["pct"], marker["why"]), (84.0, "下一棒約二十點放不下"))
 
@@ -743,7 +745,8 @@ class ParkCliTest(_CliFence):
         self.assertEqual(rc, 0)
         self.assertIn("route=H status=armed", out)
         self.assertIn(self.CRED, out)
-        self.assertEqual(len(self.backend.calls), before)
+        # 零副作用＝不 arm／disarm；QW §10 三列憑證的哨兵列為唯讀 list 查詢
+        self.assertEqual([c for c in self.backend.calls[before:] if c[0] != "list"], [])
         _rc, out, _err = self.run_cli("--status", "--verify")
         self.assertIn("排程器中：在", out)
 
@@ -871,7 +874,8 @@ class JobTest(_CliFence):
         park.write_marker(dict(_marker("H"), pkg=str(self.pkg)))
         self.transcript = self.tmp / f"{SID}.jsonl"
         self.spawned: list[Path] = []
-        self.spawn_rc = 0
+        self.resumed: list[int] = []
+        self.spawn_rc = self.resume_rc = 0
 
     def records(self, *lines: str, mtime_now: bool = False) -> None:
         self.transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -883,7 +887,13 @@ class JobTest(_CliFence):
         def spawn(path):
             self.spawned.append(path)
             return self.spawn_rc
-        seams = {"backend": self.backend, "spawn": spawn, "transcript": lambda _s: self.transcript}
+        def resume(*_a, **_kw):  # 失敗鏈會試另一條路：兩條路都要有縫，絕不開真視窗
+            self.resumed.append(1)
+            return self.resume_rc
+        seams = {"backend": self.backend, "spawn": spawn, "resume": resume, "platform": "win32",
+                 "preflight": lambda *_a, **_k: [], "transcript": lambda _s: self.transcript,
+                 "sessions_dir": self.tmp / "sessions",
+                 "notify": lambda *_a: 0}
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
             rc = self.cli.run(["--session-id", SID, "--fire", "--job", label or self.label,
@@ -962,17 +972,23 @@ class JobTest(_CliFence):
         self.assertNotIn(self.label, self.backend.jobs)
 
     def test_at_pk_63_failure_writes_a_handback_with_the_four_headings(self) -> None:
-        """park_cli.py：spawn 失敗 ⇒ 標記 failed、落 park_spawn_failed、寫四標題齊備的 handback、
-        rc 1
-        （下次 SessionStart 由既有 announce_handbacks 出聲，不是靜默失敗）。"""
+        """park_cli.py：兩條路都失敗 ⇒ 標記 failed（outcome.attempts 逐筆實際值）、落
+        park_chain_failed、寫四標題齊備的 handback、rc 1（下次 SessionStart 由既有
+        announce_handbacks 出聲，不是靜默失敗）。QW Q3：不再只試一條路。"""
         self.records()
-        self.spawn_rc = 1
+        self.spawn_rc = self.resume_rc = 1
         self.assertEqual(self.fire(), 1)
-        self.assertEqual(park.read_marker(SID)["status"], "failed")
+        marker = park.read_marker(SID)
+        self.assertEqual(marker["status"], "failed")
+        self.assertEqual([(a["route"], a["rc"]) for a in marker["outcome"]["attempts"]],
+                         [("FRESH", 1), ("RESUME", 1)])
+        self.assertNotIn("spawn_rc", marker["outcome"]["detail"])
         text = (self.bdir / f"{SID}_park_failed.md").read_text(encoding="utf-8")
         for head in ("## 做了什麼", "## 驗了什麼", "## 卡在哪", "## 下一步指令"):
             self.assertIn(head, text)
-        self.assertIn("park_spawn_failed", [t["event"] for t in self.traces()])
+        events = [t["event"] for t in self.traces()]
+        self.assertIn("park_chain_failed", events)
+        self.assertEqual(events.count("park_attempt"), 2)
 
     def test_at_pk_64_unattended_job_refuses_to_spawn(self) -> None:
         """park_cli.py：job 環境有 AUTOSDD_UNATTENDED（不該有，防禦）⇒ 拒絕 spawn、rc 4。"""

@@ -70,6 +70,9 @@ SITES: tuple[Site, ...] = (
     Site("lib.sessionctl.park_cli", "_cmd_park", "register"),
     Site("lib.sessionctl.oldwin_sched", "schedule_retry", "register"),
     Site("lib.sessionctl.oldwin_park", "_rearm", "register"),
+    # QuotaWall Q3（DES §7.5／§7.6；SE §10.2 第 2、7、8 項）：失敗終局的通知與哨兵接手
+    Site("lib.sessionctl.park_announce", "announce", "notify"),
+    Site("lib.sessionctl.park_takeover", "on_patrol", "tick"),
 )
 
 
