@@ -102,7 +102,7 @@ import transcript_activity  # noqa: E402  # DEF-200-560／562：session 存活�
 import unattended_authz  # noqa: E402  # DEF-200-575：無人回合時間邊界（牆鐘／harness 背景等待上限）的家（tools/lib）
 
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
-from lib.sessionctl import modelmix, parkearly, qw_cli, switch  # noqa: E402  # 選路／模型／park 提前恢復／QW 行
+from lib.sessionctl import modelmix, parkearly, qw_cli, switch  # noqa: E402  # 選路/模型/park/QW
 from lib.sessionctl import park as sessionctl_park  # noqa: E402  # park 標記讓路（ADR §2.17 D7）
 from lib.sessionctl import (  # noqa: E402  # QW §7.6 哨兵接手 park 失敗
     park_takeover as sessionctl_takeover,
