@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,8 +23,10 @@ NOW = datetime(2026, 11, 23, 10, 2, tzinfo=UTC)
 
 
 def _axes(five=80.0, five_min=38, week=58.0, week_min=8233):
-    return [{"kind": "five_hour", "pct": five, "resets_at": (NOW + timedelta(minutes=five_min)).isoformat()},
-            {"kind": "seven_day", "pct": week, "resets_at": (NOW + timedelta(minutes=week_min)).isoformat()}]
+    def at(m):
+        return (NOW + timedelta(minutes=m)).isoformat()
+    return [{"kind": "five_hour", "pct": five, "resets_at": at(five_min)},
+            {"kind": "seven_day", "pct": week, "resets_at": at(week_min)}]
 
 
 class TestPaceLineSeam(unittest.TestCase):
@@ -48,7 +51,8 @@ class TestPaceLineSeam(unittest.TestCase):
 
         def boom(_n):
             raise RuntimeError("x")
-        self.assertEqual(qw_cli.pace_line(SID, None, {}, now=NOW, read_quota=boom, refresh=boom), "")
+        seams = {"read_quota": boom, "refresh": boom}
+        self.assertEqual(qw_cli.pace_line(SID, None, {}, now=NOW, **seams), "")
 
     def test_quota_gate_never_imports_sessionctl(self) -> None:
         """MU-QW-62 後半：`quota_gate*` 不得 import `sessionctl`（依賴成環；AST 鎖）。"""
@@ -75,29 +79,32 @@ class TestPaceRealProcess(unittest.TestCase):
 
     def _run(self, extra_env=None, *, quota=True) -> subprocess.CompletedProcess:
         tmp = Path(tempfile.mkdtemp(prefix="w11b2_"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+        self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
         real = datetime.now().astimezone()
         qdir = tmp / "qcache"
         qdir.mkdir()
+        stamp = {"timespec": "seconds"}
         if quota:
-            axes = [{"kind": "five_hour", "pct": 80, "via": "t",
-                     "resets_at": (real + timedelta(minutes=38)).isoformat(timespec="seconds")},
-                    {"kind": "seven_day", "pct": 58, "via": "t",
-                     "resets_at": (real + timedelta(minutes=8233)).isoformat(timespec="seconds")}]
-            (qdir / "autosdd_quota.json").write_text(json.dumps(
-                {"schema": "autosdd.quota/2", "source": "endpoint", "http_status": 200,
-                 "measured_at": real.isoformat(timespec="seconds"), "axes": axes}), encoding="utf-8")
+            axes = [{"kind": k, "pct": p, "via": "t",
+                     "resets_at": (real + timedelta(minutes=m)).isoformat(**stamp)}
+                    for k, p, m in (("five_hour", 80, 38), ("seven_day", 58, 8233))]
+            body = {"schema": "autosdd.quota/2", "source": "endpoint", "http_status": 200,
+                    "measured_at": real.isoformat(**stamp), "axes": axes}
+            (qdir / "autosdd_quota.json").write_text(json.dumps(body), encoding="utf-8")
         tr = tmp / f"{SID}.jsonl"
-        tr.write_text(json.dumps({"type": "user", "sessionId": SID, "timestamp": real.isoformat(),
-                                  "message": {"role": "user", "content": "hi"}}) + "\n", encoding="utf-8")
-        env = {**os.environ, "AUTOSDD_QUOTA_CACHE_DIR": str(qdir), "AUTOSDD_TRACE_DIR": str(tmp / "traces"),
-               "TEMP": str(tmp), "TMP": str(tmp), "TMPDIR": str(tmp), "PYTHONDONTWRITEBYTECODE": "1",
+        rec = {"type": "user", "sessionId": SID, "timestamp": real.isoformat(),
+               "message": {"role": "user", "content": "hi"}}
+        tr.write_text(json.dumps(rec) + "\n", encoding="utf-8")
+        env = {**os.environ, "AUTOSDD_QUOTA_CACHE_DIR": str(qdir),
+               "AUTOSDD_TRACE_DIR": str(tmp / "traces"), "TEMP": str(tmp), "TMP": str(tmp),
+               "TMPDIR": str(tmp), "PYTHONDONTWRITEBYTECODE": "1",
                "AUTOSDD_SESSION_SWITCH_MODE": "auto", "AUTOSDD_QUOTA_PACE_FLOOR_OFF": "1"}
         env.pop("AUTOSDD_UNATTENDED", None)
         env.update(extra_env or {})
-        return subprocess.run([sys.executable, str(PLANNER), "--pace", "--model", "sonnet",
-                               "--transcript", str(tr)], cwd=str(tmp), env=env, capture_output=True,
-                              timeout=120, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
+        argv = [sys.executable, str(PLANNER), "--pace", "--model", "sonnet",
+                "--transcript", str(tr)]
+        return subprocess.run(argv, cwd=str(tmp), env=env, capture_output=True, timeout=120,
+                              encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
     def test_pace_prints_short_window_and_quotawall_lines(self) -> None:
