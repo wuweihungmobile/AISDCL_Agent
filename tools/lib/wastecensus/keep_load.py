@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from . import ctl_load
+from . import sections_ctl as sc
 from . import sections_keep as sk
 from . import sections_wall as sw
 from .reader import SYNTHETIC_MODEL, collect, parse_ts
@@ -259,16 +261,27 @@ def run(args, base: Path, trace_file: Path) -> int:
         pop = read_population(Path(args.population))
     else:
         pop = load_population(base, args.since_days)
+    if (args.replay_plan or args.switch_metrics) and "ctl" not in pop:  # W5：決策重放／M-C 的輸入
+        pop["ctl"] = ctl_load.load_ctl(Path(args.handoff_dir) if args.handoff_dir
+                                       else Path.home() / ".autosdd" / "handoff", trace_file.parent)
     if args.dump_population:
         write_population(pop, Path(args.dump_population))
         print(f"母體快照已寫：{args.dump_population}")
     traces = _jsonl(trace_file)
     body: dict = {}
+    if args.replay_plan:
+        body["replay_plan"] = sc.replay_plan(pop)
+        ctl_load.print_replay_plan(body["replay_plan"], {
+            "main": len(pop["main"]), "sub": len(pop["sub"]), "packs": len(pop["ctl"]["packs"]),
+            "parks": len(pop["ctl"]["parks"]), "burn": len(pop["ctl"]["burn"])})
     if args.switch_metrics:
         oldwin = _jsonl(Path(args.oldwin_file) if args.oldwin_file
                         else trace_file.parent / "oldwin" / "events.jsonl")
         body["metrics"] = sk.switch_metrics(pop, traces, oldwin)
         print_metrics(body["metrics"], pop)
+        body["ctl"] = sc.switch_ctl_metrics(pop, [dict(r, _at=ctl_load._epoch(r.get("at")))  # noqa: SLF001
+                                                  for r in traces])
+        ctl_load.print_switch_ctl(body["ctl"])
     if args.calibrate_quotawall:
         burn = _jsonl(Path(args.burn_file) if args.burn_file
                       else trace_file.parent / "quota_burn.jsonl")

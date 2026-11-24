@@ -123,6 +123,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="把新判準套回真實逐字稿，重現設計 §7 全表（零 token）",
     )
     ap.add_argument(
+        "--replay-plan",
+        action="store_true",
+        help="換手決策重放（Control_Handover DES §7.6：以 decide／park.recovered 重放；零 token）",
+    )
+    ap.add_argument(
         "--calibrate-switch",
         action="store_true",
         help="重算 F、B、N_lo、P_fix 建議值（讀逐字稿與 autosdd_resume_cost.jsonl）",
@@ -258,7 +263,7 @@ def main(argv: list[str]) -> int:
     args = _build_parser().parse_args(argv)
     base = Path(args.base)
     if (args.switch_metrics or args.replay_switch or args.calibrate_switch
-            or args.calibrate_quotawall):
+            or args.calibrate_quotawall or args.replay_plan):
         from . import keep_load  # noqa: PLC0415 — lazy
 
         if not args.population and not base.is_dir():

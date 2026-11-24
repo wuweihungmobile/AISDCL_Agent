@@ -62,7 +62,7 @@ def light(rec: dict) -> dict | None:
     return out
 
 
-def load_sessions(base: Path, since_days: float) -> list[dict]:
+def load_sessions(base: Path, since_days: float, light_fn=None) -> list[dict]:
     floor, out = time.time() - since_days * 86400, []
     for path in sorted(base.glob("*.jsonl")):
         try:
@@ -81,7 +81,7 @@ def load_sessions(base: Path, since_days: float) -> list[dict]:
                 continue
             if raw.get("entrypoint"):
                 eps[raw["entrypoint"]] += 1
-            if (r := light(raw)) is not None:
+            if (r := (light_fn or light)(raw)) is not None:
                 recs.append(r)
         interactive = bool(eps) and eps.get("cli", 0) >= max(eps.values())
         out.append({"sid": path.stem, "recs": recs, "interactive": interactive})
@@ -125,15 +125,16 @@ def load_trace(trace_file: Path) -> list[dict]:
 
 def run(base: Path, since_days: float, trace_file: Path, handoff_dir: Path, out: str | None,
         r1: int = sv.R1_DEFAULT) -> int:
-    got = sv.compute(load_sessions(base, since_days), load_packs(handoff_dir),
-                     load_trace(trace_file), r1=r1)
+    from . import ctl_load, sections_ctl  # noqa: PLC0415 — lazy：ctl_load 反向 import 本檔
+    sessions, trace = load_sessions(base, since_days, ctl_load.light), load_trace(trace_file)
+    got = sv.compute(sessions, load_packs(handoff_dir), trace, r1=r1)
     w1, w2, f1 = got["m_w1"], got["m_w2"], got["m_f1"]
     s1, s2, s3 = got["m_s1"], got["m_s2"], got["m_s3"]
     print(f"== 監督與換手量測（近 {since_days:g} 天；R1={r1:,}）==")
     print(f"   M-W1 無看管區間：{w1['n']} 筆（hook 出聲 {w1['n_hook_voiced']}）合計 "
           f"{w1['total_hours']} 小時；中位 {w1['gap_min'].get('p50')} 分、P90 "
           f"{w1['gap_min'].get('p90')}、最大 {w1['gap_min'].get('max')}；>60 分 {w1['gt_60min']}；"
-          f"沒回來 {w1['never_returned']}（憑證判準待 WP-4 接上＝目前恆無憑證）")
+          f"沒回來 {w1['never_returned']}（舊口徑＝恆無憑證，只當上界；修正版見下方 M-W1）")
     print(f"   M-W2 背景叫醒冷重寫：{w2['n']} 次／{w2['tokens']:,} tok")
     w3, w4, f2 = got["m_w3"], got["m_w4"], got["m_f2"]
     print(f"   M-W3 監督推回：{w3['supervise_stop_block']} 件／派工波 {w3['dispatch_waves']}"
@@ -148,7 +149,11 @@ def run(base: Path, since_days: float, trace_file: Path, handoff_dir: Path, out:
           f"（封存閘推回 {s1['seal_stop_block']}）")
     print(f"   M-S2 手貼接續：{s2['pasted']}／{s2['n_interactive']} 互動 session；{s2['by_class']}")
     print(f"   M-S3 包過時（分）：n={s3['n_packs']} {s3['lag_min']}")
+    ctl = sections_ctl.ctl_metrics(sessions, trace, ctl_load.OLD_DATA, ctl_load.make_judge(
+        base, ctl_load.load_packs(handoff_dir)), ctl_load.heartbeat_spans(trace_file.parent))
+    ctl_load.print_ctl(ctl)
     if out:
-        Path(out).write_text(json.dumps({"kind": "supervision_metrics", **got}, ensure_ascii=False,
-                                        default=str) + "\n", encoding="utf-8", newline="\n")
+        Path(out).write_text(json.dumps({"kind": "supervision_metrics", **got, "ctl": ctl},
+                                        ensure_ascii=False, default=str) + "\n",
+                             encoding="utf-8", newline="\n")
     return 0
