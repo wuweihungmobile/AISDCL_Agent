@@ -21,6 +21,7 @@ MK_PARKED_ACCOUNT = "parked_account"
 EARLY_MIN_WAIT_MIN = 60  # 剩餘等待低於此值不探（照原排程就好）
 EARLY_DROP_PP = 5.0  # 讀數須比登記當下低至少這麼多
 UNMEASURED_STREAK = 3  # 連續這麼多次量不到 ⇒ SessionStart 出聲
+EARLY_ENV = "AUTOSDD_PARK_EARLY"  # 提前到點的 `park --fire` 子行程帶 `1`：停用 §7.3 分支 A 的重排
 EV_PROBE, EV_RECOVERED = "park_early_probe", "park_early_recovered"
 REASON_UNMEASURED, REASON_NO_BASELINE = "unmeasured", "no_baseline"
 REASON_HOLD, REASON_RECOVERED = "hold", "recovered"
@@ -113,13 +114,13 @@ def with_token(lines: list[str], marker: dict, sentinel: tuple[str, str]) -> lis
     return [*lines[:-1], f"{lines[-1]} early_probe={token}"]
 
 
-def early_view(marker: dict | None, opts) -> dict | None:
-    """`park --fire` 的 early 模式（`opts.early`）：把重排次數記成已用盡，讓 QW §7.3 的分支 A
-    （主載具活著且未到 ⇒ 重排）落到 `yield_exhausted`、其餘分支照舊（DES I-10）。非 early ⇒ 原樣。
-    只是記憶體副本；`parkearly.fire_early` 事後還原磁碟上標記的次數欄。"""
+def early_view(marker: dict | None, env) -> dict | None:
+    """`park --fire` 的 early 模式（環境 `EARLY_ENV=1`，`parkearly.fire_early` 起的子行程帶）：
+    把重排次數記成已用盡，讓 QW §7.3 的分支 A（主載具活著且未到 ⇒ 重排）落到 `yield_exhausted`、
+    其餘分支照舊（DES I-10）。非 early ⇒ 原樣。只是記憶體副本；`fire_early` 事後還原磁碟次數欄。"""
     from . import park_yield  # noqa: PLC0415
 
-    if marker is None or not getattr(opts, "early", False):
+    if marker is None or (env or {}).get(EARLY_ENV) != "1":
         return marker
     return dict(marker, **{park_yield.RESCHEDULES_KEY: park_yield.MAX_RESCHEDULES})
 

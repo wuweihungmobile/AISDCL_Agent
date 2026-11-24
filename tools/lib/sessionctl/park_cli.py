@@ -343,7 +343,7 @@ def _cmd_fire(opts, sid: str, env, S: dict, clock) -> int:
     switch.trace("park_job_start", job=label, sid=sid, fire_at=opts.fire_at, late_s=late)
     refusal = se_gate.check("park_cli._cmd_fire", repo=_REPO, pkg=pkg, sid=sid, claude=opts.claude,
                             job=label)  # L1：先於一切讀標記／讓路觀察／spawn；拒絕＝終局
-    marker = parkprobe.early_view(park.read_marker(sid), opts)  # early＝提前到點：停用 §7.3 分支 A
+    marker = parkprobe.early_view(park.read_marker(sid), env)  # early＝提前到點：停用 §7.3 分支 A
     if refusal is not None:
         if marker is not None and marker["status"] == "armed" and label in {
                 j["label"] for j in marker["jobs"]}:

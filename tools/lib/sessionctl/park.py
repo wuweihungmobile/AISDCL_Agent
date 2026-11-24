@@ -11,8 +11,6 @@ band（攤提與配速床會把 23% 墊成 prepare，那不是「真的快撞線
 """
 from __future__ import annotations
 
-import contextlib
-import contextvars
 import json
 import math
 import re
@@ -62,25 +60,18 @@ def park_route(wait_s: float | None, *, unattended: bool, mode: str,
     return ROUTE_H, f"到點（約 {max(0.0, float(wait_s)) / 60:.0f} 分鐘後）由新 session 帶交接包接手"
 
 
-_FORCE_COLD: contextvars.ContextVar[bool] = contextvars.ContextVar("park_force_cold", default=False)
-
-
-@contextlib.contextmanager
-def force_cold():
-    """換帳號的提前到點（Control DES D-CT-8）：區塊內 `fire_route` 一律把快取視為已冷。用
-    ContextVar 而不用環境變數／猴子補丁——不會漏進 spawn 出去的子行程環境、執行緒各自獨立。"""
-    token = _FORCE_COLD.set(True)
-    try:
-        yield
-    finally:
-        _FORCE_COLD.reset(token)
+#: 換帳號的提前到點（Control DES D-CT-8）：`parkearly.fire_early` 起的到點子行程帶此變數
+#: （值 `1`），`fire_route` 把快取一律視為已冷。走環境變數是因為判決要跨行程邊界。
+FORCE_COLD_ENV = "AUTOSDD_PARK_FORCE_COLD"
 
 
 def fire_route(held: int | float | None, cold: bool, env=None) -> tuple[str, str]:
     """到點（reset 後）怎麼接手：回 `(FIRE_RESUME | FIRE_FRESH, 理由)`（R216 設計 §4.6、F4）。
-    `force_cold()` 區塊內 `cold` 一律為真，理由前綴 `account_changed`（REQ-CTL-34）。"""
-    route, why = _fire_route(held, cold or _FORCE_COLD.get(), env)
-    return route, (f"account_changed：{why}" if _FORCE_COLD.get() else why)
+    `env[FORCE_COLD_ENV]=="1"`（換帳號提前到點）⇒ `cold` 一律為真，理由前綴 `account_changed`
+    （REQ-CTL-34）。"""
+    forced = (env or {}).get(FORCE_COLD_ENV) == "1"
+    route, why = _fire_route(held, cold or forced, env)
+    return route, (f"account_changed：{why}" if forced else why)
 
 
 def _fire_route(held: int | float | None, cold: bool, env=None) -> tuple[str, str]:

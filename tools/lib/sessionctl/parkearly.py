@@ -3,24 +3,32 @@
 哨兵每次巡邏（`session_resume_planner._sentinel_tick`，`tick_gate` 之後、`sentinel_decide` 之前）
 呼叫一次 `tick`：前置不成立 ⇒ 靜默回 None；讀額度（`park._pace_state`，TTL 內讀快取）落
 `park_early_probe` 痕跡；`parkprobe.evaluate` 判 recovered ⇒ `fire_early`。
-`fire_early` 不另開 spawn 路：呼叫 `park_cli._cmd_fire(opts.early=True)`——L1 副作用首判、讓路
-（`live_driver`／`handed_over`／`spawning` 去重）、F4 選路、活窗 fork、失敗鏈、哨兵接手、出聲全照
-Q3；
-**唯一差別**＝QW §7.3 分支 A（主載具活著且未到 ⇒ 重排）停用（`parkprobe.early_view`）。換帳號
-（`account_changed`）時以 `park.force_cold()` 把快取視為已冷（D-CT-8）。
+`fire_early` 不另開 spawn 路：以**排程同 argv**（`park_cli.job_argv`）起一個 `park --fire` 子行程——
+L1 副作用首判、讓路（`live_driver`／`handed_over`／`spawning` 去重）、F4 選路、活窗 fork、失敗鏈、
+哨兵接手、出聲全照 Q3；**唯一差別**＝QW §7.3 分支 A（主載具活著且未到 ⇒ 重排）停用
+（子行程環境 `EARLY_ENV=1`，`parkprobe.early_view`）。換帳號（`account_changed`）時另帶
+`park.FORCE_COLD_ENV=1` 把快取視為已冷（D-CT-8）。
+
+🔴 為什麼是子行程而不是行程內呼叫 `_cmd_fire`（真行程 smoke 才抓得到）：planner 主函式對
+`--sentinel-tick` 無條件強制 `AUTOSDD_UNATTENDED=1`（DEF-200-272，排程叫起的 tick 結構上無人看管），
+而 `park_fire.run`、`handoff.spawn`、`park_cli.spawn_resume` 全都在該旗標下拒絕開窗。行程內呼叫＝
+永遠被自己的守衛擋下；子行程拿掉該旗標，環境與排程器到點跑 job 時一致（排程器環境本來就沒有它）。
+同理本檔不以 `AUTOSDD_UNATTENDED` 當前置：在哨兵 tick 裡它恆為真，沒有鑑別力；真正的無人窗口
+（`claude -p`）不會有 park 標記（`park` 拒絕無人窗口）。
 import 方向：本檔 → {parkprobe, park_cli（惰性，它反向呼叫本套件）}；`parkprobe` 不 import 本檔。
 任何例外一律吞掉並留痕跡——探針分支不得讓哨兵巡邏自己死掉。
 """
 from __future__ import annotations
 
-import argparse
 import os
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
 from . import handoff, holder, park, parkprobe, qw_schema, seal, switch
 
 EV_ERROR = "park_early_error"
+CHILD_TIMEOUT_SECONDS = 600  # 讓路觀察 180 s ＋兩條路的 spawn 等待；短於哨兵 15 分鐘巡邏
 
 
 def _sid(args) -> str:
@@ -35,9 +43,7 @@ def _sid(args) -> str:
 
 def _precheck(marker: dict, env, now: datetime, S: dict) -> str:
     """前置（REQ-CTL-31）：回不成立的原因，空字串＝成立。不碰額度、不寫任何東西。"""
-    if env.get(park.UNATTENDED_ENV):
-        return "unattended"
-    if switch.switch_mode(env) != "auto":
+    if switch.switch_mode(env) != "auto":  # 不查 AUTOSDD_UNATTENDED：見檔頭，哨兵 tick 裡它恆為真
         return "mode"
     if not park.yields(marker, now):  # armed ∧ route H ∧ 在 valid_until 內
         return "not_armed"
@@ -110,24 +116,41 @@ def tick(args, now: datetime | None = None, S: dict | None = None, env=None) -> 
         return None
 
 
+def _run_job(argv: list[str], env: dict) -> int:
+    """真子行程（無視窗、有逾時）；起不來或逾時 ⇒ 127（呼叫端落 `park_early_error`）。"""
+    import win_spawn  # noqa: PLC0415 — lazy
+
+    try:
+        return subprocess.run(argv, env=env, capture_output=True, timeout=CHILD_TIMEOUT_SECONDS,
+                              check=False, stdin=subprocess.DEVNULL,
+                              creationflags=win_spawn.NO_WINDOW).returncode
+    except (OSError, subprocess.SubprocessError):
+        return 127
+
+
 def fire_early(sid: str, marker: dict, verdict: dict, env, now: datetime, S: dict) -> str:
-    """走 `park_cli._cmd_fire(early=True)`；回標記的結局狀態（fired／skipped／failed／refused）。
-    成功（fired）才落 `park_early_recovered`（`saved_min`＝距原 `fire_at` 的分鐘數）。事後把磁碟上
-    標記的重排次數欄還原成呼叫前的值（early 只是借用該欄停用分支 A，不留痕在終態標記上）。"""
-    from . import park_cli  # noqa: PLC0415
+    """以排程同 argv 起 `park --fire` 子行程（環境：拿掉 `AUTOSDD_UNATTENDED`、加 `EARLY_ENV`，
+    換帳號再加 `FORCE_COLD_ENV`）；回標記的結局（fired／skipped／failed／refused；armed＝子行程
+    沒動標記）。成功（fired）才落 `park_early_recovered`（`saved_min`＝距原 `fire_at` 的分鐘數）。
+    事後把磁碟上標記的重排次數欄還原成呼叫前的值（early 借用該欄停用分支 A，不留痕在終態標記）。
+    縫：`S["run_job"](argv, env) -> rc`（測試以行程內 `park_cli.run` 代替真子行程）。"""
+    from . import park_cli, park_yield  # noqa: PLC0415
 
     job = next(j for j in marker["jobs"] if j.get("role") == "primary")
-    opts = argparse.Namespace(job=job["label"], pkg=marker["pkg"], fire_at=marker["fire_at"],
-                              claude=marker.get("claude"), early=True)
-    seams = dict(S, clock=S.get("clock") or (lambda: now))
-    key = "reschedules"
+    claude = marker.get("claude")
+    argv = park_cli.job_argv(job["label"], sid, marker["pkg"],
+                             datetime.fromisoformat(marker["fire_at"]),
+                             ["--claude", claude] if claude else [])
+    child = {k: v for k, v in env.items() if k != park.UNATTENDED_ENV}
+    child[parkprobe.EARLY_ENV] = "1"
+    if verdict["account_changed"]:
+        child[park.FORCE_COLD_ENV] = "1"
+    key = park_yield.RESCHEDULES_KEY
     before = marker.get(key)
     try:
-        if verdict["account_changed"]:
-            with park.force_cold():
-                park_cli._cmd_fire(opts, sid, env, seams, seams["clock"])  # noqa: SLF001
-        else:
-            park_cli._cmd_fire(opts, sid, env, seams, seams["clock"])  # noqa: SLF001
+        rc = (S.get("run_job") or _run_job)(argv, child)
+        if rc != 0:
+            switch.trace(EV_ERROR, sid=sid, error="child_rc", rc=rc)
     finally:
         final = park.read_marker(sid)
         if final is not None:

@@ -43,6 +43,7 @@ from test_sessionctl_park import (  # noqa: E402
 from lib.sessionctl import (  # noqa: E402
     briefline,
     park,
+    park_cli,
     park_status,
     park_yield,
     parkearly,
@@ -275,6 +276,7 @@ class _EarlyFence(_CliFence):
         self.spawned: list[Path] = []
         self.resumed: list[dict] = []
         self.quota_reads: list = []
+        self.jobs: list = []
         self.state = _keyed(_state(five=0.0, week=0.0), "acct-A")
         self.args = argparse.Namespace(
             plan=str(self.tmp / f"{quota_escalation.guard.PLAN_PREFIX}{SID}.md"))
@@ -295,10 +297,16 @@ class _EarlyFence(_CliFence):
                 raise state
             return state
 
-        return {"quota": quota, "policy": _policy, "backend": self.backend, "spawn": spawn,
+        def run_job(argv, env):
+            """真子行程的行程內替身：解回排程同 argv（`python sessionctl.py park --fire …`）呼叫 CLI。"""
+            self.jobs.append((list(argv), dict(env)))
+            return park_cli.run(argv[2:], env=env, now=NOW, seams=base)
+
+        base = {"quota": quota, "policy": _policy, "backend": self.backend, "spawn": spawn,
                 "resume": resume, "platform": "win32", "preflight": lambda *_a, **_k: [],
                 "transcript": lambda _s: self.transcript, "notify": lambda *_a: 0,
-                "sessions_dir": self.tmp / "sessions", **extra}
+                "sessions_dir": self.tmp / "sessions"}
+        return {**base, "run_job": run_job, **extra}
 
     def tick(self, now=NOW, env=None, **extra):
         return parkearly.tick(self.args, now, self.seams(**extra), env={**self.env, **(env or {})})
@@ -343,11 +351,12 @@ class TickFiresThroughTheQ3PathTest(_EarlyFence):
     def test_at_ctl_62_force_cold_makes_a_mid_sized_context_pick_fresh(self) -> None:
         small, big = 20_000, 900_000
         self.assertEqual(park.fire_route(small, False)[0], park.FIRE_RESUME)
-        with park.force_cold():
-            self.assertEqual(park.fire_route(small, False)[0], park.FIRE_RESUME)
-            route, why = park.fire_route(big, False)
-            self.assertEqual(route, park.FIRE_FRESH)
-            self.assertTrue(why.startswith("account_changed"))
+        forced = {park.FORCE_COLD_ENV: "1"}
+        self.assertEqual(park.fire_route(small, False, forced)[0], park.FIRE_RESUME)
+        route, why = park.fire_route(big, False, forced)
+        self.assertEqual(route, park.FIRE_FRESH)
+        self.assertTrue(why.startswith("account_changed"))
+        self.assertEqual(park.fire_route(big, False, {})[0], park.FIRE_RESUME)
         self.assertEqual(park.fire_route(big, False)[0], park.FIRE_RESUME, "快取仍熱 ⇒ 續跑只付讀價")
         self.assertFalse(park.fire_route(small, False)[1].startswith("account_changed"))
 
@@ -355,13 +364,13 @@ class TickFiresThroughTheQ3PathTest(_EarlyFence):
         row = {"pid": 4242, "sid": SID, **qw_schema.holder_extra(
             (NOW + timedelta(minutes=5)).timestamp(), "chain", "reset")}
         S = {"holder": lambda _s: row, "holder_live": lambda _r: True}
-        opts = argparse.Namespace(early=True)
+        env = {parkprobe.EARLY_ENV: "1"}
         normal = park_yield.decide(SID, self.marker, {}, S, lambda: NOW, lambda _s: None)
         self.assertEqual(normal["act"], "rearm", "非 early：主載具活著且未到 ⇒ 重排（舊行為逐字不變）")
-        early = park_yield.decide(SID, parkprobe.early_view(self.marker, opts), {}, S,
+        early = park_yield.decide(SID, parkprobe.early_view(self.marker, env), {}, S,
                                   lambda: NOW, lambda _s: None)
         self.assertEqual((early["act"], early["reason"]), ("go", "yield_exhausted"))
-        self.assertIs(parkprobe.early_view(self.marker, argparse.Namespace()), self.marker)
+        self.assertIs(parkprobe.early_view(self.marker, {}), self.marker)
         self.assertNotIn(park_yield.RESCHEDULES_KEY, self.marker, "early_view 只改記憶體副本")
 
     def test_the_reschedule_counter_on_disk_is_restored_after_an_early_fire(self) -> None:
@@ -414,6 +423,58 @@ class TickFiresThroughTheQ3PathTest(_EarlyFence):
                          ("hold", 95.0, 100.0, False))
 
 
+class ChildProcessContractTest(_EarlyFence):
+    """tools/lib/sessionctl/parkearly.py::fire_early／_run_job：到點子行程的 argv 與環境契約。
+    WHY：planner 對 `--sentinel-tick` 強制 `AUTOSDD_UNATTENDED=1`（DEF-200-272），行程內呼叫會被
+    `park_fire`／`handoff.spawn` 的無人旗標擋下；所以必須是「排程同 argv、乾淨環境」的子行程。"""
+
+    def test_a_forced_unattended_flag_in_the_tick_does_not_block_the_probe_nor_reach_the_child(
+            self) -> None:
+        verdict = self.tick(env={park.UNATTENDED_ENV: "1"})
+        self.assertEqual(verdict["fired"], "fired")
+        argv, child_env = self.jobs[0]
+        self.assertNotIn(park.UNATTENDED_ENV, child_env)
+        self.assertEqual(self.spawned, [self.pkg])
+
+    def test_the_child_argv_is_the_scheduled_job_argv_plus_the_registered_claude(self) -> None:
+        park.write_marker(dict(self.marker, claude=str(Path("x") / "fake-claude")))
+        self.tick()
+        argv, _env = self.jobs[0]
+        want = park_cli.job_argv(LABEL, SID, self.pkg, FIRE_AT, ["--claude", str(Path("x") / "fake-claude")])
+        self.assertEqual(argv, want)
+        self.assertEqual(argv[2:4], ["park", "--fire"])
+
+    def test_the_child_env_carries_early_and_force_cold_only_for_an_account_change(self) -> None:
+        self.tick()
+        _argv, env = self.jobs[0]
+        self.assertEqual((env.get(parkprobe.EARLY_ENV), park.FORCE_COLD_ENV in env), ("1", False))
+        park.write_marker(self.marker)
+        self.backend.jobs.add(LABEL)
+        self.state = _keyed(_state(five=0.0, week=0.0), "acct-B")
+        self.tick()
+        _argv, env = self.jobs[1]
+        self.assertEqual((env.get(parkprobe.EARLY_ENV), env.get(park.FORCE_COLD_ENV)), ("1", "1"))
+
+    def test_a_child_that_cannot_start_leaves_the_marker_armed_and_is_traced(self) -> None:
+        with mock.patch.object(parkearly.subprocess, "run", side_effect=OSError("找不到")):
+            verdict = self.tick(run_job=parkearly._run_job)  # noqa: SLF001
+        self.assertEqual(verdict["fired"], "armed")
+        self.assertEqual(park.read_marker(SID)["status"], "armed")
+        errs = [t for t in self.traces() if t["event"] == parkearly.EV_ERROR]
+        self.assertEqual((errs[0]["error"], errs[0]["rc"]), ("child_rc", 127))
+        self.assertEqual(self.recovered_events(), [])
+
+    def test_the_real_runner_is_windowless_bounded_and_closes_stdin(self) -> None:
+        import win_spawn
+        with mock.patch.object(parkearly.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            self.assertEqual(parkearly._run_job(["x"], {"A": "1"}), 0)  # noqa: SLF001
+        kw = run.call_args.kwargs
+        self.assertEqual((kw["creationflags"], kw["timeout"], kw["env"], kw["check"]),
+                         (win_spawn.NO_WINDOW, parkearly.CHILD_TIMEOUT_SECONDS, {"A": "1"}, False))
+        self.assertIs(kw["stdin"], parkearly.subprocess.DEVNULL)
+
+
 class NegativeControlsTest(_EarlyFence):
     """tools/lib/sessionctl/parkearly.py::tick：不誤觸發（AT-CTL-60；REQ-CTL-37；MU-CTL-30／34）。
     每例只改一個條件、替身 spawn 必須 0 次。"""
@@ -446,9 +507,9 @@ class NegativeControlsTest(_EarlyFence):
                                          message={"model": "claude-fable-5"}) + "\n", encoding="utf-8")
         self.assert_silent()
 
-    def test_unattended_and_non_auto_mode(self) -> None:
-        self.assert_silent(env={"AUTOSDD_UNATTENDED": "1"})
+    def test_non_auto_mode(self) -> None:
         self.assert_silent(env={"AUTOSDD_SESSION_SWITCH_MODE": "notify"})
+        self.assert_silent(env={"AUTOSDD_SESSION_SWITCH_MODE": "off"})
 
     def test_reading_not_lower_or_barely_lower_or_still_above_prepare(self) -> None:
         for five in (100.0, 96.0, 90.0):  # 持平／降 4pp／降 10pp 但仍 ≥ 準備門檻 85
