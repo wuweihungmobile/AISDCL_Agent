@@ -271,16 +271,17 @@ def _transcript_or_none(sid: str, env):
 
 def _fire_route(transcript, env, now: datetime) -> tuple[str, str, int | None]:
     """到點選路（`park.fire_route`）：讀上下文與快取冷熱；任何讀取問題 ⇒ 量不到 ⇒ FRESH。"""
-    from . import cachestate, roster  # noqa: PLC0415 — lazy：只有 job 本體需要
+    from . import cachestate, roster, switch, switchfacts  # noqa: PLC0415 — lazy：只有 job 本體需要
 
-    held, cold = None, False
+    held, cold, k = None, False, 0
     try:
         if transcript is not None and Path(transcript).is_file():
             held = roster._scan(Path(transcript), False).get("ctx_tokens")
             cold = bool(cachestate.cache_state(transcript, now).get("cold"))
+            k = switchfacts.compactions(transcript)  # R2：壓縮次數 → prefer_fresh
     except Exception:  # noqa: BLE001 — 讀不動不等於可以續跑，走既有交接包路
         held = None
-    route, why = park.fire_route(held, cold, env)
+    route, why = park.fire_route(held, cold, env, prefer_fresh=k >= switch.threshold(switch.R2_KEY, env)[0])  # noqa: E501
     return route, why, held
 
 

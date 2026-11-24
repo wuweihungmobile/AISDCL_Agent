@@ -65,10 +65,14 @@ def park_route(wait_s: float | None, *, unattended: bool, mode: str,
 FORCE_COLD_ENV = "AUTOSDD_PARK_FORCE_COLD"
 
 
-def fire_route(held: int | float | None, cold: bool, env=None) -> tuple[str, str]:
+def fire_route(held: int | float | None, cold: bool, env=None, *,
+               prefer_fresh: bool = False) -> tuple[str, str]:
     """到點（reset 後）怎麼接手：回 `(FIRE_RESUME | FIRE_FRESH, 理由)`（R216 設計 §4.6、F4）。
     `env[FORCE_COLD_ENV]=="1"`（換帳號提前到點）⇒ `cold` 一律為真，理由前綴 `account_changed`
-    （REQ-CTL-34）。"""
+    （REQ-CTL-34）。`prefer_fresh`（R2：壓縮次數達門檻，Control DES §7.2 旗標、REQ-CTL-22）⇒ 一律
+    FRESH（摘要疊摘要的品質訊號，與快取冷熱、成本無關）。"""
+    if prefer_fresh:
+        return FIRE_FRESH, "R2 壓縮次數已達門檻（prefer_fresh）⇒ 換新 session，不續疊摘要"
     forced = (env or {}).get(FORCE_COLD_ENV) == "1"
     route, why = _fire_route(held, cold or forced, env)
     return route, (f"account_changed：{why}" if forced else why)
