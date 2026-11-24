@@ -416,6 +416,7 @@
 | DEF-200-643 | 2026-11-23 | S6 RV-SE18 FAIL（本欄刻意零輪號） | **沙盒清理失敗後身分檔寫回順序錯誤、abandoned 下 note 項未處置** | P2 | 修清理順序與 note 處置；RV-K5 宣告 150 分租約 | fixed：6f4a9a86（FIX2）；回歸 `test_realverify_*` 與真機 RV-SE18、RV-K5 PASS |
 | DEF-200-644 | 2026-11-23 | `test_check_pending_handoff` 7 案例隨真帳本內容變紅（本欄刻意零輪號） | **測試讀真 OIR 帳本的 capnote，不密閉** | P3 | 測試改密閉 | fixed：c720b865（FIX3） |
 | DEF-200-645 | 2026-11-23 | 2026-11-23 18:14 真 `~/.autosdd/handoff/sid-1_*.md` 出現（本欄刻意零輪號） | **測試把交接包寫進真 handoff 目錄**（明細見同證據檔〈DEF-200-645〉） | P2 | 沙箱圍 HANDOFF／TRACE 居所＋替身只計 claude 續跑＋防回歸 | fixed：FIX4（`test_model_roles`；真 handoff 檔數 127→127） |
+| DEF-200-646 | 2026-11-24 | 2026-11-24 W6 真行程 smoke（真 `--sentinel-tick` 子行程）讀不到 park 標記（本欄刻意零輪號） | **哨兵以任務書檔名 `autosdd_resume_plan_<sid>` 當 sid 查 park 標記**：標記以裸 sid 為鍵，QW §7.6 `on_patrol(plan.stem, …)` 在真行程永遠查不到＝死碼；單元測試以裸 sid 當檔名故未抓到 | P2 | 去 `PLAN_PREFIX` 後再查（探針與 `on_patrol` 同一處）＋規劃器接線測試用真檔名 | fixed：W6（`fb1491df`；`test_sessionctl_parkprobe`；設計 Control_Handover_Design.md §23 第 6 點） |
 
 > **R41「四方複審裁決總結」敘事段落已搬遷至 [`AutoSDD_Defect_Log_archive_17.md`](AutoSDD_Defect_Log_archive_17.md)（R43 帳本 housekeeping，逐字保全）。**
 
