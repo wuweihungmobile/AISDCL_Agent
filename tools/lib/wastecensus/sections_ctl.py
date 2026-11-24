@@ -357,8 +357,11 @@ def _takeover_gaps(packs: list[dict]) -> list[float]:
 
 def _prepare_pct(env) -> float:
     try:
+        import quota_gate  # noqa: PLC0415 — lazy
         import quota_policy  # noqa: PLC0415 — lazy
 
-        return float(quota_policy.load_policy(env if env is not None else {})[0].prepare_pct)
+        # 未指定 env ⇒ 與其他站點同走 `policy_env()`（含使用者層覆寫與戳記），不另造空 env
+        pol = quota_policy.load_policy(quota_gate.policy_env() if env is None else env)[0]
+        return float(pol.prepare_pct)
     except Exception:  # noqa: BLE001 — 讀不到 ⇒ 用出廠準備門檻
         return 85.0

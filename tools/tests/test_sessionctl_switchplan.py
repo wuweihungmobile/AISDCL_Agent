@@ -1,11 +1,12 @@
-"""tools/lib/sessionctl/switchplan.py（決策表）、switchfacts.py（事實）與 watch／advise／switch-plan 掛點。
+"""tools/lib/sessionctl/switchplan.py（決策表）、switchfacts.py（事實）
+與 watch／advise／switch-plan 掛點。
 
 W5（Control_Handover DES §7；TCS-Control AT-CTL-41～55、86）。
 WHY：換不換 session 的判準原本散在封存閘、park 停工閘、保溫閘與轉送條件 10，沒有一處能回答「此刻整體
 上該做什麼」；本檔證明 `decide` 是這些閘的**嚴格超集**——現行會推的地方它一定給對應動作，差異只在
 文件列出的四處（排空後換／防抖／換帳號 ⇒ 快取視為已冷／提前恢復）；並證明新增的 pending／switch_due
-只改提示、不新增任何推回，R2 session 零新增推回。縫：tmp 逐字稿與包目錄、`AUTOSDD_TRACE_DIR` 指 tmp、
-時鐘注入；不碰真實 `~/.claude`、`~/.autosdd`。
+只改提示、不新增任何推回，R2 session 零新增推回。縫：tmp 逐字稿與包目錄、
+`AUTOSDD_TRACE_DIR` 指 tmp、時鐘注入；不碰真實 `~/.claude`、`~/.autosdd`。
 """
 from __future__ import annotations
 
@@ -136,7 +137,8 @@ class DecideTableTest(unittest.TestCase):
 
     def test_debounce_boundary_and_non_takeover(self) -> None:
         """AT-CTL-45：29 ⇒ STAY(debounce)；31 ⇒ H 正常；W 不受限；非接手者（None）不受限。"""
-        self.check(switchplan.decide(_inp(ctx=HARD, since_takeover_min=29)), Action.STAY, "debounce")
+        self.check(switchplan.decide(_inp(ctx=HARD, since_takeover_min=29)),
+                   Action.STAY, "debounce")
         self.check(switchplan.decide(_inp(ctx=HARD, since_takeover_min=31)),
                    Action.SWITCH_NOW, "hard")
         self.check(switchplan.decide(_inp(ctx=HARD, since_takeover_min=None)),
@@ -215,8 +217,9 @@ class _GateFence(unittest.TestCase):
 
     def package(self, *, stamp: str | None = None, acker: str | None = None) -> Path:
         path = self.hdir / f"{SID}_20261124T000000Z.md"
-        path.write_text(f"# 交接包 <!-- sessionctl-handoff sid={SID} at=x -->\n\n## 機械層\n\n資料\n\n"
-                        f"{handoff.MAIN_MARK}\n\n{_FULL_MAIN}\n", encoding="utf-8")
+        path.write_text(f"# 交接包 <!-- sessionctl-handoff sid={SID} at=x -->\n\n"
+                        f"## 機械層\n\n資料\n\n{handoff.MAIN_MARK}\n\n{_FULL_MAIN}\n",
+                        encoding="utf-8")
         if stamp is not None:
             path.with_suffix(".sealed").write_text(stamp + "\n", encoding="utf-8")
         if acker is not None:
@@ -294,7 +297,8 @@ class ConsistencyWithTheCurrentGatesTest(_GateFence):
     def test_f_row_equals_the_f4_cost_judgement_with_a_carrier(self) -> None:
         n = 0
         for ctx, cache, sealed, changed in itertools.product(
-                (None, SMALL, BIG, HARD - 1), ("hot", "cold", "unknown"), self.SEALED, (False, True)):
+                (None, SMALL, BIG, HARD - 1), ("hot", "cold", "unknown"), self.SEALED,
+                (False, True)):
             got = switchplan.decide(Inputs(ctx=ctx, hard=HARD, cache=cache, sealed=sealed,
                                            account_changed=changed))
             cold = cache == "cold" or changed
@@ -395,10 +399,12 @@ class PendingTest(_GateFence):
         self.write_transcript(HARD)
         got = switchfacts.pending_state(SID, self.transcript, 2, self.env, base=self.base)
         self.assertEqual(got["reason"], "hard")
-        self.assertEqual(json.loads((self.base / f"{SID}.pending").read_text(encoding="utf-8"))["reason"], "hard")
+        pending = json.loads((self.base / f"{SID}.pending").read_text(encoding="utf-8"))
+        self.assertEqual(pending["reason"], "hard")
 
     def test_advise_once_traces_every_voice_and_only_once_per_reason(self) -> None:
-        """AT-CTL-49：每次出聲落 `switch_advise`（sid、reason、ctx、k、mode）；同 sid 第二次不再出聲。"""
+        """AT-CTL-49：每次出聲落 `switch_advise`（sid、reason、ctx、k、mode）；
+        同 sid 第二次不再出聲。"""
         self.write_transcript(HARD)
         guard = SimpleNamespace(read_context_feed=lambda *_a: {"used": HARD},
                                 scan_transcript=lambda *_a: (HARD, 0, 0),
@@ -427,7 +433,7 @@ class PendingTest(_GateFence):
                 if target.exists() else [])
 
 
-# ───────────────────────────────────────────────────────── watch switch_due（AT-CTL-51）與封存閘不變（AT-CTL-52）
+# ───────────────────────────────────────── watch switch_due（AT-CTL-51）與封存閘不變（AT-CTL-52）
 class WatchSwitchDueTest(_GateFence):
     def run_watch(self, rosters: list[list[dict]], ctx: int) -> tuple[int, str]:
         self.write_transcript(ctx)
@@ -463,12 +469,14 @@ class WatchSwitchDueTest(_GateFence):
         self.assertIn("finalize", out)
         self.assertIn("spawn", out)
         events = [json.loads(x)["event"] for x in
-                  (self.tdir / "autosdd_session_switch.jsonl").read_text(encoding="utf-8").splitlines()]
+                  (self.tdir / "autosdd_session_switch.jsonl")
+                  .read_text(encoding="utf-8").splitlines()]
         self.assertIn(control.EV_PENDING_SET, events)
         self.assertIn(control.EV_PENDING_DUE, events)
 
     def test_without_pending_the_old_verdicts_are_untouched(self) -> None:
-        """無 pending（ctx < hard）⇒ 代理交卷後 watch 照舊不因此結束（沒有 all_done，REQ-WP-30）。"""
+        """無 pending（ctx < hard）⇒ 代理交卷後 watch 照舊不因此結束
+        （沒有 all_done，REQ-WP-30）。"""
         _rc, out = self.run_watch([[self.AGENT], []], SMALL)
         verdict = out.strip().splitlines()[-1].split()[0]
         self.assertIn(verdict, ("WATCH_VERDICT=keepwarm", "WATCH_VERDICT=cap",
@@ -553,7 +561,8 @@ class SwitchPlanCliTest(_GateFence):
             self.assertEqual(statuscmd.switch_plan_cli([], env={}), 2)
 
     def test_real_process_smoke(self) -> None:
-        """真行程（E2E 形態）：`python tools/sessionctl.py switch-plan --json` 在 tmp 圍籬下 rc 0。"""
+        """真行程（E2E 形態）：`python tools/sessionctl.py switch-plan --json`
+        在 tmp 圍籬下 rc 0。"""
         self.write_transcript(SMALL)
         env = {**os.environ, "AUTOSDD_TRACE_DIR": str(self.tdir),
                "AUTOSDD_HANDOFF_DIR": str(self.hdir), "CLAUDE_CODE_SESSION_ID": SID}
@@ -566,8 +575,21 @@ class SwitchPlanCliTest(_GateFence):
         self.assertEqual(body["decision"]["action"], Action.STAY)
 
 
-# ───────────────────────────────────────────────────────── 負向與原始碼掃描（AT-CTL-48、54、55、73）
+# ───────────────────────────────────────────────── 負向與原始碼掃描（AT-CTL-48、54、55、73）
 _SESSIONCTL = _REPO_ROOT / "tools" / "lib" / "sessionctl"
+
+
+def _imported_names(path: Path) -> set[str]:
+    """該檔 import 進來的每個模組／名稱（`import a.b`、`from . import x`、`from a import b`）。"""
+    names: set[str] = set()
+    for n in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                names.update(a.name.split("."))
+        elif isinstance(n, ast.ImportFrom):
+            names.update((n.module or "").split("."))
+            names.update(a.name for a in n.names)
+    return names - {""}
 
 
 class StaticScansTest(unittest.TestCase):
@@ -595,11 +617,14 @@ class StaticScansTest(unittest.TestCase):
                                  msg=f"{path.name} 呼叫 spawn")
 
     def test_seal_does_not_import_switchplan_and_stop_path_has_no_ensure_pending(self) -> None:
-        """AT-CTL-86 末句：`seal.py` 不 import `switchplan`；封存閘 Stop 路徑不呼叫 `ensure_pending`。"""
+        """AT-CTL-86 末句：`seal.py` 不 import `switchplan`；
+        封存閘 Stop 路徑不呼叫 `ensure_pending`。"""
         for name in ("seal.py", "converge.py"):
-            text = (_SESSIONCTL / name).read_text(encoding="utf-8")
-            self.assertNotIn("ensure_pending", text)
-        self.assertNotIn("switchplan", (_SESSIONCTL / "seal.py").read_text(encoding="utf-8"))
+            tree = ast.parse((_SESSIONCTL / name).read_text(encoding="utf-8"))
+            calls = [ast.unparse(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)]
+            self.assertEqual([c for c in calls if c.split(".")[-1] == "ensure_pending"], [],
+                             msg=f"{name} 呼叫 ensure_pending")
+        self.assertEqual(_imported_names(_SESSIONCTL / "seal.py") & {"switchplan"}, set())
 
     def test_event_names_are_one_set_and_disjoint_from_quotawall(self) -> None:
         """AT-CTL-73：新痕跡事件名集中在 `control.CTL_EVENTS`，與 QW 的事件名集合不相交。"""
@@ -661,7 +686,8 @@ class FactsTest(_GateFence):
         self.assertIn("switch pending", control.segment_text(state))
         self.assertIn("pending_switch=yes(hard)", control.status_line(state))
         quiet = controlfacts.control_state({**payload, "background_tasks": []}, SID, self.env)
-        self.assertIsNotNone(quiet.pending_switch)  # 標記已存在；代理交卷不作廢（只有封存／交棒／壓縮）
+        # 標記已存在；代理交卷不作廢（只有封存／交棒／壓縮）
+        self.assertIsNotNone(quiet.pending_switch)
 
     def test_watch_duplicate_is_traced_next_to_the_verdict(self) -> None:
         from lib.sessionctl import watchlock  # noqa: PLC0415
@@ -672,7 +698,8 @@ class FactsTest(_GateFence):
                            roster_fn=lambda: [], out=out, pid=1, projects_dir=str(self.tmp))
         self.assertEqual(rc, 0)
         rows = [json.loads(x)["event"] for x in
-                (self.tdir / "autosdd_session_switch.jsonl").read_text(encoding="utf-8").splitlines()]
+                (self.tdir / "autosdd_session_switch.jsonl")
+                .read_text(encoding="utf-8").splitlines()]
         self.assertIn(control.EV_WATCH_DUPLICATE, rows)
 
     def test_takeover_minutes_come_from_the_ack_stamp_of_this_sid(self) -> None:
@@ -689,7 +716,7 @@ class RenderCutHasNoExecutableCallsTest(unittest.TestCase):
     def test_agentbrief_never_launches_anything(self) -> None:
         """AT-CTL-55：被切清單只含文字與指標；`agentbrief.py` 沒有 subprocess／claude 啟動。"""
         text = (_SESSIONCTL / "agentbrief.py").read_text(encoding="utf-8")
-        self.assertNotIn("subprocess", text)
+        self.assertEqual(_imported_names(_SESSIONCTL / "agentbrief.py") & {"subprocess"}, set())
         self.assertIsNone(re.search(r"Popen|os\.system|spawn\(", text))
 
 

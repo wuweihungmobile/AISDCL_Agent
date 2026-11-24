@@ -9,6 +9,7 @@ WHY：換手與掌控機制上線後，只能靠可重跑的數字回答「有�
 """
 from __future__ import annotations
 
+import ast
 import json
 import re
 import subprocess
@@ -52,7 +53,8 @@ def _main(sid: str, turns: list, compactions=()) -> dict:
 
 
 def _pop(mains=(), subs=(), **ctl) -> dict:
-    return {"schema": keep_load._SNAPSHOT_SCHEMA, "since_days": 14, "main": list(mains),  # noqa: SLF001
+    schema = keep_load._SNAPSHOT_SCHEMA  # noqa: SLF001
+    return {"schema": schema, "since_days": 14, "main": list(mains),
             "sub": list(subs), "ctl": {"packs": [], "parks": [], "burn": [], **ctl}}
 
 
@@ -134,13 +136,15 @@ class MC1Test(unittest.TestCase):
 # ───────────────────────────────────────────────────────── M-C2～M-C6（AT-CTL-74、88）
 class MC2to6Test(unittest.TestCase):
     def test_m_c2_counts_pasted_summaries_and_rereads_of_old_data(self) -> None:
-        human = lambda t, text: _rec(t, "user", ok="human", tool_result=False, text=text)  # noqa: E731
+        def human(t, text):
+            return _rec(t, "user", ok="human", tool_result=False, text=text)
         fresh = {"sid": "n1", "interactive": True, "recs": [
             human(0, "按交接包繼續：x"),
             dict(_assistant(1), reads=["/u/.autosdd/handoff/a.prompts.md", "git status"]),
             dict(_assistant(2), reads=["/u/.claude/projects/p/old.jsonl"]),
             dict(_assistant(90), reads=["a.prompts.md"])]}  # 第一小時之後不算
-        pasted = {"sid": "n2", "interactive": True, "recs": [human(0, "以下是上輪資訊 " + "x" * 10)]}
+        pasted = {"sid": "n2", "interactive": True,
+                  "recs": [human(0, "以下是上輪資訊 " + "x" * 10)]}
         got = sc.m_c2([fresh, pasted], ctl_load.OLD_DATA)
         self.assertEqual((got["pasted"], got["n_interactive"], got["machine_start"]), (1, 2, 1))
         self.assertEqual(got["reread_median"], 2)
@@ -249,10 +253,13 @@ class ReplayPlanTest(unittest.TestCase):
 
     def park(self, *, drop: bool, same_account: bool = False) -> dict:
         def burn(at_min: float, five: float, week: float, acct: str) -> dict:
-            return {"fp": [f"account={acct}", "five_hour", "seven_day"], "ts": _iso(_T0 + at_min * _MIN),
-                    "pct": {"five_hour": five, "session": five, "seven_day": week, "weekly_all": week,
+            return {"fp": [f"account={acct}", "five_hour", "seven_day"],
+                    "ts": _iso(_T0 + at_min * _MIN),
+                    "pct": {"five_hour": five, "session": five, "seven_day": week,
+                            "weekly_all": week,
                             "spend": 0.0}, "resets_at": {}}
-        rows = [burn(-10, 0, 100, "A"), burn(120, 0, 3 if drop else 100, "A" if same_account else "B")]
+        rows = [burn(-10, 0, 100, "A"),
+                burn(120, 0, 3 if drop else 100, "A" if same_account else "B")]
         marker = {"sid": "pppp", "parked_at": _iso(_T0), "fire_at": _iso(_T0 + 300 * _MIN)}
         return sc.replay_plan(_pop(parks=[marker], burn=rows))
 
@@ -269,12 +276,18 @@ class ReplayPlanTest(unittest.TestCase):
         self.assertEqual(self.row(self.park(drop=True, same_account=True), "park")["hits"], 1)
 
     def test_the_replay_uses_the_implementation_not_a_second_copy(self) -> None:
-        """AT-CTL-72 末句：`sections_ctl.py` 不複製判準——只呼叫 decide／parkprobe／costmodel 本體。"""
+        """AT-CTL-72 末句：`sections_ctl.py` 不複製判準——
+        只呼叫 decide／parkprobe／costmodel 本體。"""
         text = (_REPO / "tools/lib/wastecensus/sections_ctl.py").read_text(encoding="utf-8")
         for needle in ("switchplan.decide", "parkprobe.evaluate", "switchplan.Inputs"):
             self.assertIn(needle, text)
-        for forbidden in ("W_CC1", "fresh_total", "EARLY_DROP_PP", "prepare_pct <", "< policy"):
-            self.assertNotIn(forbidden, text)
+        tree = ast.parse(text)
+        idents = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)} | {
+            n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+        self.assertEqual(idents & {"W_CC1", "fresh_total", "EARLY_DROP_PP"}, set())
+        compared = {n.id for c in ast.walk(tree) if isinstance(c, ast.Compare)
+                    for n in ast.walk(c) if isinstance(n, ast.Name)}
+        self.assertEqual(compared & {"prepare_pct", "policy"}, set())  # 不自己比額度門檻
 
 
 # ───────────────────────────────────────────────────────── 入口（真行程；零 token）
