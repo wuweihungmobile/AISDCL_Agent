@@ -113,6 +113,24 @@ def quota_detail(fired: list[tuple], plan=None) -> str:
     return "；".join(parts) or "額度事件成立（短窗額度）"
 
 
+def due_merge(sid: str, transcript, agents: list, env, verdict, family: tuple):
+    """`switch_due`（DES §7.4；REQ-CTL-24）：回 `(有效 pending｜None, 合併後判決)`。代理全數交卷且有
+    有效硬線 pending ⇒ `("switch_due", 明細)`（只勝過「沒事」與保溫族）；否則判決逐字不變。
+    惰性建立 pending 也在這裡（watch 輪詢是 `ensure_pending` 的呼叫點之一）。"""
+    from . import switchfacts, switchplan  # noqa: PLC0415 — lazy：switchfacts 吃 park／quota 匯入鏈
+
+    pend, due = switchfacts.watch_state(sid, transcript, len(agents), env)
+    return pend, switchplan.merge(verdict, due, family)
+
+
+def due_suffix(sid: str, event: str, pend, agents: list) -> str:
+    """處置字尾：`switch_due` 落 `pending_switch_due` 痕跡；待換已逾 `DRAIN_MAX_MIN` 仍有在飛代理 ⇒
+    任一判決加一行提示（只改文字）。"""
+    from . import switchplan  # noqa: PLC0415 — lazy：同上
+
+    return switchplan.on_verdict(sid, event, pend, len(agents))
+
+
 class WakeCtl:
     """watch 持有保溫錨時的叫醒控制（見檔頭）。`start` 在取得保溫錨後呼叫一次。"""
 

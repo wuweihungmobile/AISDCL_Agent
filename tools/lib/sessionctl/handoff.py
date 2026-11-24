@@ -22,7 +22,7 @@ import resume_route
 import sandbox_scope
 
 from . import handoff_build as build
-from . import owned, switch
+from . import owned, switch, switchplan
 from .spawn_dedup import SPAWN_DEDUP_SECONDS, _duplicate_refusals, _new_files  # noqa: F401
 
 MAIN_MARK = "## 主控層"
@@ -198,6 +198,7 @@ def advise_once(session_id: str, transcript: Path | None, *, guard, env=None,
             return ""
         path = ensure_mechanical(sid, transcript, env=env, now=now, base=base, **seams)
         advised.write_text(now.isoformat(), encoding="utf-8")
+        switchplan.advise_hook(sid, hits, switch.switch_mode(env))  # REQ-CTL-29：落 switch_advise
     except OSError:
         return ""
     return ("🔴 本 session 上下文已到換窗線（" + "；".join(hits) + "）：\n"

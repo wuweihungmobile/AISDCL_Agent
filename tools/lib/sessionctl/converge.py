@@ -108,6 +108,10 @@ def _finalized_wake(payload: dict, env) -> str:
         return ""
     path = seal.wake_package(sid, env, payload.get("transcript_path"))
     if path is None:
+        row = seal.latest_package(sid, env)  # M-C1 分母：封存已失效而放行（A4 修後該推的不推）
+        if row is not None and row["state"] == "live" and seal.effective(
+                row["path"], payload.get("transcript_path")) == control.SEAL_INVALIDATED:
+            switch.trace(control.EV_COLD_WAKE_EXEMPT, sid=sid, tasks=len(live))
         return ""
     if seal.handed_over(sid, env) is None:
         # 封存有效、尚未交棒（DES §4.2，A4）：只列「非代理、非監督」的背景任務（`ci_wait` 等）。

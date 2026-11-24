@@ -56,6 +56,7 @@ DISPOSAL = {
     "quota": "估剩餘：代理快完成 ⇒ 重掛 watch（同一 reset 窗同一帶不會再觸發），等交卷後 封存→`park`；否則 TaskStop 全部 → 封存 → `park`（park 前置要求無在飛代理）",  # noqa: E501
     "resume": keepwarm.DISPOSAL["resume"],
     "handed_over": keepwarm.DISPOSAL["handed_over"],
+    "switch_due": "到換手點（硬線待換、在飛代理已全數交卷）：寫完交接包主控層 → `handoff --finalize <包>` → `--spawn`；不再派新代理",  # noqa: E501
     # 入口判決（不是 decide 的事件，ORDER 不含它）：同 sid 已有活 watch。
     "duplicate": "已有同 sid 的 watch 在掛：不需重掛，繼續本回合或結束回合",
 }
@@ -337,6 +338,8 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
             verdict = decide(agents, now, started, cfg, quota_hit, kw_anchor=anchor,
                              kw_enabled=holding, kw_due=wctl.due() if holding else None,
                              kw_verdict=lambda: wctl.classify(now, state, resolver))
+            pend, verdict = watch_wake.due_merge(sid, transcript(), agents, env, verdict,
+                                                 KEEPWARM_FAMILY)  # DES §7.4 switch_due
             if verdict is not None:
                 event, detail = verdict
                 extra: dict = {}
@@ -355,6 +358,7 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
                     how = watch_wake.quota_disposal(band) or how
                 print(f"處置：{how}", file=out)
                 out.write(cutvoice.watch_text(agents, sid, transcript(), projects_dir))  # CTL-20
+                out.write(watch_wake.due_suffix(sid, event, pend, agents))  # 待換逾期字尾
                 switch.trace(EV_WATCH_VERDICT, sid=sid, verdict=event, agents=len(agents), **extra)
                 print(f"WATCH_VERDICT={event} n={len(agents)}", file=out, flush=True)
                 return 0

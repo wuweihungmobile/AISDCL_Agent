@@ -128,6 +128,18 @@ def sealed_effective(stamp: str | None, transcript: object) -> str:
     return SEAL_INVALIDATED if worked else SEAL_EFFECTIVE
 
 
+# ───────────────────────────────────────────────────────── 痕跡事件名（DES §10；REQ-CTL-43）
+# 集中一處：與 QW 的事件名集合不相交（`test_sessionctl_switchplan.py` 斷言）；
+# 發射端 import 這裡的常數。
+EV_SWITCH_ADVISE, EV_SWITCH_PLAN = "switch_advise", "switch_plan"
+EV_PENDING_SET, EV_PENDING_DUE, EV_PENDING_CLEARED = (
+    "pending_switch_set", "pending_switch_due", "pending_switch_cleared")
+EV_WATCH_DUPLICATE, EV_COLD_WAKE_EXEMPT = "watch_duplicate", "control_cold_wake_exempt"
+EV_PARK_EARLY_PROBE, EV_PARK_EARLY_RECOVERED = "park_early_probe", "park_early_recovered"
+CTL_EVENTS = (EV_SWITCH_ADVISE, EV_SWITCH_PLAN, EV_PENDING_SET, EV_PENDING_DUE, EV_PENDING_CLEARED,
+              EV_WATCH_DUPLICATE, EV_PARK_EARLY_PROBE, EV_PARK_EARLY_RECOVERED, EV_COLD_WAKE_EXEMPT)
+
+
 # ───────────────────────────────────────────────────────── ControlState（DES §3.4）
 _SEALED_DISPLAY = {SEAL_NONE: "none", SEAL_UNREADABLE: "unknown",
                    SEAL_EFFECTIVE: "effective", SEAL_INVALIDATED: "ineffective"}
@@ -177,6 +189,11 @@ class ControlState:
     wall: bool = False
     park: dict | None = None
     unacked_pkg: str | None = None
+
+
+def sealed_raw(display: str) -> str:
+    """`ControlState.sealed` 顯示名 → `sealed_effective` 四值（一一對應；未知 ⇒ `unreadable`）。"""
+    return next((k for k, v in _SEALED_DISPLAY.items() if v == display), SEAL_UNREADABLE)
 
 
 def _count(value: object) -> int:

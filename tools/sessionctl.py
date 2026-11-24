@@ -2,6 +2,10 @@
 
 用法：python tools/sessionctl.py <子指令> [旗標]
   子指令：handoff|status|stop|advice|rush|park|watch|keepwarm|quotawall|runlong|waitfor|oldwin
+          |switch-plan
+  switch-plan [--sid] [--json]
+      換手決策表（唯讀、零 token；lib/sessionctl/switchplan；印 Inputs／Decision／reason／carrier／
+      credential，末行 `SWITCH_PLAN=<動作> reason=…`）
   quotawall [--sid] [--projects-dir]
       額度牆計畫（唯讀、零 token；lib/sessionctl/qw_cli；印 stage／R／V／L 與末行
       `QUOTAWALL_PLAN=`、`QUOTAWALL_TARGET=`）
@@ -97,6 +101,10 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(oldwin_sched.status_text())  # R217：舊窗重試排程與「只提醒」列
             sys.stdout.write(rv_orphans.status_line() + "\n")  # 真機驗證租約帳孤兒（只讀）
         return rc
+    if verb == "switch-plan":  # W5（DES §7、REQ-CTL-30）：換手決策表的唯讀重現（零 token）
+        from lib.sessionctl import statuscmd
+
+        return statuscmd.switch_plan_cli(rest)
     if verb == "oldwin":  # R217 §7.1：舊視窗有條件自動關閉的重試／回收入口
         from lib.sessionctl import oldwin_sched
 
@@ -127,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         return longwait.cli_runlong(rest) if verb == "runlong" else longwait.cli_waitfor(rest)
     sys.stderr.write("sessionctl: 用法錯誤：子指令須為 "
                      "handoff／status／stop／advice／rush／park／watch／keepwarm／quotawall／"
-                     "runlong／waitfor／oldwin\n")
+                     "runlong／waitfor／oldwin／switch-plan\n")
     return _USAGE_RC
 
 

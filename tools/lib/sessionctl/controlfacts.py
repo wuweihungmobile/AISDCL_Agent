@@ -16,6 +16,7 @@ import re
 import threading
 import time
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from pathlib import Path
 
 import endurance_env
@@ -25,12 +26,16 @@ from . import (
     control,
     handoff,
     holder,
+    keepwarm,
     park,
     procstop,
     qw_schema,
     roster,
     seal,
     supervise,
+    switch,
+    switchfacts,
+    switchplan,
 )
 
 SEG_CACHE_TTL = 10.0   # 秒；DES §6.5
@@ -115,8 +120,8 @@ def _next_wake(sid: str, beat: dict | None, marker: dict | None, now: float) -> 
 
 def control_state(payload: Mapping | None = None, sid: str | None = None,
                   env: Mapping | None = None, now: float | None = None) -> control.ControlState:
-    """本 session 的控制態（DES §3.4 全欄位）。`pending_switch`／`wall` 由後續工作包（W5／QW）接上，
-    此處恆為 `None`／`False`（誠實：沒有來源就不猜）。"""
+    """本 session 的控制態（DES §3.4 全欄位）。`pending_switch` 由 W5 的 `switchfacts.pending_state`
+    供應（惰性建立）；`wall` 由 QW 接上，此處恆為 `False`（誠實：沒有來源就不猜）。"""
     payload = payload if isinstance(payload, Mapping) else {}
     env = os.environ if env is None else env
     at = time.time() if now is None else now
@@ -135,12 +140,50 @@ def control_state(payload: Mapping | None = None, sid: str | None = None,
                            if r["state"] == "live" and r["sid"] != str(sid)], [])
     park_row = ({"status": marker.get("status"), "primary": wake if carrier == "park" else None}
                 if isinstance(marker, dict) else None)
+    pending = switchfacts.pending_state(  # W5：惰性建立＋有效性（DES §7.4 兩個呼叫點之一）
+        str(sid), transcript, running + quiet, env, datetime.fromtimestamp(at).astimezone())
     return control.classify(control.Facts(
         sid=str(sid), agents_running=running, agents_quiet=quiet, agents_cut=tuple(cut),
         supervision=cred, supervision_source=source, supervision_pid=pid, supervision_hb_age=age,
         next_wake=wake, next_wake_carrier=carrier, sealed=str(sealed),
-        handed_over=str(handed) if handed else None, park=park_row,
+        handed_over=str(handed) if handed else None, park=park_row, pending_switch=pending,
         unacked_pkg=str(live[-1]["path"]) if live else None))  # type: ignore[index]
+
+
+# ───────────────────────────────────────────────────────── 換手決策（DES §7；REQ-CTL-22、30）
+def plan(payload: Mapping | None = None, sid: str | None = None, env: Mapping | None = None,
+         now: datetime | None = None, S: Mapping | None = None, trace: bool = True):
+    """組出 `switchplan.Inputs`（全部取自既有真相源）並 `decide`；回 `(Inputs, Decision)`。
+    在飛代理＝running＋quiet（都還沒交卷）；`ensure_pending` 經 `control_state` 惰性建立；`trace`
+    為真時落 `switch_plan` 痕跡（非 STAY 與每 session 首次 STAY 理由）。"""
+    payload = payload if isinstance(payload, Mapping) else {}
+    env = os.environ if env is None else env
+    now = (now or datetime.now()).astimezone()
+    state = control_state(payload, sid, env, now.timestamp())
+    sid = state.sid
+    transcript = _guard(lambda: _transcript(payload, sid), None)
+    ctx = switchfacts.ctx_of(transcript)
+    tasks = roster._tasks(dict(payload))
+    busy = state.agents_running + state.agents_quiet > 0 or any(
+        str(t.get("status") or "running") == "running" for t in (tasks or []))
+    pending = state.pending_switch
+    inputs = switchplan.Inputs(
+        ctx=ctx, hard=switch.threshold(switch.HARD_CTX_KEY, env)[0],
+        compactions=switchfacts.compactions(transcript) if transcript else 0,
+        r2=switch.threshold(switch.R2_KEY, env)[0], cache=switchfacts.cache_of(transcript, now),
+        account_changed=switchfacts.account_changed(sid, now, S),
+        quota=switchfacts.quota_facts(sid, transcript, env, now, S),
+        agents=state.agents_running + state.agents_quiet, supervision=state.supervision,
+        mode=switch.switch_mode(env), unattended=bool(env.get("AUTOSDD_UNATTENDED")),
+        since_takeover_min=switchfacts.takeover_min(sid, env, now),
+        sealed=control.sealed_raw(state.sealed), handed_over=bool(state.handed_over),
+        pending_age_min=switchplan.age_min(pending, now),
+        keepwarm_ok=not busy and not _guard(lambda: keepwarm.skip_reason(sid, env, ctx=ctx), "x"),
+        env=env)
+    decision = switchplan.decide(inputs)
+    if trace:
+        switchplan.trace_plan(sid, decision)
+    return inputs, decision
 
 
 # ───────────────────────────────────────────────────────── statusLine 區段（DES §6.5）
