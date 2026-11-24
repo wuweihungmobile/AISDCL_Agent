@@ -24,8 +24,12 @@ EV_ERROR = "park_early_error"
 
 
 def _sid(args) -> str:
+    """哨兵任務書檔名是 `<PLAN_PREFIX><sid>.md`（`session_resume_planner` 的武裝路徑）；park 標記以
+    裸 sid 為鍵，所以先去前綴（不去就永遠讀不到標記——真行程 smoke 才抓得到的接線錯誤）。"""
+    import quota_escalation  # noqa: PLC0415
+
     plan = getattr(args, "plan", None)
-    stem = Path(str(plan)).stem if plan else ""
+    stem = Path(str(plan)).stem.removeprefix(quota_escalation.guard.PLAN_PREFIX) if plan else ""
     return stem if park._SID_RE.match(stem) else ""  # noqa: SLF001
 
 

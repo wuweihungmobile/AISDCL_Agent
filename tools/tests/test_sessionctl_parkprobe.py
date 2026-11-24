@@ -27,6 +27,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "tools"))
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 
+import quota_escalation  # noqa: E402
 import quota_policy  # noqa: E402
 from test_sessionctl_park import (  # noqa: E402
     NOW,
@@ -275,7 +276,8 @@ class _EarlyFence(_CliFence):
         self.resumed: list[dict] = []
         self.quota_reads: list = []
         self.state = _keyed(_state(five=0.0, week=0.0), "acct-A")
-        self.args = argparse.Namespace(plan=str(self.tmp / f"{SID}.md"))
+        self.args = argparse.Namespace(
+            plan=str(self.tmp / f"{quota_escalation.guard.PLAN_PREFIX}{SID}.md"))
 
     def seams(self, **extra) -> dict:
         def spawn(path, **_kw):
@@ -525,6 +527,46 @@ class BriefLineTest(_Fence):
         with mock.patch.object(briefline, "orphan_line", return_value=" A"), \
                 mock.patch.object(briefline, "park_probe_line", return_value=" B"):
             self.assertEqual(briefline.lines(SID, {}), " A B")
+
+
+class PlannerWiringTest(_Fence):
+    """tools/session_resume_planner.py::_sentinel_tick：探針接線（AT-CTL-59；REQ-CTL-31；MU-CTL-32）。
+    任務書檔名帶 `PLAN_PREFIX`，park 標記以裸 sid 為鍵——兩個哨兵分支都必須去前綴。"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        import session_resume_planner as planner
+        self.planner = planner
+        plan = self.tmp / f"{planner.PLAN_PREFIX}{SID}.md"
+        self.args = planner.build_parser().parse_args(
+            ["--sentinel-tick", "--plan", str(plan), "--task-name", "T-w6"])
+
+    def test_both_probes_receive_the_bare_sid_after_the_gate_passes(self) -> None:
+        planner, seen = self.planner, {}
+        with mock.patch.object(planner.sched_isolation, "tick_gate", return_value=None), \
+                mock.patch.object(planner.sessionctl_takeover, "on_patrol",
+                                  side_effect=lambda sid, _log: seen.setdefault("takeover", sid)), \
+                mock.patch.object(parkearly.park, "read_marker",
+                                  side_effect=lambda sid: seen.setdefault("probe", sid) and None), \
+                mock.patch.object(planner, "append_log", side_effect=RuntimeError("stop")):
+            with self.assertRaises(RuntimeError):
+                planner._sentinel_tick(self.args)  # noqa: SLF001
+        self.assertEqual(seen, {"probe": SID, "takeover": SID})
+
+    def test_a_refused_gate_returns_before_the_probe_runs(self) -> None:
+        planner = self.planner
+        with mock.patch.object(planner.sched_isolation, "tick_gate", return_value=7), \
+                mock.patch.object(planner, "_schtasks_remove", return_value=0), \
+                mock.patch.object(planner.parkearly, "tick") as probe:
+            self.assertEqual(planner._sentinel_tick(self.args), 7)  # noqa: SLF001
+        probe.assert_not_called()
+
+    def test_a_probe_exception_never_kills_the_patrol(self) -> None:
+        park.write_marker(_early_marker(self.package()))
+        with mock.patch.object(parkearly.park, "_pace_state", side_effect=RuntimeError("x")):
+            self.assertIsNone(parkearly.tick(
+                self.args, NOW, {"transcript": lambda _s: self.tmp / "none.jsonl"}, env=self.env))
+        self.assertIn(parkearly.EV_ERROR, [t["event"] for t in self.traces()])
 
 
 class StatusLineCompatTest(unittest.TestCase):

@@ -1424,7 +1424,7 @@ def _sentinel_tick(args) -> int:
     plan = Path(args.plan or "unknown")
     log = endurance_log_path(plan)
     if (refused := sched_isolation.tick_gate(_REPO_ROOT, "_sentinel_tick", args.task_name, switch.trace)) is not None: _schtasks_remove(args.task_name); return refused  # noqa: E501,E701,E702 — DES S2 到點首判（巡邏只讀檔，exe 不判；探測分支交棒 `_resume_tick`，那裡帶 exe 再判）；在 `sentinel_woken` 之前，理由同 `_resume_tick`
-    parkearly.tick(args); sessionctl_takeover.on_patrol(plan.stem, log)  # noqa: E702 — W6 park 提前恢復探針（tick_gate 之後、sentinel_decide 之前；LOC 餘裕 0 故併一行）；QW §7.6：先於 sentinel_woken（讀上次巡邏）
+    parkearly.tick(args); sessionctl_takeover.on_patrol(plan.stem.removeprefix(PLAN_PREFIX), log)  # noqa: E702,E501 — W6 park 提前恢復探針（tick_gate 之後、sentinel_decide 之前；LOC 餘裕 0 故併一行）；QW §7.6：先於 sentinel_woken（讀上次巡邏）
     append_log(log, "sentinel_woken", plan=str(plan))
     try:
         text, read_fault = (plan.read_text(encoding="utf-8") if plan.is_file() else ""), ""
