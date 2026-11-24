@@ -72,7 +72,7 @@ def _keyed(state, key: str | None):
     return dataclasses.replace(state, account_key=key)
 
 
-class EvaluateTest(_Fence):
+class EvaluateTest(_Fence, unittest.TestCase):
     """tools/lib/sessionctl/parkprobe.py::evaluate、park.py::recovered：提前恢復判準
     （AT-CTL-56／57；REQ-CTL-32／37；MU-CTL-30／31）。"""
 
@@ -128,7 +128,7 @@ class EvaluateTest(_Fence):
         self.assertEqual((verdict["recovered"], verdict["account_changed"]), (True, False))
 
 
-class BaselineAndMarkerTest(_CliFence):
+class BaselineAndMarkerTest(_CliFence, unittest.TestCase):
     """tools/lib/sessionctl/park_cli.py::_cmd_park＋parkprobe.baseline：基準欄寫入與往返
     （AT-CTL-58／68；REQ-CTL-32／36）。"""
 
@@ -321,7 +321,7 @@ class _EarlyFence(_CliFence):
         return [t for t in self.traces() if t["event"] == parkprobe.EV_RECOVERED]
 
 
-class TickFiresThroughTheQ3PathTest(_EarlyFence):
+class TickFiresThroughTheQ3PathTest(_EarlyFence, unittest.TestCase):
     """tools/lib/sessionctl/parkearly.py::tick／fire_early：讀數降到門檻下 ⇒ 走既有 `_cmd_fire`
     （AT-CTL-59／61／62／63／64；REQ-CTL-31／33／34／37；MU-CTL-32～36）。"""
 
@@ -426,7 +426,7 @@ class TickFiresThroughTheQ3PathTest(_EarlyFence):
         self.assertEqual(got, ("hold", 95.0, 100.0, False))
 
 
-class ChildProcessContractTest(_EarlyFence):
+class ChildProcessContractTest(_EarlyFence, unittest.TestCase):
     """tools/lib/sessionctl/parkearly.py::fire_early／_run_job：到點子行程的 argv 與環境契約。
     WHY：planner 對 `--sentinel-tick` 強制 `AUTOSDD_UNATTENDED=1`（DEF-200-272），行程內呼叫會被
     `park_fire`／`handoff.spawn` 的無人旗標擋下；所以必須是「排程同 argv、乾淨環境」的子行程。"""
@@ -479,7 +479,7 @@ class ChildProcessContractTest(_EarlyFence):
         self.assertIs(kw["stdin"], parkearly.subprocess.DEVNULL)
 
 
-class NegativeControlsTest(_EarlyFence):
+class NegativeControlsTest(_EarlyFence, unittest.TestCase):
     """tools/lib/sessionctl/parkearly.py::tick：不誤觸發（AT-CTL-60；REQ-CTL-37；MU-CTL-30／34）。
     每例只改一個條件、替身 spawn 必須 0 次。"""
 
@@ -552,7 +552,7 @@ class NegativeControlsTest(_EarlyFence):
         self.assertIsNone(parkearly.tick(argparse.Namespace(), NOW, {}, env={}))
 
 
-class BriefLineTest(_Fence):
+class BriefLineTest(_Fence, unittest.TestCase):
     """tools/lib/sessionctl/parkprobe.py::brief_line／briefline.py：連續 3 次量不到 ⇒ SessionStart
     出聲（AT-CTL-66；REQ-CTL-35）。"""
 
@@ -594,7 +594,7 @@ class BriefLineTest(_Fence):
             self.assertEqual(briefline.lines(SID, {}), " A B")
 
 
-class PlannerWiringTest(_Fence):
+class PlannerWiringTest(_Fence, unittest.TestCase):
     """tools/session_resume_planner.py::_sentinel_tick：探針接線（AT-CTL-59；REQ-CTL-31）。
     任務書檔名帶 `PLAN_PREFIX`，park 標記以裸 sid 為鍵——兩個哨兵分支都必須去前綴。"""
 
