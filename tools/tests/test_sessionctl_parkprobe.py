@@ -1,0 +1,539 @@
+#!/usr/bin/env python3
+"""`tools/lib/sessionctl/parkprobe.py`／`parkearly.py` 的驗收測試（Control_Handover W6；TCS-Control
+AT-CTL-56～69、MU-CTL-30～37）。
+
+WHY（2026-11-22 真事件）：`65389f03` 週額度 100% ⇒ `park --at` 到 11/24 19:03；掌舵者換帳號後讀數已回
+0%，但等待期間沒有任何元件重讀額度，只能靠人手開窗。所以：
+- 判準＝「相對登記當下的下降」＋「低於準備門檻」，絕對值低不觸發（`park --why` 的 80%→80% 不誤觸發）；
+- 提前到點走 Q3 的同一條 fire 路（讓路、失敗鏈、出聲照常），只停用「主載具活著且未到 ⇒ 重排」；
+- 任何前置不成立、量不到讀數、已觸發過，一律不觸發；探針本身的例外不得讓哨兵巡邏死掉。
+
+縫：S["quota"]（假額度）、S["policy"]、S["transcript"]（假逐字稿）、S["backend"]／spawn／resume（假排程
+與假 spawn）。不碰真排程器、真 `~/.claude`、真 `~/.autosdd`。
+"""
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import json
+import os
+import sys
+import unittest
+from datetime import timedelta
+from pathlib import Path
+from unittest import mock
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT / "tools"))
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
+
+import quota_policy  # noqa: E402
+from test_sessionctl_park import (  # noqa: E402
+    NOW,
+    SID,
+    _CliFence,
+    _Fence,
+    _line,
+    _marker,
+    _policy,
+    _state,
+)
+
+from lib.sessionctl import (  # noqa: E402
+    briefline,
+    park,
+    park_status,
+    park_yield,
+    parkearly,
+    parkprobe,
+    qw_schema,
+)
+
+FIRE_AT = NOW + timedelta(hours=3)  # 剩餘等待 3 小時，遠大於 EARLY_MIN_WAIT_MIN
+LABEL = "AutoSDD_HandoffSpawn_798a7bf1_202611152002"
+
+
+def _early_marker(pkg=None, **over) -> dict:
+    """一份「等 3 小時、登記時讀數 100%、帳號 acct-A」的 armed park 標記。"""
+    marker = dict(_marker("H"), pkg=str(pkg) if pkg else None, parked_pct=100.0,
+                  parked_account="acct-A", fire_at=FIRE_AT.isoformat(),
+                  valid_until=(FIRE_AT + timedelta(seconds=park.YIELD_GRACE_SECONDS)).isoformat(),
+                  **qw_schema.marker_extra(FIRE_AT.timestamp(), "at", FIRE_AT.timestamp(), False, None))
+    marker["jobs"][0].update(label=LABEL, fire_at=FIRE_AT.isoformat())
+    marker.update(over)
+    return marker
+
+
+def _keyed(state, key: str | None):
+    return dataclasses.replace(state, account_key=key)
+
+
+class EvaluateTest(_Fence):
+    """tools/lib/sessionctl/parkprobe.py::evaluate、park.py::recovered：提前恢復判準
+    （AT-CTL-56／57；REQ-CTL-32／37；MU-CTL-30／31）。"""
+
+    def test_at_ctl_56_recovered_truth_table(self) -> None:
+        for parked, cur, prepare, want in (
+                (100, 0, 85, True), (100, 96, 85, False), (90, 86, 85, False), (90, 84, 85, True),
+                (80, 79, 85, False), (80, 80, 85, False)):
+            with self.subTest(parked=parked, cur=cur, prepare=prepare):
+                marker = dict(_marker("H"), parked_pct=float(parked))
+                got = park.recovered(marker, _state(five=cur, week=cur), _policy(prepare), NOW)
+                self.assertIs(got, want)
+
+    def test_at_ctl_56_missing_baseline_never_recovers(self) -> None:
+        self.assertFalse(park.recovered(_marker("H"), _state(five=0, week=0), _policy(), NOW))
+
+    def test_the_drop_threshold_is_exactly_five_pp(self) -> None:
+        marker = dict(_marker("H"), parked_pct=90.0)
+        self.assertTrue(park.recovered(marker, _state(five=85.0 - 0.1, week=0), _policy(86), NOW))
+        self.assertFalse(park.recovered(marker, _state(five=85.1, week=0), _policy(99), NOW))
+
+    def test_reading_ignores_model_scoped_and_fallback_axes(self) -> None:
+        resets = (NOW + timedelta(hours=1)).isoformat()
+        axes = (quota_policy.Axis("five_hour", 3.0, resets),
+                quota_policy.Axis("seven_day", 2.0, resets),
+                quota_policy.Axis("weekly_scoped", 99.0, resets, scope_model="Fable"))
+        self.assertEqual(parkprobe.reading(_state(axes=axes)), 3.0)
+        self.assertIsNone(parkprobe.reading(_state(axes=())))
+
+    def test_at_ctl_57_old_marker_without_baseline_says_so_and_is_not_judged(self) -> None:
+        verdict = parkprobe.evaluate(_marker("H"), None, None, NOW)
+        self.assertEqual((verdict["reason"], verdict["recovered"]),
+                         (parkprobe.REASON_NO_BASELINE, False))
+        self.assertEqual(parkprobe.status_row(_marker("H")), "early_probe: absent(no_baseline)")
+
+    def test_an_empty_axis_set_is_unmeasured_not_recovered(self) -> None:
+        verdict = parkprobe.evaluate(_early_marker(), _state(axes=()), _policy(), NOW)
+        self.assertEqual((verdict["reason"], verdict["recovered"]),
+                         (parkprobe.REASON_UNMEASURED, False))
+
+    def test_account_changed_needs_both_sides_and_a_difference(self) -> None:
+        marker = _early_marker()
+        self.assertTrue(parkprobe.account_changed(marker, "acct-B"))
+        for then, now in (("acct-A", "acct-A"), ("acct-A", None), (None, "acct-B"), ("", "acct-B")):
+            with self.subTest(then=then, now=now):
+                self.assertFalse(parkprobe.account_changed(
+                    dict(marker, **{parkprobe.MK_PARKED_ACCOUNT: then}), now))
+        self.assertFalse(parkprobe.account_changed(None, "acct-B"))
+
+    def test_at_ctl_87_an_old_marker_without_parked_account_can_still_recover_by_drop(self) -> None:
+        marker = {k: v for k, v in _early_marker().items() if k != parkprobe.MK_PARKED_ACCOUNT}
+        verdict = parkprobe.evaluate(marker, _keyed(_state(five=0, week=0), "acct-B"),
+                                     _policy(), NOW)
+        self.assertEqual((verdict["recovered"], verdict["account_changed"]), (True, False))
+
+
+class BaselineAndMarkerTest(_CliFence):
+    """tools/lib/sessionctl/park_cli.py::_cmd_park＋parkprobe.baseline：基準欄寫入與往返
+    （AT-CTL-58／68；REQ-CTL-32／36）。"""
+
+    def test_at_ctl_58_park_registration_writes_the_two_baseline_fields(self) -> None:
+        self.quota = lambda _n: _keyed(_state(five=98.0, week=78.0), "acct-A")
+        rc, _out, err = self.run_cli()
+        self.assertEqual(rc, 0, err)
+        marker = park.read_marker(SID)
+        self.assertEqual((marker[parkprobe.MK_PARKED_PCT], marker[parkprobe.MK_PARKED_ACCOUNT]),
+                         (98.0, "acct-A"))
+
+    def test_baseline_takes_the_max_over_short_and_weekly_axes_excluding_scoped(self) -> None:
+        state = _keyed(_state(five=10.0, week=70.0), "acct-A")
+        self.assertEqual(parkprobe.baseline({"quota": lambda _n: state}, NOW),
+                         {"parked_pct": 70.0, "parked_account": "acct-A"})
+
+    def test_an_unmeasurable_baseline_is_omitted_and_never_breaks_registration(self) -> None:
+        def boom(_n):
+            raise OSError("端點 500")
+        self.assertEqual(parkprobe.baseline({"quota": boom}, NOW), {})
+        self.assertEqual(parkprobe.baseline({"quota": lambda _n: _state(axes=())}, NOW), {})
+        self.quota = lambda _n: _state(axes=())
+        rc, _out, _err = self.run_cli("--at", (NOW + timedelta(minutes=30)).isoformat(),
+                                      "--why", "週額度停工到時間再接手")
+        self.assertEqual(rc, 0)
+        self.assertNotIn(parkprobe.MK_PARKED_PCT, park.read_marker(SID))
+
+    def test_an_unkeyed_account_is_recorded_as_null_not_dropped(self) -> None:
+        self.assertEqual(parkprobe.baseline({"quota": lambda _n: _state()}, NOW)["parked_account"],
+                         None)
+
+    def test_baseline_fields_survive_write_read_and_settling(self) -> None:
+        marker = _early_marker()
+        self.assertTrue(park.write_marker(marker)[0])
+        self.assertEqual(park.read_marker(SID), marker)
+        self.cli._settle(marker, "cancelled", "cancel")  # noqa: SLF001
+        after = park.read_marker(SID)
+        self.assertEqual((after["status"], after["parked_pct"], after["parked_account"]),
+                         ("cancelled", 100.0, "acct-A"))
+
+    def test_at_ctl_68_the_last_line_gains_exactly_one_token(self) -> None:
+        import sentinel_lifecycle
+        listed: list = []
+
+        def arm(sid, *_a):
+            listed.append(f"{sentinel_lifecycle.TASK_PREFIX}{sid}")
+            return 0
+        _rc, out, _err = self.run_cli(arm_sentinel=arm, jobs=lambda _p: list(listed))
+        last = out.strip().splitlines()[-1]
+        self.assertIn("sentinel=armed", last)
+        self.assertTrue(last.endswith(" early_probe=armed"), last)
+        _rc, out, _err = self.run_cli(env={"AUTOSDD_SENTINEL_OFF": "1"})
+        self.assertTrue(out.strip().splitlines()[-1].endswith(" early_probe=absent(sentinel_off)"))
+        _rc, out, _err = self.run_cli(arm_sentinel=lambda *a: 5, jobs=lambda _p: [])
+        self.assertTrue(out.strip().splitlines()[-1].endswith(" early_probe=absent(arm_rc_5)"))
+
+    def test_at_ctl_68_an_old_baseline_free_marker_reports_no_baseline_not_armed(self) -> None:
+        line = parkprobe.with_token(["hint", "PARK_VERDICT=armed"], _marker("H"), ("armed", ""))[-1]
+        self.assertTrue(line.endswith(" early_probe=absent(no_baseline)"), line)
+
+    def test_at_ctl_67_status_prints_the_early_probe_row_and_refused_markers_keep_all_rows(
+            self) -> None:
+        park.write_marker(_early_marker(self.pkg))
+        rc, out, _err = self.run_cli("--status")
+        self.assertEqual(rc, 0)
+        self.assertRegex(out, r"early_probe: next_probe=\? last=never reading=\? baseline=100\.0")
+        park.write_marker(dict(_early_marker(self.pkg), status="refused",
+                               outcome={"at": NOW.isoformat(), "event": "x", "detail": "y"}))
+        _rc, out, _err = self.run_cli("--status")
+        for key in ("primary:", "backup:", "sentinel:", "early_probe:"):
+            self.assertIn(key, out)
+
+    def test_status_row_reads_the_last_probe_trace_and_the_scheduler_seam(self) -> None:
+        marker = _early_marker()
+        with mock.patch.object(parkprobe, "probe_rows", return_value=[
+                {"at": "t1", "reading": 5.0}, {"at": "t2", "reading": 0.0}]):
+            row = parkprobe.status_row(marker, {"next_probe": lambda _sid: "2026-11-15T20:00"})
+        self.assertEqual(row, "early_probe: next_probe=2026-11-15T20:00 last=t2 reading=0.0 "
+                              "baseline=100.0")
+
+
+class ImportDirectionAndScanTest(unittest.TestCase):
+    """tools/lib/sessionctl/parkprobe.py／parkearly.py／park_cli.py：匯入方向、欄名住處、單一額度讀取點
+    （AT-CTL-58／65／69／90；REQ-CTL-38／46）。逐行掃描，不做整檔缺席斷言。"""
+
+    SESSIONCTL = _REPO_ROOT / "tools" / "lib" / "sessionctl"
+
+    def lines(self, name: str) -> list[str]:
+        return (self.SESSIONCTL / name).read_text(encoding="utf-8").splitlines()
+
+    def imports(self, name: str) -> list[str]:
+        return [ln.strip() for ln in self.lines(name) if ln.lstrip().startswith(("from ", "import "))]
+
+    def test_at_ctl_58_import_direction_is_one_way(self) -> None:
+        bad = [ln for ln in self.lines("parkprobe.py")
+               if ln.lstrip().startswith(("from . import", "import ")) and
+               ("park_cli" in ln or "parkearly" in ln)]
+        self.assertEqual(bad, [], "parkprobe 不得 import park_cli／parkearly")
+        self.assertTrue(any("parkprobe" in ln for ln in self.imports("parkearly.py")))
+        self.assertTrue(any("park_cli" in ln for ln in self.lines("parkearly.py")
+                            if ln.strip().startswith("from . import park_cli")))
+        self.assertEqual([ln for ln in self.imports("park_cli.py") if "parkearly" in ln], [])
+        self.assertEqual([ln for ln in self.lines("park_cli.py") if "fire_early" in ln], [])
+
+    def test_at_ctl_58_baseline_constants_do_not_live_in_qw_schema(self) -> None:
+        for name in ("parked_pct", "parked_account"):
+            self.assertEqual([ln for ln in self.lines("qw_schema.py") if name in ln], [])
+        self.assertTrue(any("parked_pct" in ln for ln in self.lines("parkprobe.py")))
+
+    def test_at_ctl_65_69_the_only_quota_read_is_park_pace_state(self) -> None:
+        reads = [ln for ln in self.lines("parkprobe.py") + self.lines("parkearly.py")
+                 if "quota_meter" in ln or "quota_gate" in ln or "urllib" in ln or "requests" in ln]
+        self.assertEqual([ln for ln in reads if not ln.lstrip().startswith(("#", '"""'))
+                          and "import" in ln], [], "探針路徑不得自己 import 額度讀取點")
+        self.assertTrue(any("_pace_state" in ln for ln in self.lines("parkearly.py")))
+
+    def test_at_ctl_59_the_planner_calls_parkearly_in_one_line_and_yields_stays_in_decide(
+            self) -> None:
+        planner = (_REPO_ROOT / "tools" / "session_resume_planner.py").read_text(
+            encoding="utf-8").splitlines()
+        calls = [ln for ln in planner if "parkearly.tick(" in ln]
+        self.assertEqual(len(calls), 1)
+        uses = [ln for ln in planner if "yields(" in ln and "def " not in ln]
+        self.assertEqual(len(uses), 1, "park.yields 仍只在 sentinel_decide 內呼叫一次")
+        tick_at = next(i for i, ln in enumerate(planner) if "sched_isolation.tick_gate(" in ln)
+        probe_at = next(i for i, ln in enumerate(planner) if "parkearly.tick(" in ln)
+        decide_at = next(i for i, ln in enumerate(planner)
+                         if i > tick_at and "sentinel_decide(" in ln and "def " not in ln)
+        self.assertLess(tick_at, probe_at)
+        self.assertLess(probe_at, decide_at)
+
+
+class _EarlyFence(_CliFence):
+    """提前到點共同夾具：armed 標記（等 3 小時）、備援 job 在假排程器、假 spawn／resume。"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.backend.jobs.add(LABEL)
+        self.marker = _early_marker(self.pkg)
+        park.write_marker(self.marker)
+        self.transcript = self.tmp / f"{SID}.jsonl"
+        stale = (NOW - timedelta(hours=5)).isoformat()
+        self.transcript.write_text(_line(type="assistant", timestamp=stale,
+                                         message={"model": "claude-fable-5"}) + "\n",
+                                   encoding="utf-8")
+        os.utime(self.transcript, ((NOW - timedelta(hours=5)).timestamp(),) * 2)
+        self.spawned: list[Path] = []
+        self.resumed: list[dict] = []
+        self.quota_reads: list = []
+        self.state = _keyed(_state(five=0.0, week=0.0), "acct-A")
+        self.args = argparse.Namespace(plan=str(self.tmp / f"{SID}.md"))
+
+    def seams(self, **extra) -> dict:
+        def spawn(path, **_kw):
+            self.spawned.append(path)
+            return 0
+
+        def resume(*_a, **kw):
+            self.resumed.append(kw)
+            return 0
+
+        def quota(now):
+            self.quota_reads.append(now)
+            state = self.state
+            if isinstance(state, Exception):
+                raise state
+            return state
+
+        return {"quota": quota, "policy": _policy, "backend": self.backend, "spawn": spawn,
+                "resume": resume, "platform": "win32", "preflight": lambda *_a, **_k: [],
+                "transcript": lambda _s: self.transcript, "notify": lambda *_a: 0,
+                "sessions_dir": self.tmp / "sessions", **extra}
+
+    def tick(self, now=NOW, env=None, **extra):
+        return parkearly.tick(self.args, now, self.seams(**extra), env={**self.env, **(env or {})})
+
+    def probes(self) -> list[dict]:
+        return [t for t in self.traces() if t["event"] == parkprobe.EV_PROBE]
+
+    def recovered_events(self) -> list[dict]:
+        return [t for t in self.traces() if t["event"] == parkprobe.EV_RECOVERED]
+
+
+class TickFiresThroughTheQ3PathTest(_EarlyFence):
+    """tools/lib/sessionctl/parkearly.py::tick／fire_early：讀數降到門檻下 ⇒ 走既有 `_cmd_fire`
+    （AT-CTL-59／61／62／63／64；REQ-CTL-31／33／34／37；MU-CTL-32～36）。"""
+
+    def test_recovered_reading_fires_once_and_tears_down_the_backup_job(self) -> None:
+        verdict = self.tick()
+        self.assertTrue(verdict["recovered"])
+        self.assertEqual(verdict["fired"], "fired")
+        self.assertEqual(park.read_marker(SID)["status"], "fired")
+        self.assertNotIn(LABEL, self.backend.jobs, "備援排程隨 fire 自拆（QW 原規則）")
+        self.assertEqual(self.spawned, [self.pkg], "上下文量不到 ⇒ FRESH 帶交接包")
+        events = self.recovered_events()
+        self.assertEqual(len(events), 1)
+        self.assertAlmostEqual(events[0]["saved_min"], 180.0, places=1)
+        self.assertIs(events[0]["account_changed"], False)
+
+    def test_at_ctl_63_at_most_once_the_next_patrol_skips(self) -> None:
+        self.tick()
+        reads = len(self.quota_reads)
+        self.assertIsNone(self.tick())
+        self.assertEqual((len(self.recovered_events()), len(self.quota_reads)), (1, reads))
+
+    def test_at_ctl_62_an_account_change_forces_cold_and_marks_the_route_reason(self) -> None:
+        self.state = _keyed(_state(five=0.0, week=0.0), "acct-B")
+        verdict = self.tick()
+        self.assertTrue(verdict["account_changed"])
+        routes = [t for t in self.traces() if t["event"] == "park_route"]
+        self.assertTrue(routes[0]["why"].startswith("account_changed"), routes)
+        self.assertIs(self.recovered_events()[0]["account_changed"], True)
+
+    def test_at_ctl_62_force_cold_makes_a_mid_sized_context_pick_fresh(self) -> None:
+        small, big = 20_000, 900_000
+        self.assertEqual(park.fire_route(small, False)[0], park.FIRE_RESUME)
+        with park.force_cold():
+            self.assertEqual(park.fire_route(small, False)[0], park.FIRE_RESUME)
+            route, why = park.fire_route(big, False)
+            self.assertEqual(route, park.FIRE_FRESH)
+            self.assertTrue(why.startswith("account_changed"))
+        self.assertEqual(park.fire_route(big, False)[0], park.FIRE_RESUME, "快取仍熱 ⇒ 續跑只付讀價")
+        self.assertFalse(park.fire_route(small, False)[1].startswith("account_changed"))
+
+    def test_at_ctl_61_early_disables_only_the_reschedule_branch(self) -> None:
+        row = {"pid": 4242, "sid": SID, **qw_schema.holder_extra(
+            (NOW + timedelta(minutes=5)).timestamp(), "chain", "reset")}
+        S = {"holder": lambda _s: row, "holder_live": lambda _r: True}
+        opts = argparse.Namespace(early=True)
+        normal = park_yield.decide(SID, self.marker, {}, S, lambda: NOW, lambda _s: None)
+        self.assertEqual(normal["act"], "rearm", "非 early：主載具活著且未到 ⇒ 重排（舊行為逐字不變）")
+        early = park_yield.decide(SID, parkprobe.early_view(self.marker, opts), {}, S,
+                                  lambda: NOW, lambda _s: None)
+        self.assertEqual((early["act"], early["reason"]), ("go", "yield_exhausted"))
+        self.assertIs(parkprobe.early_view(self.marker, argparse.Namespace()), self.marker)
+        self.assertNotIn(park_yield.RESCHEDULES_KEY, self.marker, "early_view 只改記憶體副本")
+
+    def test_the_reschedule_counter_on_disk_is_restored_after_an_early_fire(self) -> None:
+        for before in (None, 2):
+            with self.subTest(before=before):
+                marker = _early_marker(self.pkg)
+                if before is not None:
+                    marker[park_yield.RESCHEDULES_KEY] = before
+                park.write_marker(marker)
+                self.backend.jobs.add(LABEL)
+                self.assertEqual(self.tick()["fired"], "fired")
+                self.assertEqual(park.read_marker(SID).get(park_yield.RESCHEDULES_KEY), before)
+
+    def test_at_ctl_64_a_live_reset_primary_handles_it_but_an_at_primary_does_not(self) -> None:
+        row = {"pid": 4242, "sid": SID,
+               **qw_schema.holder_extra(NOW.timestamp() - 600, "chain", "reset")}
+        with mock.patch.object(parkearly.holder, "read", return_value=row), \
+                mock.patch.object(parkearly.holder, "is_live", return_value=True):
+            park.write_marker(dict(self.marker, **{qw_schema.MK_PRIMARY_SOURCE: "reset"}))
+            self.assertIsNone(self.tick(), "短窗 reset 型主載具活著 ⇒ 由 early_reset 處理，本分支不重判")
+            self.assertEqual(self.recovered_events(), [])
+        with mock.patch.object(parkearly.holder, "read", return_value=row), \
+                mock.patch.object(parkearly.holder, "is_live", return_value=False):
+            park.write_marker(self.marker)  # primary_source=at：early_reset 不適用 ⇒ 本分支判
+            self.assertTrue(self.tick()["recovered"])
+
+    def test_at_ctl_59_unmeasured_returns_a_verdict_without_firing_and_traces_it(self) -> None:
+        self.state = OSError("端點 500")
+        verdict = self.tick()
+        self.assertIsNone(verdict, "例外一律吞掉：探針不得讓哨兵巡邏死掉")
+        self.assertEqual(park.read_marker(SID)["status"], "armed")
+        self.assertIn(parkearly.EV_ERROR, [t["event"] for t in self.traces()])
+
+    def test_at_ctl_66_an_empty_reading_is_traced_unmeasured_and_not_fired(self) -> None:
+        self.state = _state(axes=())
+        verdict = self.tick()
+        self.assertEqual((verdict["reason"], verdict["recovered"]), ("unmeasured", False))
+        self.assertEqual([p["reason"] for p in self.probes()], ["unmeasured"])
+        self.assertEqual((self.spawned, self.recovered_events()), ([], []))
+
+    def test_at_ctl_65_the_reading_goes_through_the_single_pace_state_seam(self) -> None:
+        self.tick()
+        self.assertEqual(len(self.quota_reads), 1)
+
+    def test_the_probe_trace_carries_reading_baseline_and_reason(self) -> None:
+        self.state = _keyed(_state(five=95.0, week=95.0), "acct-A")
+        self.tick()
+        probe = self.probes()[0]
+        self.assertEqual((probe["reason"], probe["reading"], probe["parked_pct"], probe["recovered"]),
+                         ("hold", 95.0, 100.0, False))
+
+
+class NegativeControlsTest(_EarlyFence):
+    """tools/lib/sessionctl/parkearly.py::tick：不誤觸發（AT-CTL-60；REQ-CTL-37；MU-CTL-30／34）。
+    每例只改一個條件、替身 spawn 必須 0 次。"""
+
+    def assert_silent(self, **kw) -> None:
+        self.assertIsNone(self.tick(**kw) if kw else self.tick())
+        self.assertEqual((self.spawned, self.resumed, self.recovered_events()), ([], [], []))
+        self.assertEqual(park.read_marker(SID)["status"], "armed")
+
+    def test_wait_shorter_than_sixty_minutes(self) -> None:
+        late = NOW + timedelta(minutes=59)
+        park.write_marker(dict(self.marker, fire_at=late.isoformat()))
+        self.assert_silent()
+        park.write_marker(dict(self.marker, fire_at=(NOW + timedelta(minutes=61)).isoformat()))
+        self.assertIsNotNone(self.tick(), "61 分鐘 ⇒ 探")
+
+    def test_acked_package(self) -> None:
+        self.pkg.with_suffix(".ack").write_text("acked t sid=other", encoding="utf-8")
+        self.assert_silent()
+
+    def test_handed_over_or_spawning_intent(self) -> None:
+        with mock.patch.object(parkearly.seal, "_spawned", return_value=True):
+            self.assert_silent()
+        with mock.patch.object(parkearly.handoff, "_duplicate_refusals", return_value=["剛 spawn"]):
+            self.assert_silent()
+
+    def test_live_driver(self) -> None:
+        fresh = (NOW - timedelta(minutes=1)).isoformat()
+        self.transcript.write_text(_line(type="assistant", timestamp=fresh,
+                                         message={"model": "claude-fable-5"}) + "\n", encoding="utf-8")
+        self.assert_silent()
+
+    def test_unattended_and_non_auto_mode(self) -> None:
+        self.assert_silent(env={"AUTOSDD_UNATTENDED": "1"})
+        self.assert_silent(env={"AUTOSDD_SESSION_SWITCH_MODE": "notify"})
+
+    def test_reading_not_lower_or_barely_lower_or_still_above_prepare(self) -> None:
+        for five in (100.0, 96.0, 90.0):  # 持平／降 4pp／降 10pp 但仍 ≥ 準備門檻 85
+            with self.subTest(five=five):
+                self.state = _keyed(_state(five=five, week=five), "acct-A")
+                self.assertFalse(self.tick()["recovered"])
+        self.assertEqual((self.spawned, self.recovered_events()), ([], []))
+
+    def test_park_why_registered_below_threshold_does_not_fire_on_a_low_absolute_reading(self) -> None:
+        park.write_marker(dict(self.marker, parked_pct=80.0))
+        self.state = _keyed(_state(five=80.0, week=80.0), "acct-A")
+        self.assertFalse(self.tick()["recovered"])
+        self.assertEqual(self.spawned, [])
+
+    def test_old_marker_without_baseline_traces_no_baseline_and_never_fires(self) -> None:
+        old = {k: v for k, v in self.marker.items() if k not in ("parked_pct", "parked_account")}
+        park.write_marker(old)
+        verdict = self.tick()
+        self.assertEqual((verdict["reason"], verdict["recovered"]), ("no_baseline", False))
+        self.assertEqual(self.quota_reads, [], "無基準就不必量額度")
+        self.assertEqual(self.spawned, [])
+
+    def test_armed_but_expired_or_cancelled_markers_are_not_probed(self) -> None:
+        park.write_marker(dict(self.marker, status="cancelled"))
+        self.assertIsNone(self.tick())
+        park.write_marker(dict(self.marker, status="armed",
+                               valid_until=(NOW - timedelta(seconds=1)).isoformat()))
+        self.assertIsNone(self.tick())
+        self.assertEqual(self.quota_reads, [])
+
+    def test_a_missing_marker_or_a_non_sid_plan_is_silent(self) -> None:
+        park.marker_path(SID).unlink()
+        self.assertIsNone(self.tick())
+        self.args = argparse.Namespace(plan=str(self.tmp / "unknown.md"))
+        self.assertIsNone(self.tick())
+        self.assertIsNone(parkearly.tick(argparse.Namespace(), NOW, {}, env={}))
+
+
+class BriefLineTest(_Fence):
+    """tools/lib/sessionctl/parkprobe.py::brief_line／briefline.py：連續 3 次量不到 ⇒ SessionStart
+    出聲（AT-CTL-66；REQ-CTL-35）。"""
+
+    def row(self, reason: str, n: int) -> dict:
+        return {"event": parkprobe.EV_PROBE, "sid": SID, "reason": reason,
+                "at": (NOW + timedelta(minutes=15 * n)).isoformat()}
+
+    def write_rows(self, *rows: dict) -> None:
+        with (self.tdir / park._SPAWNED_LOG).open("a", encoding="utf-8") as fh:  # noqa: SLF001
+            fh.writelines(json.dumps(r) + "\n" for r in rows)
+
+    def test_three_consecutive_unmeasured_probes_say_so(self) -> None:
+        marker = _early_marker(None, valid_until=(NOW + timedelta(days=9)).isoformat())
+        park.write_marker(marker)
+        with mock.patch.object(parkprobe, "datetime", wraps=parkprobe.datetime) as dt:
+            dt.now.return_value = NOW
+            self.write_rows(self.row("unmeasured", 0), self.row("unmeasured", 1))
+            self.assertEqual(parkprobe.brief_line({}), "")
+            self.write_rows(self.row("unmeasured", 2))
+            text = parkprobe.brief_line({})
+            self.assertIn("連續 3 次量不到", text)
+            self.assertIn("park --status", text)
+            self.assertEqual(briefline.park_probe_line({}), text)
+            self.write_rows(self.row("hold", 3))
+            self.assertEqual(parkprobe.brief_line({}), "", "中間有一次量得到就重新累計")
+
+    def test_no_armed_marker_or_any_exception_gives_an_empty_line(self) -> None:
+        self.assertEqual(parkprobe.brief_line({}), "")
+        with mock.patch.object(parkprobe.park, "read_marker", side_effect=RuntimeError("x")):
+            park.write_marker(_early_marker(None))
+            self.assertEqual(parkprobe.brief_line({}), "")
+
+    def test_briefline_lines_joins_both_notes_and_stays_empty_when_both_are_empty(self) -> None:
+        with mock.patch.object(briefline, "orphan_line", return_value=""), \
+                mock.patch.object(briefline, "park_probe_line", return_value=""):
+            self.assertEqual(briefline.lines(SID, {}), "")
+        with mock.patch.object(briefline, "orphan_line", return_value=" A"), \
+                mock.patch.object(briefline, "park_probe_line", return_value=" B"):
+            self.assertEqual(briefline.lines(SID, {}), " A B")
+
+
+class StatusLineCompatTest(unittest.TestCase):
+    """tools/lib/sessionctl/park_status.py：本包不改 SE／QW 既有三列（SE X-22：兩稿各自加列）。"""
+
+    def test_park_status_lines_still_three_rows_and_early_row_is_separate(self) -> None:
+        rows = park_status.lines(SID, None, {"backend": mock.Mock(name="b", list_jobs=lambda _p: [])})
+        self.assertEqual([r.split(":")[0] for r in rows], ["primary", "backup", "sentinel"])
+
+
+if __name__ == "__main__":
+    unittest.main()
