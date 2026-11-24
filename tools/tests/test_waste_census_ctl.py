@@ -137,8 +137,8 @@ class MC2to6Test(unittest.TestCase):
         human = lambda t, text: _rec(t, "user", ok="human", tool_result=False, text=text)  # noqa: E731
         fresh = {"sid": "n1", "interactive": True, "recs": [
             human(0, "按交接包繼續：x"),
-            dict(_assistant(1), reads=[r"C:\u\.autosdd\handoff\a.prompts.md", "git status"]),
-            dict(_assistant(2), reads=["C:\\u\\.claude\\projects\\p\\old.jsonl"]),
+            dict(_assistant(1), reads=["/u/.autosdd/handoff/a.prompts.md", "git status"]),
+            dict(_assistant(2), reads=["/u/.claude/projects/p/old.jsonl"]),
             dict(_assistant(90), reads=["a.prompts.md"])]}  # 第一小時之後不算
         pasted = {"sid": "n2", "interactive": True, "recs": [human(0, "以下是上輪資訊 " + "x" * 10)]}
         got = sc.m_c2([fresh, pasted], ctl_load.OLD_DATA)

@@ -395,7 +395,7 @@ class PendingTest(_GateFence):
         self.write_transcript(HARD)
         got = switchfacts.pending_state(SID, self.transcript, 2, self.env, base=self.base)
         self.assertEqual(got["reason"], "hard")
-        self.assertEqual(json.loads((self.base / f"{SID}.pending").read_text())["reason"], "hard")
+        self.assertEqual(json.loads((self.base / f"{SID}.pending").read_text(encoding="utf-8"))["reason"], "hard")
 
     def test_advise_once_traces_every_voice_and_only_once_per_reason(self) -> None:
         """AT-CTL-49：每次出聲落 `switch_advise`（sid、reason、ctx、k、mode）；同 sid 第二次不再出聲。"""
@@ -463,7 +463,7 @@ class WatchSwitchDueTest(_GateFence):
         self.assertIn("finalize", out)
         self.assertIn("spawn", out)
         events = [json.loads(x)["event"] for x in
-                  (self.tdir / "autosdd_session_switch.jsonl").read_text().splitlines()]
+                  (self.tdir / "autosdd_session_switch.jsonl").read_text(encoding="utf-8").splitlines()]
         self.assertIn(control.EV_PENDING_SET, events)
         self.assertIn(control.EV_PENDING_DUE, events)
 
@@ -672,7 +672,7 @@ class FactsTest(_GateFence):
                            roster_fn=lambda: [], out=out, pid=1, projects_dir=str(self.tmp))
         self.assertEqual(rc, 0)
         rows = [json.loads(x)["event"] for x in
-                (self.tdir / "autosdd_session_switch.jsonl").read_text().splitlines()]
+                (self.tdir / "autosdd_session_switch.jsonl").read_text(encoding="utf-8").splitlines()]
         self.assertIn(control.EV_WATCH_DUPLICATE, rows)
 
     def test_takeover_minutes_come_from_the_ack_stamp_of_this_sid(self) -> None:
