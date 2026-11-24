@@ -304,6 +304,7 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
     if not watchlock.acquire(sid, pid):  # 單例（DES §5）：同 sid 已有活 watch ⇒ 本支不跑
         print(f"處置：{DISPOSAL['duplicate']}\nWATCH_VERDICT=duplicate n=0", file=out, flush=True)
         switch.trace(EV_WATCH_VERDICT, sid=sid, verdict="duplicate", agents=0)
+        watch_wake.due_suffix(sid, "duplicate", None, [])  # 另落 watch_duplicate 痕跡
         return 0
     started, latched, holding, state, band = now_fn(), False, False, {}, "prepare"
     resolver = _kw_resolver(budget, state)

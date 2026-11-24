@@ -241,6 +241,8 @@ def on_verdict(sid: str, event: str, pending: dict | None, agents: int,
     `DRAIN_MAX_MIN` ⇒ 回一行處置字尾（任一判決；只改文字，不新增推回、不新增判決）。"""
     if event == "switch_due":
         switch.trace(control.EV_PENDING_DUE, sid=sid, since=(pending or {}).get("since"))
+    elif event == "duplicate":  # 入口判決（同 sid 已有活 watch）：另落 `watch_duplicate`
+        switch.trace(control.EV_WATCH_DUPLICATE, sid=sid)
     age = age_min(pending, now) if agents > 0 else None
     if age is not None and age > DRAIN_MAX_MIN:
         return (f"待換已逾 {DRAIN_MAX_MIN} 分（{age:.0f} 分）：仍有在飛代理——先 TaskStop 它們、"

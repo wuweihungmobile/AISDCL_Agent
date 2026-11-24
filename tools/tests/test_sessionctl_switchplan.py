@@ -617,5 +617,81 @@ class StaticScansTest(unittest.TestCase):
                          {control.EV_PARK_EARLY_PROBE, control.EV_PARK_EARLY_RECOVERED})
 
 
+class FactsTest(_GateFence):
+    """switchfacts／controlfacts：事實取自既有真相源；pending 進 `ControlState` 與 statusLine。"""
+
+    def test_account_changed_needs_both_sides_and_a_difference(self) -> None:
+        """AT-CTL-87（W5 面）：標記 `parked_account` 與當下 `account_key` 皆非空且不同才為真；
+        任一側 None（含舊標記無此欄、無標記）⇒ 假；當下值取自同一次 `_pace_state` 讀數。"""
+        now = datetime.now().astimezone()
+        reads: list[int] = []
+
+        def state(key):
+            def read(_now):
+                reads.append(1)
+                return SimpleNamespace(account_key=key, axes=())
+            return read
+
+        def marker(**extra):
+            return {"sid": SID, "status": "armed", **extra}
+
+        cases = [({"parked_account": "A"}, "B", True), ({"parked_account": "A"}, "A", False),
+                 ({"parked_account": "A"}, None, False), ({"parked_account": None}, "B", False),
+                 ({}, "B", False)]
+        for extra, now_key, want in cases:
+            with self.subTest(extra=extra, now_key=now_key):
+                with mock.patch("lib.sessionctl.park.read_marker", return_value=marker(**extra)):
+                    got = switchfacts.account_changed(SID, now, {"state": state(now_key)})
+                self.assertEqual(got, want)
+        with mock.patch("lib.sessionctl.park.read_marker", return_value=None):
+            reads.clear()
+            self.assertFalse(switchfacts.account_changed(SID, now, {"state": state("B")}))
+            self.assertEqual(reads, [])  # 無 park 標記 ⇒ 不讀額度（基準只存在於標記）
+
+    def test_control_state_carries_the_pending_marker_into_the_status_line(self) -> None:
+        """惰性建立：`control_state` 是 `ensure_pending` 的第二個呼叫點；statusLine 區段出現
+        `switch pending`。"""
+        from lib.sessionctl import controlfacts  # noqa: PLC0415
+
+        self.write_transcript(HARD)
+        payload = {"session_id": SID, "transcript_path": str(self.transcript),
+                   "background_tasks": [{"id": "a", "type": "subagent", "status": "running"}]}
+        state = controlfacts.control_state(payload, SID, self.env)
+        self.assertEqual(state.pending_switch["reason"], "hard")
+        self.assertIn("switch pending", control.segment_text(state))
+        self.assertIn("pending_switch=yes(hard)", control.status_line(state))
+        quiet = controlfacts.control_state({**payload, "background_tasks": []}, SID, self.env)
+        self.assertIsNotNone(quiet.pending_switch)  # 標記已存在；代理交卷不作廢（只有封存／交棒／壓縮）
+
+    def test_watch_duplicate_is_traced_next_to_the_verdict(self) -> None:
+        from lib.sessionctl import watchlock  # noqa: PLC0415
+
+        with mock.patch.object(watchlock, "acquire", return_value=False):
+            out = io.StringIO()
+            rc = watch.run(SID, watch.Cfg(), now_fn=lambda: 1.0, sleep_fn=lambda _s: None,
+                           roster_fn=lambda: [], out=out, pid=1, projects_dir=str(self.tmp))
+        self.assertEqual(rc, 0)
+        rows = [json.loads(x)["event"] for x in
+                (self.tdir / "autosdd_session_switch.jsonl").read_text().splitlines()]
+        self.assertIn(control.EV_WATCH_DUPLICATE, rows)
+
+    def test_takeover_minutes_come_from_the_ack_stamp_of_this_sid(self) -> None:
+        pkg = self.package(acker=SID)
+        got = switchfacts.takeover_min(SID, self.env, datetime.now().astimezone())
+        self.assertIsNotNone(got)
+        self.assertLess(got, 60)  # `.ack` 寫在 5 分鐘前
+        self.assertIsNone(switchfacts.takeover_min(OTHER, self.env, datetime.now().astimezone()))
+        pkg.with_suffix(".ack").unlink()
+        self.assertIsNone(switchfacts.takeover_min(SID, self.env, datetime.now().astimezone()))
+
+
+class RenderCutHasNoExecutableCallsTest(unittest.TestCase):
+    def test_agentbrief_never_launches_anything(self) -> None:
+        """AT-CTL-55：被切清單只含文字與指標；`agentbrief.py` 沒有 subprocess／claude 啟動。"""
+        text = (_SESSIONCTL / "agentbrief.py").read_text(encoding="utf-8")
+        self.assertNotIn("subprocess", text)
+        self.assertIsNone(re.search(r"Popen|os\.system|spawn\(", text))
+
+
 if __name__ == "__main__":
     unittest.main()
