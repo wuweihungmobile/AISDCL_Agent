@@ -716,6 +716,9 @@ _GOVERNANCE_DOCS = (
     # R218：額度牆續航／掌控／副作用隔離收尾的缺陷明細與收尾決策（DEF-200-638～645）。資格同上。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R218_QuotaWall_Control_Closure_Evidence.md",
+    # R218：測試衛生（worktree 副本汙染掃描、沙盒 git 背景維護競速）與 leak_fence 誤判調查
+    # （DEF-200-647～649）。資格同上：逐條寫出缺陷座標與回歸鎖所在案例（⇒ 指針稽核）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R218_TestHygiene_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

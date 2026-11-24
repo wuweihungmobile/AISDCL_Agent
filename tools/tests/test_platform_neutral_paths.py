@@ -37,6 +37,7 @@ sys.path.insert(0, str(_REPO_ROOT / "tools" / "probe"))
 import git_paths  # noqa: E402  ← R81 XPL-S1-01：git 路徑列舉的唯一取數層
 import sdd_latest  # noqa: E402
 import test_subprocess_encoding_hygiene as _sister  # noqa: E402
+import worktree_paths  # noqa: E402  ← DEF-200-647：全 repo 掃描排除 .claude/worktrees 的唯一入口
 
 # R85／A-3：單平台專屬外部執行檔的**詞彙表**是量測本身，唯一的家在這支 probe
 # （檔內逐字：「這兩張表是判準本身。改它就是重新定義量測」）。本檔只當「門」，不留第二份。
@@ -1531,7 +1532,7 @@ def _pathext_scan_files() -> list[Path]:
                   ".ruff_cache", ".mypy_cache", "node_modules"}
     out: list[Path] = []
     for suffix in ("*.py", "*.ps1", "*.psm1", "*.sh"):
-        for p in _REPO_ROOT.rglob(suffix):
+        for p in worktree_paths.rglob_live(_REPO_ROOT, suffix):
             if skip_parts & set(p.parts):
                 continue
             if p.name.startswith("_zzz_"):  # 平行測試合成暫存模組（第五輪）
@@ -4000,7 +4001,7 @@ class TestDirEntryPrimitivesAreAccountedFor(unittest.TestCase):
         } | {cfg.parent for cfg in _REPO_ROOT.glob("*/*/pyvenv.cfg")}
         census = {"live": 0}
         scanned = 0
-        for py in _REPO_ROOT.rglob("*.py"):
+        for py in worktree_paths.rglob_live(_REPO_ROOT, "*.py"):  # DEF-200-647
             if skip_parts & set(py.parts) or py.name.startswith("_zzz_"):  # _zzz_=合成暫存模組
                 continue
             if any(root in py.parents for root in skip_roots):

@@ -20,8 +20,10 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 # 平台中立的假「絕對」repo 根（WHY 見 _platform_helpers 常數旁註解；R11 真 Mac
 # 首跑實證：寫死 "D:/repo" 在 POSIX 非絕對路徑 → join/resolve 語意分歧假紅）。
+import worktree_paths  # noqa: E402  ← DEF-200-647：全 repo 掃描排除 .claude/worktrees 的唯一入口
 from _platform_helpers import ABS_FAKE_REPO  # noqa: E402
 from _ps_engine import available_engines as _ps_available_engines  # noqa: E402
 
@@ -3433,7 +3435,7 @@ def _action_scan_sources() -> dict[str, str]:
         base = _REPO_ROOT / tree
         if not base.is_dir():
             continue
-        for path in sorted(base.rglob("*")):
+        for path in sorted(worktree_paths.rglob_live(_REPO_ROOT, "*", base)):  # DEF-200-647
             rel = str(path.relative_to(_REPO_ROOT)).replace("\\", "/")
             if (path.suffix in (".ps1", ".py") and "__pycache__" not in path.parts
                     and not rel.startswith(_ACTION_SCAN_EXCLUDE)):

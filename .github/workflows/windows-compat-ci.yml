@@ -476,6 +476,7 @@ on:
       # 在同一輪的 push 又攔一次。補列這個動作只覆蓋當下已存在的檔，不會讓之後新增
       # 的共用層自動跟上——所以「這一輪已經補過了」不是可以少查一次的理由。
       - "tools/lib/git_paths.py"
+      - "tools/lib/git_sandbox_fence.py"  # DEF-200-648：runner 的沙盒 git 圍籬，tools/tests 經 run_root_unittests 消費
       - "tools/lib/quota_meter.py"
       - "tools/lib/quota_escalation.py"
       - "tools/lib/script_interface_parity.py"
@@ -989,6 +990,7 @@ on:
       # 在同一輪的 push 又攔一次。補列這個動作只覆蓋當下已存在的檔，不會讓之後新增
       # 的共用層自動跟上——所以「這一輪已經補過了」不是可以少查一次的理由。
       - "tools/lib/git_paths.py"
+      - "tools/lib/git_sandbox_fence.py"  # DEF-200-648：runner 的沙盒 git 圍籬，tools/tests 經 run_root_unittests 消費
       - "tools/lib/quota_meter.py"
       - "tools/lib/quota_escalation.py"
       - "tools/lib/script_interface_parity.py"

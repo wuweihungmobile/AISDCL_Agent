@@ -5476,5 +5476,118 @@ class UnattendedPostureFenceTest(unittest.TestCase):
         self.assertIn(self._KEY, fx._STRIP)
 
 
+class GitSandboxFenceTest(unittest.TestCase):
+    """DEF-200-648：沙盒 git 的背景自動維護與 teardown rmtree 競速（macOS CI run 45427135743，
+    `.git/objects/maintenance.lock` FileNotFoundError）。受測模組 `tools/lib/git_sandbox_fence.py`：
+    runner 在全套期間設 `GIT_TEMPLATE_DIR`，新建 repo 的 `.git/config` 一出生就帶
+    `maintenance.auto=false`／`gc.auto=0`（不用 `GIT_CONFIG_COUNT`：SelfImproving 推送守門把任何
+    `GIT_CONFIG_*` 環境變數視為注入而拒絕）。WHY 這道鎖要在：55 處站點各抄一份 `-c` 擋不住下一個
+    新站點，而且「旗標寫了沒」在 commit 之前看不出來。"""
+
+    _KEY = "GIT_TEMPLATE_DIR"
+
+    @staticmethod
+    def _git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", *args], capture_output=True, encoding="utf-8", errors="replace",
+            timeout=60, check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+    def _fresh_local(self, repo: Path, key: str) -> str | None:
+        cp = self._git("-C", str(repo), "config", "--local", "--get", key)
+        return cp.stdout.strip() if cp.returncode == 0 else None
+
+    def test_a_repo_born_inside_the_fence_has_background_maintenance_off(self) -> None:
+        """真 `git init`：圍籬內建的 repo，local 設定就帶兩個鍵；圍籬外建的沒有（對照組，證明
+        夾具真的能分出有無修法——兩邊都 None／都有值的鎖是空轉）。"""
+        import git_sandbox_fence  # noqa: PLC0415 — 隨用隨載，與 runner 同一個 sys.path
+        with tempfile.TemporaryDirectory(prefix="gsf-") as td:
+            outside, inside = Path(td) / "out", Path(td) / "in"
+            with mock.patch.dict(os.environ):
+                os.environ.pop(self._KEY, None)
+                self.assertEqual(self._git("init", "-q", str(outside)).returncode, 0)
+
+                def _run() -> int:
+                    return self._git("init", "-q", str(inside)).returncode
+
+                self.assertEqual(git_sandbox_fence.fence(_run), 0)
+            self.assertIsNone(self._fresh_local(outside, "maintenance.auto"), "對照組不該已有該鍵")
+            self.assertEqual(self._fresh_local(inside, "maintenance.auto"), "false")
+            self.assertEqual(self._fresh_local(inside, "gc.auto"), "0")
+
+    def test_the_fence_sets_the_template_for_the_run_and_restores_the_environment(self) -> None:
+        import git_sandbox_fence  # noqa: PLC0415
+        seen: dict[str, str] = {}
+
+        def _run() -> int:
+            seen["tpl"] = os.environ[self._KEY]
+            seen["cfg"] = (Path(seen["tpl"]) / "config").read_text(encoding="utf-8")
+            return 7
+
+        with mock.patch.dict(os.environ):
+            os.environ.pop(self._KEY, None)
+            self.assertEqual(git_sandbox_fence.fence(_run), 7, "rc 必須原樣穿透")
+            self.assertNotIn(self._KEY, os.environ, "沒設過的鍵不得被圍籬留下")
+        self.assertIn("auto = false", seen["cfg"])
+        self.assertFalse(Path(seen["tpl"]).exists(), "模板暫存目錄用完必須刪掉")
+
+    def test_a_caller_template_is_kept_as_the_base_and_restored_after(self) -> None:
+        import git_sandbox_fence  # noqa: PLC0415
+        with tempfile.TemporaryDirectory(prefix="gsf-user-") as td:
+            user = Path(td)
+            (user / "hooks").mkdir()
+            (user / "hooks" / "pre-x").write_text("#!/bin/sh\n", encoding="utf-8")
+            (user / "config").write_text("[core]\n\tsymlinks = false\n", encoding="utf-8")
+            seen: dict[str, str] = {}
+
+            def _run() -> int:
+                tpl = Path(os.environ[self._KEY])
+                seen["hook"] = str((tpl / "hooks" / "pre-x").is_file())
+                seen["cfg"] = (tpl / "config").read_text(encoding="utf-8")
+                return 0
+
+            with mock.patch.dict(os.environ, {self._KEY: str(user)}):
+                git_sandbox_fence.fence(_run)
+                self.assertEqual(os.environ[self._KEY], str(user), "呼叫端原值要還原")
+        self.assertEqual(seen["hook"], "True", "呼叫端模板的內容被吞掉了")
+        self.assertIn("symlinks = false", seen["cfg"])
+        self.assertIn("maintenance", seen["cfg"], "疊加而不是取代：兩邊的設定都要在")
+
+    def test_the_fence_restores_even_when_the_run_raises(self) -> None:
+        import git_sandbox_fence  # noqa: PLC0415
+
+        def _boom() -> int:
+            raise RuntimeError("x")
+
+        with mock.patch.dict(os.environ, {self._KEY: "keep"}):
+            with self.assertRaises(RuntimeError):
+                git_sandbox_fence.fence(_boom)
+            self.assertEqual(os.environ[self._KEY], "keep")
+
+    def test_main_wraps_the_suite_in_the_git_sandbox_fence(self) -> None:
+        """接線鎖（AST，同 `test_main_wraps_the_fenced_suite_in_the_posture_fence`）：圍籬必須在
+        `run_with_floor` 之外（建 repo 的測試跑起來之前就要生效）、`temp_fence` 之內（暫存模板的
+        建與刪都落在 TEMP 圍籬的觀察窗內）。runner 是 pre-push／nightly／三支 CI 的共同入口，
+        接線掉了＝55 處站點全部回到修前。"""
+        tree = ast.parse(Path(run_root_unittests.__file__).read_text(encoding="utf-8"))
+        main_fn = next(n for n in ast.walk(tree)
+                       if isinstance(n, ast.FunctionDef) and n.name == "main")
+        last = main_fn.body[-1]
+
+        def _calls(node: ast.AST, attr: str) -> list[ast.Call]:
+            return [n for n in ast.walk(node) if isinstance(n, ast.Call)
+                    and getattr(n.func, "attr", None) == attr]
+
+        fences = _calls(last, "fence")
+        self.assertTrue(fences, "main() 的最終 return 找不到 git_sandbox_fence.fence(...)")
+        self.assertEqual(getattr(getattr(fences[0].func, "value", None), "id", None),
+                         "git_sandbox_fence")
+        self.assertTrue(_calls(fences[0], "run_with_floor") or any(
+            isinstance(n, ast.Name) and n.id == "run_with_floor" for n in ast.walk(fences[0])),
+            "run_with_floor 必須在圍籬內層")
+        self.assertTrue(any(fences[0] is c or any(fences[0] is d for d in ast.walk(c))
+                            for c in _calls(last, "temp_fence")),
+                        "git_sandbox_fence.fence 必須在 temp_fence 內層")
+
+
 if __name__ == "__main__":
     unittest.main()

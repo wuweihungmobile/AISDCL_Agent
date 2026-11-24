@@ -43,6 +43,7 @@ import quota_escalation as escalation  # noqa: E402
 import schedule_backend as sb  # noqa: E402
 import sentinel_lifecycle  # noqa: E402
 import unattended_authz  # noqa: E402  # DEF-200-575：牆鐘常數的家（延後 bootout 上界的方向鎖對端）
+import worktree_paths  # noqa: E402  # DEF-200-647：全 repo 掃描排除 .claude/worktrees 的唯一入口
 
 import session_resume_planner as planner  # noqa: E402
 
@@ -266,7 +267,7 @@ def _carrier_scan_surface() -> dict[str, str]:
     """
     out: dict[str, str] = {}
     for tree in ("tools", ".claude"):
-        for path in sorted((_REPO_ROOT / tree).rglob("*.py")):
+        for path in sorted(worktree_paths.rglob_live(_REPO_ROOT, "*.py", _REPO_ROOT / tree)):
             parts = set(path.parts)
             if "__pycache__" in parts or ".venv" in parts or "tests" in parts:
                 continue
@@ -364,7 +365,7 @@ def _outside_consumers(name: str) -> list[Path]:
     mine = {_REPO_ROOT / "tools" / "lib" / "schedule_backend.py", Path(__file__)}
     out: list[Path] = []
     # 第五輪：改用一般迴圈＋容忍 FileNotFoundError，取代原本塞讀取進 comprehension。
-    for p in _REPO_ROOT.rglob("*.py"):
+    for p in worktree_paths.rglob_live(_REPO_ROOT, "*.py"):
         if p in mine or ".venv" in p.parts or "AISDLC_SDD" in p.parts:
             continue
         if p.name.startswith("_zzz_"):

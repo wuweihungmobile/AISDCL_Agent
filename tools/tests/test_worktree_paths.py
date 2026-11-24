@@ -14,8 +14,10 @@ worktree」做**純字串包含**判斷，不解析 `..`——`<root>/.claude/wo
 """
 from __future__ import annotations
 
+import contextlib
 import ntpath
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -98,6 +100,112 @@ class TestCrossPlatformSeparatorAndCaseHandling(unittest.TestCase):
     def test_the_dotdot_traversal_fix_still_holds_under_ntpath_semantics(self) -> None:
         outside = self._FAKE_ROOT + r"\.claude\worktrees\..\..\AutoClaude"
         self.assertFalse(WT.is_under_disposable_worktree(outside))
+
+
+class TestRglobLiveSkipsAgentWorktreeCopies(unittest.TestCase):
+    """DEF-200-647：Agent 工具 `isolation: worktree` 把整份 repo 副本建在
+    `<repo>/.claude/worktrees/<name>/`；全 repo 檔案系統掃描器把它當本體掃（2026-11-24 nightly
+    6 紅、主樹 `{'live': 1205} != {'live': 37}`）。受測：`tools/lib/worktree_paths.py` 的
+    `rglob_live`（唯一排除入口）與四支真實掃描器在「有／無假副本」時結果相同。"""
+
+    _LIVE = ("tools/real.py", ".claude/hooks/h.py", "tools/s.ps1", "top.ps1", "tools/lib/q.sh")
+
+    @staticmethod
+    def _rels(root: Path, paths) -> set[str]:
+        return {p.relative_to(root).as_posix() for p in paths}
+
+    def _make_repo(self, with_copy: bool) -> Path:
+        tmp = tempfile.TemporaryDirectory(prefix="wtp-scan-")
+        self.addCleanup(tmp.cleanup)
+        root = Path(os.path.realpath(tmp.name))
+        for rel in self._LIVE:
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text("x = 1\n", encoding="utf-8")
+        if with_copy:
+            copy = root / ".claude" / "worktrees" / "agent-x"
+            for rel in self._LIVE:
+                (copy / rel).parent.mkdir(parents=True, exist_ok=True)
+                (copy / rel).write_text("x = 1\n", encoding="utf-8")
+            (copy / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
+        return root
+
+    def test_the_fixture_really_reproduces_the_bug_with_a_plain_rglob(self) -> None:
+        """對照組：裸 `rglob` 在這份夾具上**確實**把副本掃進來（否則下面的鎖是空轉）。"""
+        root = self._make_repo(with_copy=True)
+        self.assertTrue(any("worktrees" in p.parts for p in root.rglob("*.py")))
+
+    def test_rglob_live_equals_the_scan_of_a_repo_without_the_copy(self) -> None:
+        with_copy, without = self._make_repo(True), self._make_repo(False)
+        for pattern in ("*.py", "*.ps1", "*"):
+            with self.subTest(pattern=pattern):
+                got = self._rels(with_copy, WT.rglob_live(with_copy, pattern))
+                want = self._rels(without, without.rglob(pattern))
+                self.assertEqual(got, want)
+                self.assertTrue(got, "空集合比對恆綠")
+
+    def test_base_narrowing_to_dot_claude_also_skips_the_copy(self) -> None:
+        root = self._make_repo(True)
+        got = self._rels(root, WT.rglob_live(root, "*.py", root / ".claude"))
+        self.assertEqual(got, {".claude/hooks/h.py"})
+
+    def test_exclusion_is_anchored_at_the_repo_root_and_case_insensitive(self) -> None:
+        self.assertTrue(WT.is_disposable_worktree_rel((".claude", "worktrees", "a", "b.py")))
+        self.assertTrue(WT.is_disposable_worktree_rel((".Claude", "WorkTrees")))
+        self.assertFalse(WT.is_disposable_worktree_rel(("docs", ".claude", "worktrees", "b.py")),
+                         "只排除 repo 根的那一個；別處同名路徑照常掃")
+        self.assertFalse(WT.is_disposable_worktree_rel((".claude", "hooks", "h.py")))
+        self.assertFalse(WT.is_disposable_worktree_rel(()))
+
+    def test_the_real_scanners_ignore_a_worktree_copy(self) -> None:
+        """真實掃描器（不是本函式的替身）：把各模組的 `_REPO_ROOT` 指到夾具 repo，有副本與無副本
+        的結果必須一致、且不含任何 `worktrees` 路徑。涵蓋 2026-11-24 nightly 的六處斷言與
+        同型的全 repo 掃描面。"""
+        import test_check_hooks_liveness as hl  # noqa: PLC0415
+        import test_mac_endurance_r83 as mac  # noqa: PLC0415
+        import test_platform_neutral_paths as pn  # noqa: PLC0415
+        import test_python_c_percent_shim as shim  # noqa: PLC0415
+
+        def rel(root: Path, items) -> list[str]:
+            return sorted(str(i).replace("\\", "/") if isinstance(i, str)
+                          else Path(i).relative_to(root).as_posix() for i in items)
+
+        results: dict[bool, dict[str, list[str]]] = {}
+        for with_copy in (True, False):
+            root = self._make_repo(with_copy)
+            with contextlib.ExitStack() as stack:
+                for mod, attr in ((pn, "_REPO_ROOT"), (hl, "_REPO_ROOT"),
+                                  (mac, "_REPO_ROOT"), (shim, "_ROOT")):
+                    stack.enter_context(mock.patch.object(mod, attr, root))
+                results[with_copy] = {
+                    "pathext": rel(root, pn._pathext_scan_files()),
+                    "action": rel(root, hl._action_scan_sources()),
+                    "carrier": rel(root, mac._carrier_scan_surface()),
+                    "consumers": rel(root, mac._outside_consumers("nothing")),
+                    "ps1": rel(root, shim._iter_ps1_files()),
+                }
+        for name, got in results[True].items():
+            with self.subTest(scanner=name):
+                self.assertEqual(got, results[False][name], f"{name}：副本改變了掃描結果")
+                self.assertFalse([p for p in got if "worktrees" in p], f"{name}：掃進了副本")
+        self.assertTrue(results[False]["pathext"] and results[False]["ps1"],
+                        "夾具沒有東西可掃＝上面的相等是空轉")
+
+    def test_no_test_walks_the_repo_root_with_a_bare_rglob(self) -> None:
+        """結構鎖：`tools/tests` 與 `tools/lib` 不得再出現「repo 根名稱直接 `.rglob(`」——全 repo
+        掃描一律走 `worktree_paths.rglob_live`（新掃描器照抄舊寫法就是這個缺陷的復發路徑）。
+        子樹（`tools/`、`tools/lib/`…）的 `rglob` 不在此限：副本不在其下。"""
+        bare = re.compile(r"\b(?:_REPO_ROOT|_ROOT|REPO_ROOT|_REPO|repo_root)\.rglob\(")
+        offenders = []
+        for tree in (_REPO_ROOT / "tools" / "tests", _REPO_ROOT / "tools" / "lib"):
+            for py in sorted(tree.rglob("*.py")):
+                if "__pycache__" in py.parts:
+                    continue
+                text = py.read_text(encoding="utf-8")
+                for n, line in enumerate(text.splitlines(), start=1):
+                    if bare.search(line) and not line.lstrip().startswith("#"):
+                        offenders.append(f"{py.relative_to(_REPO_ROOT).as_posix()}:{n}")
+        offenders = [o for o in offenders if not o.startswith("tools/tests/test_worktree_paths.py")]
+        self.assertEqual(offenders, [], "全 repo 掃描請改用 rglob_live（DEF-200-647）")
 
 
 if __name__ == "__main__":

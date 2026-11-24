@@ -29,6 +29,37 @@ NTFS 大小寫不敏感／正反斜線混用，且不依賴磁碟查詢，所以
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable, Iterator
+from pathlib import Path
+
+#: 拋棄式 worktree 根（相對 repo 根）的路徑段。Agent 工具 `isolation: worktree` 把整份 repo 副本
+#: 建在 `<repo>/.claude/worktrees/<name>/`（gitignored）；副本含本體的全部 `.py`／`.ps1`。
+DISPOSABLE_WORKTREE_PARTS: tuple[str, str] = (".claude", "worktrees")
+
+
+def is_disposable_worktree_rel(rel_parts: Iterable[str]) -> bool:
+    """相對 repo 根的路徑段是否落在拋棄式 worktree 內（DEF-200-647；純字面、不碰磁碟）。
+
+    WHY 與下面兩支並存：`is_under_disposable_worktree` 問「這條**絕對路徑**在不在」（hook 的
+    刪除保護臂用，要 realpath）；本函式問「掃描迭代到的這一筆算不算本體」——掃描器的檔案
+    迭代已經是 repo 相對路徑，不該為每一筆再 realpath 一次。大小寫不敏感（NTFS）。
+    """
+    head = tuple(s.lower() for s in list(rel_parts)[:2])
+    return head == DISPOSABLE_WORKTREE_PARTS
+
+
+def rglob_live(repo_root: Path, pattern: str, base: Path | None = None) -> Iterator[Path]:
+    """`(base or repo_root).rglob(pattern)`，但略過 `<repo_root>/.claude/worktrees/` 底下的副本。
+
+    DEF-200-647（2026-11-24 nightly 6 紅、主樹 `{'live': 1205} != {'live': 37}`）：全 repo 檔案系統
+    掃描器（`rglob`／`os.walk`）把代理 worktree 副本當本體掃，代理在飛期間必假紅。唯一的排除入口
+    在這裡——掃描根是 repo 根或 `.claude/` 的掃描器一律走本函式，不各寫一份排除；掃描根是
+    `tools/`、`tools/lib/` 等子樹者不需要（副本不在其下）。排除錨定在 repo 根（不是任意位置的
+    同名目錄）：凍結版或夾具裡剛好有叫 `.claude/worktrees` 的路徑，仍照舊被掃。
+    """
+    for path in (base or repo_root).rglob(pattern):
+        if not is_disposable_worktree_rel(path.relative_to(repo_root).parts):
+            yield path
 
 
 def disposable_worktree_root() -> str:

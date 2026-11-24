@@ -26,10 +26,13 @@ python.exe 上，完全正確——把它一起掃會製造假紅。
 from __future__ import annotations
 
 import re
+import sys
 import unittest
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_ROOT / "tools" / "lib"))
+import worktree_paths  # noqa: E402  ← DEF-200-647：全 repo 掃描排除 .claude/worktrees 的唯一入口
 
 # 掃描檔數下限釘選（比照 tools/run_root_unittests.py MIN_TESTS 慣例）：低於此數
 # ＝glob 壞掉/目錄搬家導致掃描器變空殼，本檔會靜默恆綠。2026-07-27 實測 137 支
@@ -49,7 +52,7 @@ _PY_TOKEN = re.compile(r'(?i)\bpython[0-9.]*\b|PyExe|PY_EXE|PYTHON_EXE')
 
 def _iter_ps1_files() -> list[Path]:
     return sorted(
-        p for p in _ROOT.rglob("*.ps1")
+        p for p in worktree_paths.rglob_live(_ROOT, "*.ps1")  # DEF-200-647
         if ".venv" not in p.parts and ".git" not in p.parts
     )
 
