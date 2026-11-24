@@ -261,7 +261,7 @@ def _rmtree(path: Path) -> None:
 
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(
-        ["git", "-C", str(repo), *args],
+        ["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-C", str(repo), *args],
         check=True,
         capture_output=True,
         timeout=60,
