@@ -2,14 +2,15 @@
 """`tools/lib/sessionctl/parkprobe.py`／`parkearly.py` 的驗收測試（Control_Handover W6；TCS-Control
 AT-CTL-56～69、MU-CTL-30～37）。
 
-WHY（2026-11-22 真事件）：`65389f03` 週額度 100% ⇒ `park --at` 到 11/24 19:03；掌舵者換帳號後讀數已回
-0%，但等待期間沒有任何元件重讀額度，只能靠人手開窗。所以：
-- 判準＝「相對登記當下的下降」＋「低於準備門檻」，絕對值低不觸發（`park --why` 的 80%→80% 不誤觸發）；
+WHY（2026-11-22 真事件）：`65389f03` 週額度 100% ⇒ `park --at` 到 11/24 19:03；掌舵者換帳號後
+讀數已回 0%，但等待期間沒有任何元件重讀額度，只能靠人手開窗。所以：
+- 判準＝「相對登記當下的下降」＋「低於準備門檻」，絕對值低不觸發（`park --why` 的 80%→80%
+  不誤觸發）；
 - 提前到點走 Q3 的同一條 fire 路（讓路、失敗鏈、出聲照常），只停用「主載具活著且未到 ⇒ 重排」；
 - 任何前置不成立、量不到讀數、已觸發過，一律不觸發；探針本身的例外不得讓哨兵巡邏死掉。
 
-縫：S["quota"]（假額度）、S["policy"]、S["transcript"]（假逐字稿）、S["backend"]／spawn／resume（假排程
-與假 spawn）。不碰真排程器、真 `~/.claude`、真 `~/.autosdd`。
+縫：S["quota"]（假額度）、S["policy"]、S["transcript"]（假逐字稿）、S["backend"]／spawn／
+resume（假排程與假 spawn）。不碰真排程器、真 `~/.claude`、真 `~/.autosdd`。
 """
 from __future__ import annotations
 
@@ -60,7 +61,8 @@ def _early_marker(pkg=None, **over) -> dict:
     marker = dict(_marker("H"), pkg=str(pkg) if pkg else None, parked_pct=100.0,
                   parked_account="acct-A", fire_at=FIRE_AT.isoformat(),
                   valid_until=(FIRE_AT + timedelta(seconds=park.YIELD_GRACE_SECONDS)).isoformat(),
-                  **qw_schema.marker_extra(FIRE_AT.timestamp(), "at", FIRE_AT.timestamp(), False, None))
+                  **qw_schema.marker_extra(FIRE_AT.timestamp(), "at", FIRE_AT.timestamp(),
+                                           False, None))
     marker["jobs"][0].update(label=LABEL, fire_at=FIRE_AT.isoformat())
     marker.update(over)
     return marker
@@ -209,8 +211,8 @@ class BaselineAndMarkerTest(_CliFence):
 
 
 class ImportDirectionAndScanTest(unittest.TestCase):
-    """tools/lib/sessionctl/parkprobe.py／parkearly.py／park_cli.py：匯入方向、欄名住處、單一額度讀取點
-    （AT-CTL-58／65／69／90；REQ-CTL-38／46）。逐行掃描，不做整檔缺席斷言。"""
+    """tools/lib/sessionctl/parkprobe.py／parkearly.py／park_cli.py：匯入方向、欄名住處、
+    單一額度讀取點（AT-CTL-58／65／69／90；REQ-CTL-38／46）。逐行掃描，不做整檔缺席斷言。"""
 
     SESSIONCTL = _REPO_ROOT / "tools" / "lib" / "sessionctl"
 
@@ -218,7 +220,8 @@ class ImportDirectionAndScanTest(unittest.TestCase):
         return (self.SESSIONCTL / name).read_text(encoding="utf-8").splitlines()
 
     def imports(self, name: str) -> list[str]:
-        return [ln.strip() for ln in self.lines(name) if ln.lstrip().startswith(("from ", "import "))]
+        heads = ("from ", "import ")
+        return [ln.strip() for ln in self.lines(name) if ln.lstrip().startswith(heads)]
 
     def test_at_ctl_58_import_direction_is_one_way(self) -> None:
         bad = [ln for ln in self.lines("parkprobe.py")
@@ -298,7 +301,7 @@ class _EarlyFence(_CliFence):
             return state
 
         def run_job(argv, env):
-            """真子行程的行程內替身：解回排程同 argv（`python sessionctl.py park --fire …`）呼叫 CLI。"""
+            """真子行程的行程內替身：解回排程同 argv（`… park --fire …`）呼叫 CLI。"""
             self.jobs.append((list(argv), dict(env)))
             return park_cli.run(argv[2:], env=env, now=NOW, seams=base)
 
@@ -357,7 +360,7 @@ class TickFiresThroughTheQ3PathTest(_EarlyFence):
         self.assertEqual(route, park.FIRE_FRESH)
         self.assertTrue(why.startswith("account_changed"))
         self.assertEqual(park.fire_route(big, False, {})[0], park.FIRE_RESUME)
-        self.assertEqual(park.fire_route(big, False)[0], park.FIRE_RESUME, "快取仍熱 ⇒ 續跑只付讀價")
+        self.assertEqual(park.fire_route(big, False)[0], park.FIRE_RESUME, "快取仍熱 ⇒ 續跑")
         self.assertFalse(park.fire_route(small, False)[1].startswith("account_changed"))
 
     def test_at_ctl_61_early_disables_only_the_reschedule_branch(self) -> None:
@@ -366,7 +369,7 @@ class TickFiresThroughTheQ3PathTest(_EarlyFence):
         S = {"holder": lambda _s: row, "holder_live": lambda _r: True}
         env = {parkprobe.EARLY_ENV: "1"}
         normal = park_yield.decide(SID, self.marker, {}, S, lambda: NOW, lambda _s: None)
-        self.assertEqual(normal["act"], "rearm", "非 early：主載具活著且未到 ⇒ 重排（舊行為逐字不變）")
+        self.assertEqual(normal["act"], "rearm", "非 early：主載具活著且未到 ⇒ 重排（舊行為）")
         early = park_yield.decide(SID, parkprobe.early_view(self.marker, env), {}, S,
                                   lambda: NOW, lambda _s: None)
         self.assertEqual((early["act"], early["reason"]), ("go", "yield_exhausted"))
@@ -390,7 +393,7 @@ class TickFiresThroughTheQ3PathTest(_EarlyFence):
         with mock.patch.object(parkearly.holder, "read", return_value=row), \
                 mock.patch.object(parkearly.holder, "is_live", return_value=True):
             park.write_marker(dict(self.marker, **{qw_schema.MK_PRIMARY_SOURCE: "reset"}))
-            self.assertIsNone(self.tick(), "短窗 reset 型主載具活著 ⇒ 由 early_reset 處理，本分支不重判")
+            self.assertIsNone(self.tick(), "reset 型主載具活著 ⇒ 由 early_reset 處理，不重判")
             self.assertEqual(self.recovered_events(), [])
         with mock.patch.object(parkearly.holder, "read", return_value=row), \
                 mock.patch.object(parkearly.holder, "is_live", return_value=False):
@@ -419,8 +422,8 @@ class TickFiresThroughTheQ3PathTest(_EarlyFence):
         self.state = _keyed(_state(five=95.0, week=95.0), "acct-A")
         self.tick()
         probe = self.probes()[0]
-        self.assertEqual((probe["reason"], probe["reading"], probe["parked_pct"], probe["recovered"]),
-                         ("hold", 95.0, 100.0, False))
+        got = (probe["reason"], probe["reading"], probe["parked_pct"], probe["recovered"])
+        self.assertEqual(got, ("hold", 95.0, 100.0, False))
 
 
 class ChildProcessContractTest(_EarlyFence):
@@ -440,7 +443,8 @@ class ChildProcessContractTest(_EarlyFence):
         park.write_marker(dict(self.marker, claude=str(Path("x") / "fake-claude")))
         self.tick()
         argv, _env = self.jobs[0]
-        want = park_cli.job_argv(LABEL, SID, self.pkg, FIRE_AT, ["--claude", str(Path("x") / "fake-claude")])
+        fake = str(Path("x") / "fake-claude")
+        want = park_cli.job_argv(LABEL, SID, self.pkg, FIRE_AT, ["--claude", fake])
         self.assertEqual(argv, want)
         self.assertEqual(argv[2:4], ["park", "--fire"])
 
@@ -503,8 +507,8 @@ class NegativeControlsTest(_EarlyFence):
 
     def test_live_driver(self) -> None:
         fresh = (NOW - timedelta(minutes=1)).isoformat()
-        self.transcript.write_text(_line(type="assistant", timestamp=fresh,
-                                         message={"model": "claude-fable-5"}) + "\n", encoding="utf-8")
+        row = _line(type="assistant", timestamp=fresh, message={"model": "claude-fable-5"})
+        self.transcript.write_text(row + "\n", encoding="utf-8")
         self.assert_silent()
 
     def test_non_auto_mode(self) -> None:
@@ -518,7 +522,7 @@ class NegativeControlsTest(_EarlyFence):
                 self.assertFalse(self.tick()["recovered"])
         self.assertEqual((self.spawned, self.recovered_events()), ([], []))
 
-    def test_park_why_registered_below_threshold_does_not_fire_on_a_low_absolute_reading(self) -> None:
+    def test_park_why_registration_does_not_fire_on_a_low_absolute_reading(self) -> None:
         park.write_marker(dict(self.marker, parked_pct=80.0))
         self.state = _keyed(_state(five=80.0, week=80.0), "acct-A")
         self.assertFalse(self.tick()["recovered"])
@@ -591,7 +595,7 @@ class BriefLineTest(_Fence):
 
 
 class PlannerWiringTest(_Fence):
-    """tools/session_resume_planner.py::_sentinel_tick：探針接線（AT-CTL-59；REQ-CTL-31；MU-CTL-32）。
+    """tools/session_resume_planner.py::_sentinel_tick：探針接線（AT-CTL-59；REQ-CTL-31）。
     任務書檔名帶 `PLAN_PREFIX`，park 標記以裸 sid 為鍵——兩個哨兵分支都必須去前綴。"""
 
     def setUp(self) -> None:
@@ -634,7 +638,8 @@ class StatusLineCompatTest(unittest.TestCase):
     """tools/lib/sessionctl/park_status.py：本包不改 SE／QW 既有三列（SE X-22：兩稿各自加列）。"""
 
     def test_park_status_lines_still_three_rows_and_early_row_is_separate(self) -> None:
-        rows = park_status.lines(SID, None, {"backend": mock.Mock(name="b", list_jobs=lambda _p: [])})
+        seams = {"backend": mock.Mock(name="b", list_jobs=lambda _p: [])}
+        rows = park_status.lines(SID, None, seams)
         self.assertEqual([r.split(":")[0] for r in rows], ["primary", "backup", "sentinel"])
 
 
