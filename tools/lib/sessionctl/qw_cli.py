@@ -48,6 +48,21 @@ def cli(argv: list[str], env: Mapping | None = None, *, now: datetime | None = N
     return 0
 
 
+def pace_line(sid: str | None, transcript, env: Mapping | None = None, *,
+              now: datetime | None = None, **seams) -> str:
+    """`--pace` 的 QW 行（REQ-QW-79）：只回機器行 `QUOTAWALL_PLAN=…\\n`；量不到／無 sid／任何例外
+    ⇒ 空字串（fail-open，不印、不報錯、不改 rc）。planner 是唯一呼叫者；`quota_gate` 不 import
+    本套件（依賴方向 planner→sessionctl，AT-QW-93 以 AST 鎖）。"""
+    if not sid:
+        return ""
+    try:
+        plan = qw_plan.plan(sid, transcript, os.environ if env is None else env,
+                            now or datetime.now().astimezone(), **seams)
+        return "" if plan.stage == qw_plan.NONE else qw_plan.plan_lines(plan)[-1] + "\n"
+    except Exception:  # noqa: BLE001 — 唯讀診斷行，量不到不得拖垮 --pace
+        return ""
+
+
 def status_lines(sid: str) -> list[str]:
     """`sessionctl status` 的憑證三列（唯讀）；量不到整體降級成一行說明，不拋。"""
     try:

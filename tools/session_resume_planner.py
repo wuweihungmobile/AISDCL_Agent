@@ -102,7 +102,7 @@ import transcript_activity  # noqa: E402  # DEF-200-560／562：session 存活�
 import unattended_authz  # noqa: E402  # DEF-200-575：無人回合時間邊界（牆鐘／harness 背景等待上限）的家（tools/lib）
 
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
-from lib.sessionctl import modelmix, parkearly, switch  # noqa: E402  # 選路／模型／park 提前恢復
+from lib.sessionctl import modelmix, parkearly, qw_cli, switch  # noqa: E402  # 選路／模型／park 提前恢復／QW 行
 from lib.sessionctl import park as sessionctl_park  # noqa: E402  # park 標記讓路（ADR §2.17 D7）
 from lib.sessionctl import (  # noqa: E402  # QW §7.6 哨兵接手 park 失敗
     park_takeover as sessionctl_takeover,
@@ -1574,11 +1574,11 @@ def main(argv: list[str]) -> int:
         print(quota_gate.pace_report(model=args.model or harness_feed.active_model_of(aim, guard), sid=guard.session_id_of(aim) if aim else None), end="")  # noqa: E501 — DEF-200-420：自動推導，顯式 --model 優先
         print(quota_reconcile.ledger_gap_line(), end="")  # DEF-200-203：落款斷層提醒（只出聲）
         print(modelmix.pace_line(quota_gate, guard.model_family(args.model or harness_feed.active_model_of(aim, guard)) or None), end="")  # noqa: E501 — sessionctl D8：模型平衡建議（只出聲）
+        print(qw_cli.pace_line(guard.session_id_of(aim) if aim else None, aim), end="")  # noqa: E501 — REQ-QW-79：QW 行（量不到不印）
         if aim:  # DEF-200-431：印出 session 來源（stderr，stdout 的四欄判定不動）
             print(harness_feed.session_line(source, guard.session_id_of(aim)), file=sys.stderr)
-        liveness = sentinel_lifecycle.liveness_line(guard.session_id_of(aim)) if aim else ""
-        if liveness:
-            print(liveness, file=sys.stderr)
+            if (liveness := sentinel_lifecycle.liveness_line(guard.session_id_of(aim))):
+                print(liveness, file=sys.stderr)
         return 0
 
     # 這三個模式不需要逐字稿，先處理（否則在找不到 session 的機器上連查姿態都做不到）。
