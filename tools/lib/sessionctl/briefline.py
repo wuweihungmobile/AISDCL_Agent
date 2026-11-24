@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable, Mapping
 from datetime import datetime
 
-from . import cutvoice, roster
+from . import cutvoice, parkprobe, roster
 
 ORPHAN_MAX_AGE_SECONDS = roster.RESIDUE_MAX_AGE_SECONDS  # 同名冊：滿壽命的殘局不再公告
 
@@ -61,5 +61,9 @@ def join(lines: list[str]) -> str:
     return "".join(line for line in lines if line)
 
 
+def park_probe_line(env: Mapping | None = None) -> str:
+    return parkprobe.brief_line(env)  # armed park 的提前恢復探針連續 3 次量不到（W6，REQ-CTL-35）
+
+
 def lines(sid: str | None, env: Mapping | None = None) -> str:
-    return join([orphan_line(sid, env)])
+    return join([orphan_line(sid, env), park_probe_line(env)])

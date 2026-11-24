@@ -24,6 +24,7 @@ from . import (
     park_reset,
     park_spawn,
     park_status,
+    parkprobe,
     se_gate,
     switch,
 )
@@ -158,7 +159,8 @@ def _cmd_park(opts, sid: str, env, S: dict, now: datetime) -> int:
               "valid_until": (fire + timedelta(seconds=park.YIELD_GRACE_SECONDS)).isoformat(),
               "jobs": [{"label": label, "role": "primary", "fire_at": fire.isoformat(),
                         "credential": str(cred)}], "reason": reason, "outcome": None,
-              **park_register.marker_fields(primary, fire, at_mode=bool(opts.at), env=env)}
+              **park_register.marker_fields(primary, fire, at_mode=bool(opts.at), env=env),
+              **parkprobe.baseline(S, now)}  # W6：parked_pct／parked_account（量不到 ⇒ 不寫）
     if opts.claude:
         marker["claude"] = opts.claude  # 供 QW §7.6 哨兵接手沿用同一執行檔（未給 ⇒ 標記逐字不變）
     ok, msg = park.write_marker(marker)
@@ -176,8 +178,8 @@ def _cmd_park(opts, sid: str, env, S: dict, now: datetime) -> int:
     print(cred)
     print(f"park 已掛好：到點（{fire.isoformat(timespec='seconds')}）若這個 session 沒有人在動，"
           "就由新 session 帶交接包接手。現在可以結束回合；不要請人回這個視窗接手。")
-    print("\n".join(park_register.verdict_lines(sid, primary, fire, cred, sentinel,
-                                                platform_name=S.get("platform"))))
+    print("\n".join(parkprobe.with_token(park_register.verdict_lines(
+        sid, primary, fire, cred, sentinel, platform_name=S.get("platform")), marker, sentinel)))
     return 0
 
 
@@ -249,7 +251,8 @@ def _cmd_status(opts, sid: str, S: dict) -> int:
             where = "量不到" if listed is None else "在" if job["label"] in listed else "不在"
             live = f"｜排程器中：{where}"
         print(f"  job {job['label']}｜憑證 {job['credential']}{live}")
-    print("\n".join(park_status.lines(sid, marker, S, platform_name=S.get("platform"))))
+    print("\n".join([*park_status.lines(sid, marker, S, platform_name=S.get("platform")),
+                     parkprobe.status_row(marker, S)]))
     return 0
 
 
@@ -340,7 +343,7 @@ def _cmd_fire(opts, sid: str, env, S: dict, clock) -> int:
     switch.trace("park_job_start", job=label, sid=sid, fire_at=opts.fire_at, late_s=late)
     refusal = se_gate.check("park_cli._cmd_fire", repo=_REPO, pkg=pkg, sid=sid, claude=opts.claude,
                             job=label)  # L1：先於一切讀標記／讓路觀察／spawn；拒絕＝終局
-    marker = park.read_marker(sid)
+    marker = parkprobe.early_view(park.read_marker(sid), opts)  # early＝提前到點：停用 §7.3 分支 A
     if refusal is not None:
         if marker is not None and marker["status"] == "armed" and label in {
                 j["label"] for j in marker["jobs"]}:
