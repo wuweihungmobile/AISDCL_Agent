@@ -263,6 +263,27 @@ def _stamp(row: dict) -> float | None:
         return None
 
 
+def _replay_ruling(state, policy, now: datetime):
+    """QVD C21（R-04）：重放點的判決（純 `decide` 當 decision；動作只看原始讀數，cap 不影響）。"""
+    import quota_policy  # noqa: PLC0415
+    import quota_ruling  # noqa: PLC0415
+
+    axes = tuple(quota_policy.Axis(a.kind, float(a.pct), a.resets_at) for a in state.axes
+                 if type(a.pct) in (int, float))
+    qs = quota_policy.QuotaState(axes, now.isoformat(), "replay", "ok",
+                                 getattr(state, "account_key", None))
+    return quota_ruling.ruling(qs, quota_policy.decide(qs, now, policy), model=None,
+                               policy=policy, now=now)
+
+
+def _load_policy(env):
+    import quota_gate  # noqa: PLC0415 — lazy
+    import quota_policy  # noqa: PLC0415
+
+    # 未指定 env ⇒ 與其他站點同走 `policy_env()`（含使用者層覆寫與戳記），不另造空 env
+    return quota_policy.load_policy(quota_gate.policy_env() if env is None else env)[0]
+
+
 def replay_park_early(parks: list[dict], burn: list[dict], policy, grid_min: float = 15) -> dict:
     """每個 park 標記在 `parked_at ＋ n×格點` 上以 `park.recovered`（經 `parkprobe.evaluate`）重放；
     基準＝登記當下最近一筆讀數（舊標記沒有 `parked_pct`，重放時由 `quota_burn` 補）。
@@ -283,8 +304,8 @@ def replay_park_early(parks: list[dict], burn: list[dict], policy, grid_min: flo
         at = parked + grid_min * 60
         while at < fire - parkprobe.EARLY_MIN_WAIT_MIN * 60:
             state = _burn_state(burn, at)
-            verdict = (parkprobe.evaluate(seeded, state, policy, _dt(at))
-                       if state is not None else {})
+            verdict = (parkprobe.evaluate(seeded, state, _replay_ruling(state, policy, _dt(at)),
+                                          _dt(at)) if state is not None else {})
             if verdict.get("recovered"):
                 hits.append({"sid": marker.get("sid"), "at": _dt(at).isoformat(),
                              "saved_min_ge": round((fire - at) / 60, 1),
@@ -319,7 +340,7 @@ def replay_plan(pop: dict, *, env=None, policy=None) -> dict:
     debounced = [g for g in gaps if _decide(env, ctx=hard, hard=hard, since_takeover_min=g
                                             ).reason == "debounce"]
     park = replay_park_early(ctl.get("parks", []), ctl.get("burn", []),
-                             policy or SimpleNamespace(prepare_pct=_prepare_pct(env)))
+                             policy or _load_policy(env))
     drain = sum(1 for r in h_rows if r["action"] == switchplan.Action.SWITCH_AFTER_DRAIN)
     rows = [
         {"name": "H：ctx ≥ 硬線", "hits": len(h_rows),
@@ -354,14 +375,3 @@ def _takeover_gaps(packs: list[dict]) -> list[float]:
                 gaps.append(round((second["sealed_at"] - first["acked_at"]) / 60, 1))
     return sorted(gaps)
 
-
-def _prepare_pct(env) -> float:
-    try:
-        import quota_gate  # noqa: PLC0415 — lazy
-        import quota_policy  # noqa: PLC0415 — lazy
-
-        # 未指定 env ⇒ 與其他站點同走 `policy_env()`（含使用者層覆寫與戳記），不另造空 env
-        pol = quota_policy.load_policy(quota_gate.policy_env() if env is None else env)[0]
-        return float(pol.prepare_pct)
-    except Exception:  # noqa: BLE001 — 讀不到 ⇒ 用出廠準備門檻
-        return 85.0

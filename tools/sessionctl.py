@@ -1,8 +1,10 @@
 """sessionctl 命令列入口（薄殼：只分派，判準全在 `lib/sessionctl/`；ADR-XPLAT-004 §2.13）。
 
 用法：python tools/sessionctl.py <子指令> [旗標]
-  子指令：handoff|status|stop|advice|rush|park|watch|keepwarm|quotawall|runlong|waitfor|oldwin
-          |switch-plan
+  子指令：handoff|status|stop|advice|rush|park|watch|keepwarm|quota|quotawall|runlong|waitfor
+          |oldwin|switch-plan
+  quota [--json] [--next-est <pp>] [--model <family>] [--sid]
+      單一權威額度判決（lib/quota_ruling＋lib/sessionctl/ruling_io；印 `QUOTA_VERDICT=` 行與理由）
   switch-plan [--sid] [--json]
       換手決策表（唯讀、零 token；lib/sessionctl/switchplan；印 Inputs／Decision／reason／carrier／
       credential，末行 `SWITCH_PLAN=<動作> reason=…`）
@@ -125,6 +127,10 @@ def main(argv: list[str] | None = None) -> int:
         from lib.sessionctl import keepwarm
 
         return keepwarm.cli(rest)
+    if verb == "quota":  # QVD §3.5 C19：單一權威額度判決（判準 quota_ruling、取數 ruling_io）
+        from lib.sessionctl import ruling_io
+
+        return ruling_io.cli(rest)
     if verb == "quotawall":  # QuotaWall S-9：唯讀額度牆計畫（零 token；末行 QUOTAWALL_PLAN=）
         from lib.sessionctl import qw_cli
 
@@ -134,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
 
         return longwait.cli_runlong(rest) if verb == "runlong" else longwait.cli_waitfor(rest)
     sys.stderr.write("sessionctl: 用法錯誤：子指令須為 "
-                     "handoff／status／stop／advice／rush／park／watch／keepwarm／quotawall／"
+                     "handoff／status／stop／advice／rush／park／watch／keepwarm／quota／quotawall／"
                      "runlong／waitfor／oldwin／switch-plan\n")
     return _USAGE_RC
 

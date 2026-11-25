@@ -648,7 +648,8 @@ class TempFenceTest(unittest.TestCase):
 
 
 #: DEF-200-446：會碰配速契約寫端的 `(模組, 函式)`；模組名只比點分名的最後一段（容許相對匯入）。
-_PACE_WRITERS = {("quota_gate", "pace_report"), ("quota_gate", "run_pace"),
+_PACE_WRITERS = {("quota_gate", "pace_report"), ("ruling_io", "pace_report"),
+                 ("quota_gate", "run_pace"),
                  ("quota_gate", "main"), ("pace_contract", "write"),
                  ("quota_meter", "write_cache"), ("session_resume_planner", "main")}
 

@@ -63,6 +63,7 @@ import endurance_env  # noqa: E402  # R96／B-4：持久痕跡居所的 SSOT（�
 import harness_feed  # noqa: E402  # R158：`check_lines()` 的空窗出聲測試 round-label-ok
 import quota_criteria  # noqa: E402  # R86：判準本體的家（本檔只做斷言）
 import quota_gate as qg  # noqa: E402
+from lib.sessionctl import ruling_io as RIO  # noqa: E402  # QVD §9：pace_report 搬出 hub
 import quota_messages as qm  # noqa: E402  # R88／LOC-01：人話面與載具參照的家
 import quota_meter  # noqa: E402  # R82／HELM-02：`NO_WINDOW` 相等鎖的另一端
 import quota_policy  # noqa: E402  # R82：門檻／階梯的唯一的家，本檔不再持有任何數字
@@ -2685,7 +2686,9 @@ class SentinelLivenessColumnTest(unittest.TestCase):
             if isinstance(n, ast.FunctionDef) and n.name == "main"))
         pace_branch = main_src[main_src.index("args.pace"):
                                main_src.index("args.check_autocompact")]
-        self.assertIn("liveness_line", pace_branch, "--pace 沒接上活性欄（蓋好沒接電）")
+        self.assertIn("ruling_io.pace_block(", pace_branch, "--pace 區塊沒接到 ruling_io（QVD §9）")
+        self.assertIn("liveness_line", inspect.getsource(RIO.pace_block),
+                      "--pace 沒接上活性欄（蓋好沒接電）")
 
 
 class SentinelWiringTest(unittest.TestCase):
@@ -5192,7 +5195,7 @@ class Fix3UnattendedOutcomeBannerTest(unittest.TestCase):
             # feed 目錄一併隔離：無 model 的逐字稿會走 feed 退用分支（DEF-200-424），不碰真 home
             endurance_env.record_unattended_outcome(
                 "sidP", "exhausted", reset_returned=False, handback_path="/h/p.md")
-            with unittest.mock.patch.object(planner.quota_gate, "pace_report",
+            with unittest.mock.patch.object(planner.ruling_io, "pace_report",
                                             lambda **_k: "PACE-BODY\n"), \
                     unittest.mock.patch.object(planner.sentinel_lifecycle, "liveness_line",
                                                lambda *_a, **_k: ""), \
@@ -10040,7 +10043,7 @@ class RefreshSlotLoserWaitsTest(unittest.TestCase):
     def test_pace_for_an_unmeasured_state_says_unmeasured_not_no_reset(self) -> None:
         """DEF-200-452 的 `--pace` 出口（誤擋訊息之外另一個印出同句的地方）。"""
         os.utime(qg.refresh_stamp_path(), (time.time() - 30, time.time() - 30))
-        text = qg.pace_report(now=datetime.now().astimezone())
+        text = RIO.pace_report(now=datetime.now().astimezone())
         self.assertIn("band=unmeasured", text, "前提：這份報告該是量不到")
         for phrase in ("提額", "不會自己解除", "沒有 reset 可以等"):
             self.assertNotIn(phrase, text, f"量不到被印成「{phrase}」")
@@ -11256,7 +11259,7 @@ class RateLimitIsAFloorNotAnUnknownTest(unittest.TestCase):
         cache = _quota_cache(self.tmp, 30.0, age=600.0, account_key="acct-0123456789")
         before = cache.read_bytes()
         self._fake_429(self.meter, {"Retry-After": "120"})
-        report = qg.pace_report()
+        report = RIO.pace_report()
         self.assertEqual(cache.read_bytes(), before, "429 蓋掉了上一份好快取")
         ledger = qg.burn_ledger_path()
         rows = ledger.read_text(encoding="utf-8").splitlines() if ledger.exists() else []
@@ -12907,21 +12910,23 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
         取新鮮 ⇒ 印逐軸真實讀數（仍不打 API）；真的不可用才說沒有讀數；`--check` 末行共用同句。"""
         now = datetime.now(UTC).astimezone()
         sid = "sid-halted-pace"
-        reset_at = (now + timedelta(seconds=600)).isoformat()
+        reset_at = (now + timedelta(days=2)).isoformat()
+        # QVD C3：halted 行只在判決 HALT_WEEKLY（同帳號週軸標記）時出現；短窗標記改判 WAIT_RESET／PARK。
         qg.write_halt_marker(sid, {"sid": sid, "reset_at": reset_at, "at": now.isoformat(),
-                                   "band": "halt", "binding": "session"})
+                                   "band": "halt", "binding": "seven_day"})
         _quota_cache(self.tmp, 96.0)
-        fresh = qg.pace_report(now=now, sid=sid)
+        fresh = RIO.pace_report(now=now, sid=sid)
         self.assertIn("halted", fresh)
+        self.assertTrue(fresh.startswith("QUOTA_VERDICT=HALT_WEEKLY"), fresh.splitlines()[0])
         self.assertIn("kind=session", fresh, "快取新鮮卻沒印真實讀數")
         _quota_cache(self.tmp, 96.0, age=600.0)
-        stale = qg.pace_report(now=now, sid=sid)
+        with unittest.mock.patch.object(qg, "quota_meter", None):  # 補量不得打真端點（密閉）
+            stale = RIO.pace_report(now=now, sid=sid)
         self.assertNotIn("kind=", stale, "快取已過期卻印了讀數")
-        self.assertIn("沒有新鮮快取", stale)
+        self.assertIn("沒有新鮮讀數", stale)
         line = qm.halted_band_line({"reset_at": "2999-01-01T00:00:00+00:00"}, now)
         for text in (fresh, stale, line):
             self.assertNotIn("量不到本來就是事實", text)
-
     def test_a_fable_halt_does_not_poison_an_opus_window(self) -> None:
         """DEF-200-437（重放實測）：遲滯檔此前不分模型——Fable 視窗的 halt（cap=0）寫進去後，緊接著
         的 Opus 視窗首個 Agent 被「cap=0」擋下，而 Opus 自己各軸的 cap 是 2。遲滯鍵＝模型家族。"""
@@ -12958,7 +12963,7 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
             self.addCleanup(setattr, target, value, old)
         qg.burn_ratio = lambda state: (3.69, "n=21", "")
         quota_policy.decide = stricter_when_paced
-        qg.pace_report(model="opus")
+        RIO.pace_report(model="opus")
         stability = qg.quota_stability
         self.assertIsNone(stability.load_state(scope="opus"), "--pace 寫進了守衛那把尺的遲滯檔")
         self.assertEqual(stability.load_state(scope="opus", ruler="pace").cap, 1,
@@ -12982,7 +12987,7 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
         被擋——「被擋的這一次只要等窗口清空就能再派」在這個語境無所指，且叫人等一個不會來的事件。"""
         _quota_cache(self.tmp, 75.0, kind="weekly_all", resets_in=5 * 86400.0)
         self._pace_contract_to_tmp()
-        text = qg.pace_report(model="opus")
+        text = RIO.pace_report(model="opus")
         self.assertIn("好幾天", text, "前提：遠期 reset 的節流句有印出來")
         for phrase in ("窗口清空", "被擋的這一次", "不是等一下就好"):
             self.assertNotIn(phrase, text, "--pace 語境下這句話為假或自相矛盾")
@@ -12998,13 +13003,13 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
         _quota_cache(self.tmp, None,
                      extra=(("session", 5.0, 3600.0), ("weekly_scoped", 99.0, 60.0)),
                      scope_models={"weekly_scoped": "Fable"})
-        scoped = qg.pace_report(now=now, sid=sid, model="fable")
+        scoped = RIO.pace_report(now=now, sid=sid, model="fable")
         self.assertIn("halted", scoped, "前提：走的是 halt 標記短路")
         self.assertIn("換模型有用", scoped, "短路版 --pace 沒有換模型有沒有用那一句")
-        other = qg.pace_report(now=now, sid=sid, model="sonnet")
+        other = RIO.pace_report(now=now, sid=sid, model="sonnet")
         self.assertNotIn("換模型", other, "該模型判讀並未停止，卻印了換模型的結論（假話）")
         _quota_cache(self.tmp, None, extra=(("session", 5.0, 3600.0), ("weekly_all", 99.0, 60.0)))
-        self.assertIn("換模型沒有用", qg.pace_report(now=now, sid=sid, model="opus"),
+        self.assertIn("換模型沒有用", RIO.pace_report(now=now, sid=sid, model="opus"),
                       "全模型共用軸停止時，短路版沒說換模型沒有用")
 
     def test_a_raw_model_id_in_pace_reads_like_its_family_word(self) -> None:
@@ -13017,8 +13022,8 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
             ("weekly_scoped", 97.0, 3557 * mins)), scope_models={"weekly_scoped": "Fable"})
         self._pace_contract_to_tmp()
         now = datetime.now(UTC).astimezone()  # 同一個 now：兩次呼叫跨分鐘邊界會讓「剩 N 分鐘」差 1
-        raw = qg.pace_report(now=now, model="claude-fable-5").splitlines()[0]
-        family = qg.pace_report(now=now, model="fable").splitlines()[0]
+        raw = RIO.pace_report(now=now, model="claude-fable-5").splitlines()[2]
+        family = RIO.pace_report(now=now, model="fable").splitlines()[2]
         self.assertEqual(raw, family, "原始 id 與家族字讀出不同的答案")
         self.assertIn("band=halt", raw, "擁有者自己的分軌軸（Fable 97%）沒讓它停止")
         self.assertTrue((self.tmp / "autosdd_pace_fable.json").is_file(),
@@ -13209,7 +13214,7 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
     def test_plan_note_is_silent_on_the_very_first_reading(self) -> None:
         _quota_cache(self.tmp, 40.0, kind="five_hour",
                      extra=(("seven_day", 30.0, 90_000.0),))
-        report = qg.pace_report()
+        report = RIO.pace_report()
         self.assertNotIn("⚠️ 偵測到帳號軸組合改變", report)
 
     def test_pace_report_still_reads_only_cache_no_network(self) -> None:
@@ -13220,7 +13225,7 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
         old = quota_meter.measure_detail
         quota_meter.measure_detail = lambda *a, **k: calls.append(a) or (None, "spy")
         self.addCleanup(setattr, quota_meter, "measure_detail", old)
-        self.assertIn("可派", qg.pace_report())
+        self.assertIn("可派", RIO.pace_report())
         self.assertEqual(calls, [], "新增的指紋過濾/比對邏輯讓 --pace 多打了一次端點")
 
     # ── R93 二次訂正（Architect REJECT 承接，DEF-200-114）：account_key 併入指紋 ──────
@@ -13438,7 +13443,7 @@ class QuotaGateDecidesOnTheDispatchTargetModelTest(unittest.TestCase):
         self.assertEqual(effects, [], "只擋這一次派工卻做了視窗級副作用（任務書／喚醒）")
         self.assertFalse(qg.halt_marker_path(self.sonnet.stem).exists(),
                          "替自己模型沒停止的視窗落了 halt 標記")
-        first = qg.pace_report(sid=self.sonnet.stem, model="sonnet").splitlines()[0]
+        first = RIO.pace_report(sid=self.sonnet.stem, model="sonnet").splitlines()[2]
         self.assertIn("現在可派", first, "視窗自己的 --pace 沒有印「現在可派」")
         self.assertNotIn("halted", first, "視窗自己的 --pace 首行被 halt 標記短路成 halted")
 
@@ -13733,7 +13738,7 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
         """一行內要有：可派幾個／cap／band／最緊那一軸具名／它距 reset 幾分鐘。"""
         _quota_cache(self.tmp, 35.0, kind="weekly_all", resets_in=99 * 3600,
                      extra=(("nimbus_quill", 0.0, None), ("session", 20.0, 20 * 60)))
-        line = qg.pace_report().splitlines()[0]
+        line = RIO.pace_report().splitlines()[2]
         for token in ("可派", "cap=", "band=", "最緊的一條＝", "分鐘"):
             self.assertIn(token, line, f"`--pace` 第一行少了 {token}：{line}")
         # SA-06：binding 必須是**真的在消耗**的那一軸，不是 0%／reset 不明那一個
@@ -13747,7 +13752,7 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
         old = quota_meter.measure_detail
         quota_meter.measure_detail = lambda *a, **k: calls.append(a) or (None, "spy")
         self.addCleanup(setattr, quota_meter, "measure_detail", old)
-        self.assertIn("可派", qg.pace_report())
+        self.assertIn("可派", RIO.pace_report())
         self.assertEqual(calls, [], "快取新鮮卻還是去打端點 ⇒ 查一次就花一次")
 
     def test_an_unusable_cache_costs_at_most_one_measurement_per_ttl(self) -> None:
@@ -13757,7 +13762,7 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
         quota_meter.measure_detail = lambda *a, **k: calls.append(a) or (None, "spy")
         self.addCleanup(setattr, quota_meter, "measure_detail", old)
         for _ in range(5):
-            qg.pace_report()
+            RIO.pace_report()
         self.assertEqual(len(calls), 1, f"補量 {len(calls)} 次 ⇒ TTL 名額沒生效")
 
     def test_the_cli_flag_exists_and_needs_no_transcript(self) -> None:
@@ -13787,14 +13792,14 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
             encoding="utf-8")
         _quota_cache(self.tmp, 75.0, kind="seven_day", resets_in=72 * 3600,
                      extra=(("five_hour", 16.0, 42 * 60),))
-        report = qg.pace_report()
+        report = RIO.pace_report()
         self.assertEqual(quota_criteria.pace_line_problems(report), [], report)
         ledger = qg.burn_ledger_path()
         # 🔴 R93：基線由 2（預先落的同指紋歷史列）變成 3——多的那一列才是本次呼叫真的
         # 落款；判準仍是「查了一次只多一列」，不是「檔案恰好一列」。
         self.assertEqual(len(ledger.read_text(encoding="utf-8").splitlines()), 3,
                          "查了一次卻沒有落款 ⇒ 樣本永不累積")
-        qg.pace_report()   # 同一份快取再查一次：不得寫出第二列重複觀測
+        RIO.pace_report()   # 同一份快取再查一次：不得寫出第二列重複觀測
         self.assertEqual(len(ledger.read_text(encoding="utf-8").splitlines()), 3)
 
     def test_the_unmeasurable_case_says_so_instead_of_looking_healthy(self) -> None:
@@ -13802,7 +13807,7 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
         old = quota_meter.measure_detail
         quota_meter.measure_detail = lambda *a, **k: (None, "spy")
         self.addCleanup(setattr, quota_meter, "measure_detail", old)
-        report = qg.pace_report()
+        report = RIO.pace_report()
         self.assertIn("量不到", report, f"量不到卻沒說：{report}")
 
     # ── R89／`DEF-200-112`：cap=0 的兩型（等得到 reset／只能等人）此前在 `--pace` 上逐字
@@ -13827,7 +13832,7 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
         ):
             with self.subTest(name):
                 _quota_cache(self.tmp, **seed)
-                report = qg.pace_report()
+                report = RIO.pace_report()
                 if want:
                     self.assertIn(want, report, f"{name}：{report}")
                 if deny:
@@ -13862,18 +13867,18 @@ class QuotaPaceOutletIsReachableTest(unittest.TestCase):
         env = unittest.mock.patch.dict(os.environ, {"AUTOSDD_QUOTA_MAX_FANOUT": "12"})
         env.start()
         self.addCleanup(env.stop)
-        self.assertIn("max_fanout=12", qg.pace_report().splitlines()[0])
+        self.assertIn("max_fanout=12", RIO.pace_report().splitlines()[2])
 
     def test_the_pace_report_carries_the_posture_line_read_from_the_cache_path(self) -> None:
         """`posture_line` 搬進人話面之後的接線鎖：快取路徑由 `pace_report` 傳入；讀不出來一律說
         「無 credits fallback」（保守），讀得出來照 posture 欄說話；re-export 與本尊同一個物件。"""
         cache = _quota_cache(self.tmp, 20.0)
-        self.assertIn("帳號姿態讀不出來", qg.pace_report(), "種的快取沒有 posture 欄，應走保守句")
+        self.assertIn("帳號姿態讀不出來", RIO.pace_report(), "種的快取沒有 posture 欄，應走保守句")
         body = json.loads(cache.read_text(encoding="utf-8"))
         body["posture"] = {"plan_fingerprint": ["five_hour", "seven_day"],
                            "credits_present": True, "fallback_available": True}
         cache.write_text(json.dumps(body), encoding="utf-8", newline="\n")
-        report = qg.pace_report()
+        report = RIO.pace_report()
         self.assertIn("方案指紋=five_hour+seven_day", report)
         self.assertIn("credits **可用**", report)
         self.assertIs(qg.posture_line, qm.posture_line)
@@ -13956,7 +13961,7 @@ class WindowUsageIsToldTheSameWayByBothOutletsTest(unittest.TestCase):
         cap, _now = self._cap_now()
         self.assertTrue(cap, f"cap={cap} ⇒ 這一條要的「視窗剛好用滿」構造不出來")
         self.assertEqual(self._seed_dispatches(cap), cap, "派發帳沒種滿")
-        line = qg.pace_report().splitlines()[0]
+        line = RIO.pace_report().splitlines()[2]
         self.assertIn("現在可派 0 個", line, f"視窗已用滿，`--pace` 卻還在報可派：{line}")
         self.assertIn(f"cap={cap}", line, "cap 這個原始值不見了 ⇒ 「cap 很寬但視窗滿了」"
                                           "與「cap 本來就是 0」在畫面上同形")
@@ -14211,11 +14216,11 @@ class FanoutWindowRemainingSecondsTest(unittest.TestCase):
         """
         _quota_cache(self.tmp, 75.0, kind="session", resets_in=2 * 3600)
         self._seed(163, 40)
-        report = qg.pace_report(self.now)
+        report = RIO.pace_report(self.now)
         self.assertIn("扇出視窗：剩 137 秒", report, f"`--pace` 沒印視窗剩餘秒：{report}")
         self.assertIn("帳上 2 筆", report, f"帳上筆數不見了：{report}")
         self.assertIn("最舊 163 秒前", report, f"最舊那一筆的年齡不見了：{report}")
-        self.assertIn("可派", report.splitlines()[0],
+        self.assertIn("可派", report.splitlines()[2],  # QVD C3：首行＝判決行、第二行＝理由
                       "新那一行擠掉了第一行 ⇒ 既有的「一行五項事實」鎖會被連帶打紅")
 
 

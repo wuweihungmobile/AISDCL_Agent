@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lib"))
 import quota_burndown as B  # noqa: E402
 import quota_criteria as QC  # noqa: E402
 import quota_gate as QG  # noqa: E402
+from lib.sessionctl import ruling_io as RIO  # noqa: E402  # QVD §9：pace_report 搬出 hub
 import quota_messages as QM  # noqa: E402
 import quota_meter as M  # noqa: E402
 import quota_pace as W  # noqa: E402
@@ -278,9 +279,9 @@ class TestCarrierAndEffectiveness(unittest.TestCase):
         self.put_cache(now)
         B.issue("weekly_all", "清倉")  # 預設路徑＝AUTOSDD_TRACE_DIR 下的落款檔，與 hook 讀的同一份
         ident = B.read_directive()["id"]
-        report = QG.pace_report(now=now)
+        report = RIO.pace_report(now=now)
         self.assertEqual(report.count("清倉模式生效中"), 1, "全文清倉段整份輸出只印一次")
-        self.assertIn(f"🔥清倉 {ident}：", report.splitlines()[0])  # 標題行只帶短標記
+        self.assertIn(f"🔥清倉 {ident}：", report.splitlines()[2])  # 標題行（判決行兩行之後）只帶短標記
         for name, key, want in ((QG.BURN_LEDGER_NAME, "bd", ident),
                                 (B.EVENTS_NAME, "effect", "relaxed")):
             last = (self.tmp / name).read_text(encoding="utf-8").splitlines()[-1]
@@ -288,7 +289,7 @@ class TestCarrierAndEffectiveness(unittest.TestCase):
         self.assertLessEqual({"decided_cap", "decided_rec"}, json.loads(last).keys())  # 穩定化前
         self.assertEqual(self.hook_ids(), [ident], "派工 hook 的 decide() 沒帶落款")
         with mock.patch.object(QG, "policy_env", lambda root=None: {B.OFF_ENV: "1"}):
-            self.assertNotIn("清倉", QG.pace_report(now=now))
+            self.assertNotIn("清倉", RIO.pace_report(now=now))
             self.assertEqual(self.hook_ids(), [None], "kill-switch 在派工 hook 路徑也要生效")
         self.assertIsNone(json.loads(W.row_of(NOW.isoformat(), (("a", 1.0),)))["bd"])  # 無授權
 

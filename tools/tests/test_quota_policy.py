@@ -55,6 +55,7 @@ import quota_availability as QA  # noqa: E402  # R102：可得性軸遲滯狀態
 import quota_boot_check as QBC  # noqa: E402  # R102／R16：啟動自檢（H6／H7）  round-label-ok
 import quota_criteria as QC  # noqa: E402
 import quota_gate as QG  # noqa: E402  # R95 修4：halt 動作接線面（waker 注入驗證）
+from lib.sessionctl import ruling_io as RIO  # noqa: E402  # QVD §9：pace_report 搬出 hub
 import quota_ledger as QL  # noqa: E402  # R102：`with_lock()` 互斥原語（F24 修復）  round-label-ok
 import quota_messages as QM  # noqa: E402  # R95 修4：halt 多軸 reset 裁決的家
 import quota_meter as M  # noqa: E402
@@ -3791,15 +3792,23 @@ class ConcurrencyDecisionPathWiringTest(unittest.TestCase):
         nxt = rest.find("\ndef ", 1)  # 找不到（本函式是檔案最後一個 def）⇒ 到檔尾
         return rest if nxt == -1 else rest[:nxt]
 
+    #: QVD §9：`pace_report` 搬到 `sessionctl/ruling_io.py`（hub 成員只縮不長）。
+    _PACE_SRC = (_REPO / "tools" / "lib" / "sessionctl" / "ruling_io.py").read_text(
+        encoding="utf-8")
+
     def test_quota_gate_calls_both_the_availability_and_stability_layers(self) -> None:
-        body = self._body_of("quota_gate")
+        # QVD §3.1：管線自 `quota_gate()` 原樣抽出為 `dispatch_decision()`（派工閘與判決共用）。
+        self.assertIn("dispatch_decision(", self._body_of("quota_gate"),
+                      "quota_gate() 沒有經 dispatch_decision ⇒ 派工閘與判決不是同一條管線")
+        body = self._body_of("dispatch_decision")
         self.assertIn("quota_availability.evaluate(", body,
                       "quota_gate() 沒有呼叫可得性軸遲滯 ⇒ (a) 沒有真的接進派發路徑")
         self.assertIn("quota_stability.evaluate(", body,
                       "quota_gate() 沒有呼叫平穩性機制 ⇒ (b)(c)(d) 沒有真的接進派發路徑")
 
     def test_pace_report_calls_both_layers_before_writing_the_engine_contract(self) -> None:
-        body = self._body_of("pace_report")
+        start = self._PACE_SRC.index("def pace_report(")
+        body = self._PACE_SRC[start:self._PACE_SRC.index("\ndef ", start + 1)]
         self.assertIn("quota_stability.evaluate(", body,
                       "pace_report() 沒有套用平穩性機制 ⇒ 引擎讀到的 pace_contract 仍是"
                       "未平穩化的原始 cap")
@@ -3809,9 +3818,11 @@ class ConcurrencyDecisionPathWiringTest(unittest.TestCase):
 
     def test_both_rulers_forward_the_halt_reset_to_the_stabilizer(self) -> None:
         """DEF-200-479：兩處呼叫都得把 halt 在等的 reset 交給遲滯層，否則 reset 感知是死碼。"""
-        calls = [n for n in ast.walk(ast.parse(self._SRC)) if isinstance(n, ast.Call)
-                 and ast.unparse(n.func) == "quota_stability.evaluate"]
-        kws = [{k.arg: ast.unparse(k.value) for k in c.keywords} for c in calls]
+        calls = [n for src in (self._SRC, self._PACE_SRC) for n in ast.walk(ast.parse(src))
+                 if isinstance(n, ast.Call) and ast.unparse(n.func).removeprefix("qg.")
+                 == "quota_stability.evaluate"]
+        kws = [{k.arg: ast.unparse(k.value).removeprefix("qg.") for k in c.keywords}
+               for c in calls]
         self.assertEqual([k.get("reset_at") for k in kws], ["halt_resets_at(decision)"] * 2)
         self.assertEqual(sum(k.get("event") == "event" for k in kws), 1,
                          "守衛尺沒帶 event ⇒ 放手時出不了聲")
@@ -4797,7 +4808,7 @@ class PaceFloorGateTest(_GateHarness):
     def test_at_qp_38_pace_report_says_the_floor_and_stays_m7_clean(self):
         """`--pace` 是派工前的詢問口；不說床就看不出為何被擋。"""
         now = self.cache(38.0, 247.0)
-        text = QG.pace_report(now)
+        text = RIO.pace_report(now)
         for part in ("配速床：", "kind=five_hour", "pp", "超線"):
             self.assertIn(part, text)
         self.assertRegex(text, r"剩 24[67] 分鐘，已用")
@@ -4806,7 +4817,7 @@ class PaceFloorGateTest(_GateHarness):
         floor_lines = "".join(x + "\n" for x in text.splitlines() if x.startswith("  配速床："))
         self.assertTrue(floor_lines)
         self.assertEqual(QC.m7_problems(floor_lines), [])
-        calm = QG.pace_report(self.cache(10.0, 247.0))
+        calm = RIO.pace_report(self.cache(10.0, 247.0))
         self.assertIn("未超線", calm)
 
     def test_at_qp_39_the_third_dispatch_is_blocked_and_a_rush_unblocks_all(self):

@@ -34,6 +34,7 @@ import importlib.util as _ilu  # noqa: E402
 import context_budget_guard as guard  # noqa: E402
 import platform_utils  # noqa: E402
 import quota_gate as qg  # noqa: E402
+from lib.sessionctl import ruling_io as RIO  # noqa: E402  # QVD §9：pace_report 搬出 hub
 import quota_messages  # noqa: E402
 import quota_policy  # noqa: E402
 import schedule_backend as sb  # noqa: E402
@@ -589,8 +590,7 @@ class HaltedBandLineTest(unittest.TestCase):
 
 
 class PaceReportShortCircuitsDuringHaltTest(unittest.TestCase):
-    """D23（SD-07；INV-H3）：`pace_report()` 於 halt 未過期時須短路回 halted 行，不得
-    進 `pace_state()` 補打 API。詳見 docs/06_quality/
+    """D23（SD-07；INV-H3）→ QVD §6（v2.1.28 R-4.1.6-6 取代）：halt 有效不再短路取數。原詳見 docs/06_quality/
     CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
 
     def setUp(self) -> None:
@@ -598,20 +598,22 @@ class PaceReportShortCircuitsDuringHaltTest(unittest.TestCase):
         self.enterContext(unittest.mock.patch.dict(
             os.environ, {"AUTOSDD_TRACE_DIR": str(self.tmp / "traces")}))
 
-    def test_pace_state_is_never_called_while_halted(self) -> None:
+    def test_pace_state_is_called_once_even_while_halted(self) -> None:
+        """QVD §6／R-4.1.6-6（v2.1.28 取代 INV-H3 收斂版）：halt 標記有效＋快取逾 TTL ⇒ 仍經
+        `pace_state()` 補量恰一次（halt 標記不得壓住補量；同 TTL 節流在 `claim_refresh_slot`）。"""
         now = datetime.now(UTC).astimezone()
         sid = "sid-d23-pace-halt"
         qg.write_halt_marker(sid, {
             "sid": sid, "reset_at": (now + timedelta(seconds=600)).isoformat(),
             "at": now.isoformat(), "band": "halt", "binding": "session"})
-
-        def _boom(*_a, **_k):
-            raise AssertionError("halt 期間不該呼叫 pace_state()——那條路可能補打一次 API")
-
-        self.enterContext(unittest.mock.patch.object(qg, "pace_state", _boom))
-        report = qg.pace_report(now=now, sid=sid)
-        self.assertIn("halted", report)
-
+        calls = []
+        real = qg.pace_state
+        self.enterContext(unittest.mock.patch.object(
+            qg, "pace_state", lambda at: calls.append(at) or real(at)))
+        self.enterContext(unittest.mock.patch.object(qg, "quota_meter", None))
+        report = RIO.pace_report(now=now, sid=sid)
+        self.assertEqual(len(calls), 1, "halt 有效時仍須經 pace_state 補量一次")
+        self.assertTrue(report.startswith("QUOTA_VERDICT="), report.splitlines()[0])
     def test_no_halt_marker_falls_through_to_normal_pace_report(self) -> None:
         """對照組：沒有 halt 標記時仍走既有路徑（不是永遠短路）。"""
         now = datetime.now(UTC).astimezone()
@@ -623,7 +625,7 @@ class PaceReportShortCircuitsDuringHaltTest(unittest.TestCase):
             "source": "endpoint", "measured_at": now.isoformat(timespec="seconds"),
         }), encoding="utf-8")
         self.enterContext(unittest.mock.patch.object(qg, "quota_cache_path", lambda: cache))
-        report = qg.pace_report(now=now, sid="sid-never-halted-d23")
+        report = RIO.pace_report(now=now, sid="sid-never-halted-d23")
         self.assertNotIn("halted", report)
 
 
@@ -646,7 +648,7 @@ class PaceReportSaysTheEscapeHatchesTest(unittest.TestCase):
         self.enterContext(unittest.mock.patch.object(qg, "quota_cache_path", lambda: cache))
         qg.write_halt_marker("sid-def561-halted", {"sid": "sid-def561-halted", "reset_at": later,
                                                    "at": self.now.isoformat(), "band": "halt",
-                                                   "binding": "session"})
+                                                   "binding": "seven_day"})  # QVD C3：halted 行只在 HALT_WEEKLY
 
     def test_both_return_paths_say_it_only_when_a_flag_is_set(self) -> None:
         for label, env, says in (("RESUME_OFF", {"AUTOSDD_RESUME_OFF": "1"}, "只探測"),
@@ -655,7 +657,7 @@ class PaceReportSaysTheEscapeHatchesTest(unittest.TestCase):
             with unittest.mock.patch.object(qg, "policy_env", return_value=env):
                 for path, sid, marker in (("halt 短路", "sid-def561-halted", True),
                                           ("完整報告", "sid-def561-live", False)):
-                    text = qg.pace_report(now=self.now, sid=sid)
+                    text = RIO.pace_report(now=self.now, sid=sid)
                     with self.subTest(label, path=path):
                         self.assertEqual("halted" in text, marker, "兩條回傳面沒各走一次")
                         for phrase in ("只探測", "不武裝"):

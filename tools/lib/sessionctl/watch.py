@@ -53,7 +53,7 @@ DISPOSAL = {
     "stall": "`sessionctl status` 看該代理最後一筆；確定卡住 ⇒ TaskStop 它、派新代理＋短任務書（指向它的 HB 檔；不得 SendMessage 冷續，`resume_gate` 也會擋）；重掛 watch",  # noqa: E501
     "overrun": "讀它的 HB：快完成 ⇒ 重掛 watch 並 `--wall-min <現值+30>`（每支至多一次）；否則 TaskStop＋拆小重派",  # noqa: E501
     "budget": "TaskStop（續下去每輪都更貴）＋派新代理接它的 HB",
-    "quota": "估剩餘：代理快完成 ⇒ 重掛 watch（同一 reset 窗同一帶不會再觸發），等交卷後 封存→`park`；否則 TaskStop 全部 → 封存 → `park`（park 前置要求無在飛代理）",  # noqa: E501
+    "quota": "先 `python tools/sessionctl.py quota` 重算（判決過期一律重算），再依新 ACTION 查 watch_wake.QUOTA_DISPOSAL 對應列",  # noqa: E501
     "resume": keepwarm.DISPOSAL["resume"],
     "handed_over": keepwarm.DISPOSAL["handed_over"],
     "switch_due": "到換手點（硬線待換、在飛代理已全數交卷）：寫完交接包主控層 → `handoff --finalize <包>` → `--spawn`；不再派新代理",  # noqa: E501
@@ -236,9 +236,10 @@ def ended_turn(sid: str, agent_id: str, projects_dir=None) -> bool:
             and msg.get("stop_reason") == "end_turn")
 
 
-def quota_keys_now(now: float | None = None, plan=None) -> list[tuple]:
-    """額度事件閂鎖鍵（兩條序列各至多一把）；判準住 `watch_wake.quota_keys`（r9 W11d）。"""
-    return watch_wake.quota_keys(now, plan)
+def quota_keys_now(sid: str, transcript, env, now: float | None = None, plan=None,
+                   read_quota=None) -> list[tuple]:
+    """額度事件閂鎖鍵（單一判決序列，至多一把）；判準住 `watch_wake.quota_keys`（QVD C4）。"""
+    return watch_wake.quota_keys(sid, transcript, env, now, plan, read_quota)
 
 
 def _anchor_reader(sid: str, projects_dir):
@@ -297,7 +298,8 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
         sid, transcript(), env, datetime.fromtimestamp(t).astimezone(), read_quota=read_quota,
         refresh=refresh))
     plans = watch_wake.PlanCache(plan_fn)
-    quota_fn = quota_fn or (lambda: quota_keys_now(now_fn(), plans.get(now_fn())))
+    quota_fn = quota_fn or (lambda: quota_keys_now(sid, transcript(), env, now_fn(),
+                                                   plans.get(now_fn()), read_quota))
     wctl = watch_wake.WakeCtl(sid, transcript, env, cfg, budget, anchor_fn, read_quota=read_quota,
                               refresh=refresh)
     pid = os.getpid() if pid is None else pid
@@ -306,7 +308,8 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
         switch.trace(EV_WATCH_VERDICT, sid=sid, verdict="duplicate", agents=0)
         watch_wake.due_suffix(sid, "duplicate", None, [])  # 另落 watch_duplicate 痕跡
         return 0
-    started, latched, holding, state, band = now_fn(), False, False, {}, "prepare"
+    started, latched, holding, state, band = now_fn(), False, False, {}, "NODISPATCH"
+    tail = ""
     resolver = _kw_resolver(budget, state)
     try:
         while True:
@@ -327,11 +330,12 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
                 continue
             quota_hit: bool | str = False
             hits = watch_wake.norm_hits(hit)
-            if hits:  # 兩條序列各自閂鎖（W11d）；計畫序列另以在飛代理數 N 做新派工重判
+            if hits:  # 單一序列閂鎖 (acct, ACTION, win)（QVD C5）；在飛代理數 N 做新派工重判
                 fired = watch_wake.fire_hits(sid, hits, getattr(plans.get(now), "n_live", None))
                 if fired:
                     band = watch_wake.top_band(fired)
                     quota_hit = watch_wake.quota_detail(fired, plans.get(now))
+                    tail = watch_wake.verdict_tail(fired)
                 elif not latched:  # 同一個 run 只落一次痕跡，免得每輪洗版
                     latched = True
                     switch.trace(keepwarm.EV_QUOTA_LATCHED, sid=sid, band=watch_wake.top_band(hits),
@@ -361,7 +365,8 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
                 out.write(cutvoice.watch_text(agents, sid, transcript(), projects_dir))  # CTL-20
                 out.write(watch_wake.due_suffix(sid, event, pend, agents))  # 待換逾期字尾
                 switch.trace(EV_WATCH_VERDICT, sid=sid, verdict=event, agents=len(agents), **extra)
-                print(f"WATCH_VERDICT={event} n={len(agents)}", file=out, flush=True)
+                tail = tail if event == "quota" else ""
+                print(f"WATCH_VERDICT={event}{tail} n={len(agents)}", file=out, flush=True)
                 return 0
             write_heartbeat(sid, cfg, started, now, pid, anchor, wctl.due() if holding else None)
             sleep_fn(poll_sec)

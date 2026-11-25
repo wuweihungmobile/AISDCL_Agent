@@ -93,17 +93,18 @@ import harness_feed  # noqa: E402
 
 # 判讀原語。**刻意沒有 try/except**：能力提供者可以降級，判讀原語不行——給它
 # fallback stub 等於讓同一份字面有第二個家，而且會用錯的答案靜默通過。
-import pace_contract  # noqa: E402  # R86：配速檔案契約的寫入端（引擎側唯一的傳遞方式）
+import pace_contract  # noqa: E402,F401  # R86 配速契約寫入端（ruling_io.pace_report 經本檔屬性取用）
 import quota_availability  # noqa: E402  # R102／PRD §4.2.4(a)：可得性軸遲滯（內部已 fail-soft）  round-label-ok
 import quota_burndown  # noqa: E402  # DEF-200-528：清倉授權疊層（操作者落款；只改逐軸輸入）
 import quota_env_layers  # noqa: E402  # 檔案層載入鏈（env.shared → .env）的 SSOT
 import quota_messages  # noqa: E402  # DEF-200-435：新 helper 走模組屬性（from-import 每名佔一行，tier 餘裕僅 1 行）
 import quota_pace  # noqa: E402  # R86：窗長／燃燒率／跨窗攤提（同樣是判讀原語）
-import quota_pace_floor  # noqa: E402  # ADR-XPLAT-004 §2.15：配速床說明行（純函式）
+import quota_pace_floor  # noqa: E402,F401  # ADR-XPLAT-004 §2.15：配速床說明行（純函式）
 import quota_policy  # noqa: E402
+import quota_ruling  # noqa: E402  # QVD §8：判決行與阻斷訊息（純函式；只 import quota_policy）
 import quota_rush  # noqa: E402  # §2.15：趕工戳記疊入 policy_env()／gate 落款（內部已 fail-soft）
 import quota_stability  # noqa: E402  # R102／PRD §4.2.4(b)(c)(d)：死區／變化率／最小停留時間  round-label-ok
-import session_brief  # noqa: E402  # DEF-200-561：`--pace` 的續跑逃生口出聲（純函式 escape_hatch_note，單向相依）
+import session_brief  # noqa: E402,F401  # DEF-200-561：`--pace` 的續跑逃生口出聲（純函式 escape_hatch_note，單向相依）
 
 # 🔴 R91：「送進模型 context」這件事的唯一發射口搬到 `platform_utils`（hook I/O 的既有
 # SSOT，它已經住著 `read_payload`）。本檔此前自己 `print(json.dumps(...))`，而同一輪
@@ -901,92 +902,6 @@ def pace_state(now: datetime) -> quota_policy.QuotaState:
     return settled_quota(won)
 
 
-# 🔴 R86：多出的第三行是**攤提**（掌舵者不滿的直接原因）。他看到「短窗 16% used／45 分鐘
-# 就 reset」卻只能派 2 個，而畫面只寫 `binding=seven_day` ⇒ 讀起來像程式抓錯或過度保守。
-# 那一行現在自己回答「為什麼空著也不能衝」：本窗分攤到的長窗配額是多少、已用多少、
-# 還剩幾分鐘會蒸發。落款則在同一次呼叫裡 append 一列——**查一次就多一個樣本**，
-# 而換算比只能從歷時差分來（見 `record_burn` 上方那段）。
-# 🔴 R98：新增 `model` 參數——這次要問的目標模型；`None`＝不知道，模型分軌軸（見
-# `quota_policy.MODEL_SCOPED_KINDS`）一律不進 cap 聚合，但仍全帶在 describe() 那一行裡
-# （`quota_policy._in_cap_gate()`）。既有呼叫端全部沿用這個預設，行為逐字不變。
-def pace_report(now: datetime | None = None, model: str | None = None,
-                sid: str | None = None) -> str:
-    """`--pace` 的全文：第一行是那個數字，第二行起是逐軸明細（每個 % 都帶 kind 與分鐘）。
-
-    D23（SD-07）：本 sid 的 halt 標記未過期時短路，**不**進 `pace_state()`（它在快取不可用時
-    可能補打一次 `/api/oauth/usage`）——halt 期間不需要再花一次 API。DEF-200-435：短路仍**讀**
-    快取（只讀檔、不打 API）：新鮮 ⇒ 標記行之後印逐軸真實讀數；不可用才說沒有讀數。
-    DEF-200-561：兩個回傳面（halt 短路／完整報告）尾端都附續跑逃生口說明（`hatch`，有設才有字）。
-    """
-    now = now or datetime.now().astimezone()
-    policy, problems = quota_policy.load_policy(policy_env())
-    hatch = session_brief.escape_hatch_note(policy_env())  # DEF-200-561：逃生口有設就出聲
-    if (halted := halted_band_line(read_halt_marker(sid or ""), now)):
-        return halted_pace_text(halted, read_quota(now), now, policy, model) + hatch
-    state = pace_state(now)
-    bd = quota_burndown.active(state, now, policy_env(), core_signature)  # DEF-200-528
-    # 🔴 `live` 落款進去是為了**下一輪**：per-agent 燃燒率＝Δpct ÷（Δ分鐘 × 併發數），
-    # 而併發數不記下來就永遠算不出來（本輪的 r 只到「每 pp 換幾 pp」這一層）。
-    # 🔴 R96／B-2：同一個 `live` 現在**還要餵給 `pace_line()`**——舵手派工前問的那個數字
-    # 此前只讀 cap 側（`recommended_fanout`），而守衛擋人的判準是滾動視窗派發帳
-    # ⇒ 實測「`--pace` 印可派 2 個」與「`Agent` 被擋、本視窗已用 2 次」同一刻並存。
-    # 用 walrus 留值：取數次數與時點逐字不變（同一次呼叫、同一個 `now`），只是給第二個消費者。
-    root = fanout_ledger_path()
-    record_burn(state, live := live_dispatches(root, now), bd and bd.id)
-    # 🔴 `DEF-200-169`：**先** `live_dispatches()`（它會 prune 掉滾出視窗的目錄項）**再**問
-    # 最舊那一筆，兩者吃同一個 `now`／同一把 `floor` ⇒ 「帳上 N 筆」與「最舊 M 秒前」在同
-    # 一行裡結構上不可能互相矛盾（先問最舊再數也對，但兩次取數之間會多一個競態窗）。
-    window = fanout_window_left(root, now)
-    ratio, ratio_note, plan_note = burn_ratio(state)
-    decision = quota_policy.decide(state, now, policy, ratio, ratio_note, active_model=model,
-                                   burndown=bd)
-    quota_burndown.log_decision(decision, now)  # 增補檔 §6.3：relaxed／inert 計數的 JSONL 等價物
-    # 🔴 R102：把 cap 寫進契約檔這一步，是引擎唯一真的會讀到 cap 的地方（`quota_gate()` 的  round-label-ok  # noqa: E501
-    # 派發帳只擋 hook 觸發的扇出型工具呼叫，引擎自己的併發排程走這份檔案契約）——平穩性
-    # 機制若只接進 `quota_gate()`，引擎那一側仍然看得到原始的、會抖動的 cap。可得性狀態
-    # （`quota_availability`）仍是 per-account 共用；平穩性遲滯（`quota_stability`）
-    # 則按（模型家族, 尺）分檔（DEF-200-437）：`--pace` 帶 ratio 算出的更緊 cap 只准寫
-    # **pace 那把尺**（`ruler=RULER_PACE`），不得改守衛的執法狀態——此前兩者共用一份，
-    # 查一次 `--pace` 就讓之後一個最小停留時間內的扇出多擋一格；另外各家族也互不污染。
-    avail = quota_availability.evaluate(now, state.usable(),
-                                        exit_streak=policy.availability_exit_streak,
-                                        min_dwell_seconds=policy.availability_min_dwell_seconds)
-    stabilized = quota_stability.evaluate(
-        decision.cap, decision.band, now, scope=model, ruler=quota_stability.RULER_PACE,
-        min_dwell_seconds=policy.min_dwell_seconds,
-        unmeasured=avail.availability == quota_availability.AVAILABILITY_UNMEASURED,
-        reset_at=halt_resets_at(decision))
-    if stabilized != decision.cap:
-        decision = replace(decision, cap=stabilized,
-                           recommended_fanout=min(decision.recommended_fanout, stabilized))
-    # 🔴 R86 跨包：引擎（`autoclaude/`）**不准** import 本層（`.importlinter` 的
-    # `no-harness-import`）⇒ 唯一的傳遞方式是檔案契約。fail-soft 在 `pace_contract.write`
-    # 內（寫不進去只在 stderr 說一次，`--pace` 的 rc 與那一行輸出都不受影響）。
-    pace_contract.write(decision, state, policy.max_fanout, policy.halt_pct, model=model)
-    tail = f"\n⚠️ env.shared（跨機）或本機 .env 有設錯：{'；'.join(problems)}" if problems else ""
-    # 🔴 R89／`DEF-200-112`：這一行此前**只有撞牆時才說得出來**。`--pace` 是舵手派工前
-    # 查的那個出口，而它對 cap=0 只印「reset 距離不明」——「等 20 分鐘就好」與「只能等
-    # 人去提額」在畫面上完全相同，於是 R88 整輪都在等一個結構上不會來的 reset。
-    # 判讀本身**不新造**：`reset_branch()` 的 arm／notify／escalate 三分支早就承載這個
-    # 語意（halt 撞線訊息已在用），這裡只是把同一個家接到第二個出口。
-    # 🔴 free 帶（`cap is None`）刻意不印：那一行逐字說「這道節流…」，而 free 帶沒有任何
-    # 節流 ⇒ 印出來就是一句假話，而「訊息裡混一句假話比少一欄更難看見」是本 repo 的判例。
-    # DEF-200-200 ③：`state.measured_at` 是分流兩義的參考時刻（見 `quota_pace.expiry_of`）
-    # ——`--pace` 是唯一同時握有它與 `now` 的出口，不帶就只能回「已過去、成因未定」。
-    horizon = ("" if decision.cap is None
-               else throttle_horizon_line(decision, now, state.measured_at))
-    # R95：攤提行帶 converge 錨點（出聲不收緊時說出口）；hint 行空字串＝不印（見渲染端）。
-    return (f"{pace_line(decision, live, policy.max_fanout)}\n"
-            f"  {quota_policy.describe(decision, burndown=False)}\n"
-            f"{quota_burndown.full_line(decision)}"  # DEF-200-528：清倉全文段，整份輸出只這一處
-            f"  {quota_pace.explain(decision.amort, policy.converge_pct)}\n"
-            f"{quota_pace_floor.line(decision.pace)}"  # §2.15：配速床一段（每行自帶縮排與換行）
-            f"  {posture_line(quota_cache_path())}\n"
-            f"{fanout_window_line(window, live, FANOUT_WINDOW_SECONDS)}"
-            f"{horizon}{quota_messages.model_lines(decision, policy_env())}"
-            f"  來源={state.source} 量測於={state.measured_at or '(無)'}{tail}\n{plan_note}{hatch}")
-
-
 def quota_throttle_message(decision: quota_policy.Decision, tool: str, live: int,
                            now: datetime) -> str:
     """節流帶的訊息。同 halt：**一個裸百分比都不准出現**（M7），逐軸帶 kind 與剩餘分鐘。"""
@@ -1028,9 +943,41 @@ def quota_throttle_message(decision: quota_policy.Decision, tool: str, live: int
 # → `fable`）與 `axis.scope_model`（伺服器回的顯示名 `"Fable"`）casefold 相等——這條
 # 正規化路徑不是新造：`model_family()` 的家族清單本就含 `"fable"`（R79 既有，見該函式），
 # 本次只是把既有輸出接到這個此前沒人接的插座。
+def dispatch_decision(state: quota_policy.QuotaState, now: datetime, env, model=None,
+                      event: str = "PreToolUse", *, unmeasured: bool | None = None,
+                      peek: bool = False):
+    # QVD §3.1：自 `quota_gate()` 原樣抽出（清倉 → decide → 可得性遲滯 → 平穩機制 → cap 改寫）；
+    # 派工閘與 `ruling_io.gather()` 共用這一份，cap 只有一個來源。`unmeasured`＝含 L3 地板替補後
+    # 的最終結論（缺＝`not state.usable()`）。平穩機制只准收緊立即、放寬受遲滯（R102）。
+    # `peek=True`＝唯讀一步（讀守衛那把尺的遲滯、不寫；同 `degraded_posture` 的唯讀先例）：
+    # 觀測者（--pace、watch、Stop…）不得改派工閘的執法狀態（DEF-200-437）。
+    policy = quota_policy.load_policy(env)[0]
+    unmeasured = (not state.usable()) if unmeasured is None else unmeasured
+    bd = quota_burndown.active(state, now, env, core_signature)  # DEF-200-528 清倉授權
+    decision = quota_policy.decide(state, now, policy, active_model=model, burndown=bd)
+    if peek:
+        cap = decision.cap if decision.cap is None else quota_stability.stabilize(
+            quota_stability.load_state(scope=model), decision.cap, decision.band, now,
+            min_dwell_seconds=policy.min_dwell_seconds, unmeasured=unmeasured).cap
+        return replace(decision, cap=cap, recommended_fanout=min(
+            decision.recommended_fanout, cap)) if cap != decision.cap else decision
+    avail = quota_availability.evaluate(now, not unmeasured,
+                                        exit_streak=policy.availability_exit_streak,
+                                        min_dwell_seconds=policy.availability_min_dwell_seconds,
+                                        event=event)
+    stabilized = quota_stability.evaluate(
+        decision.cap, decision.band, now, scope=model, min_dwell_seconds=policy.min_dwell_seconds,
+        unmeasured=avail.availability == quota_availability.AVAILABILITY_UNMEASURED,
+        reset_at=halt_resets_at(decision), event=event)
+    if stabilized != decision.cap:  # `rec <= cap` 不變式：建議值跟著夾一次
+        decision = replace(decision, cap=stabilized,
+                           recommended_fanout=min(decision.recommended_fanout, stabilized))
+    return decision
+
+
 def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
                plan_writer, waker, event: str = "PreToolUse",
-               active_model: str | None = None) -> int:
+               active_model: str | None = None, rule=None) -> int:
     """額度軸的**獨立**判定入口。回 0＝放行、2＝擋下。不讀 context、不碰網路以外的東西。
 
     六個注入依賴全部來自 hook 端（見檔頭的單向規則）：`blocking`＝阻斷工具名單、
@@ -1080,30 +1027,11 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
     # 🔴 **整支 hook 唯一的判讀入口，恰好呼叫一次**（M10：「函式對了但沒人叫它」是本 repo
     # 反覆記載的『機制蓋好沒接電』）。量不到時 `decide()` 回 `degraded_cap`（不是不設限、
     # 也永不 halt）：R81 複審探針實測「快取過期 600s ＋ 額度 99%」時 42 次派發放行 42。
-    # DEF-200-528：清倉授權（操作者落款檔；無落款＝None，與今天逐字相同）。`env` 傳進去是給它
-    # 判斷 kill-switch 用的；生效判準與讀取點全住 `quota_burndown.active()`。
-    bd = quota_burndown.active(state, now, env, core_signature)
-    decision = quota_policy.decide(state, now, policy, active_model=active_model, burndown=bd)
-    # 🔴 R102／PRD §4.2.4：平穩性機制接線。`unmeasured` 這裡已經是「這次讀完（含 L3 地板  round-label-ok  # noqa: E501
-    # 替補之後）到底讀不讀得到」的最終結論——`quota_availability.evaluate()` 要的正是
-    # 這個訊號（不是取代它，是替它加上遲滯：單次瞬斷不足以判定「已進入不可得」，見該檔
-    # `advance()`）。`quota_stability.evaluate()` 再吃可得性軸的結論：只要遲滯後仍判定
-    # unmeasured，放寬方向（cap 上調）整段失效，收緊方向永遠立即生效——把 (a) 接進
-    # (b)(c)(d) 正是本輪任務書逐字要求的那一條線。
-    avail = quota_availability.evaluate(now, not unmeasured,
-                                        exit_streak=policy.availability_exit_streak,
-                                        min_dwell_seconds=policy.availability_min_dwell_seconds,
-                                        event=event)
-    stabilized = quota_stability.evaluate(
-        decision.cap, decision.band, now, scope=active_model,
-        min_dwell_seconds=policy.min_dwell_seconds,
-        unmeasured=avail.availability == quota_availability.AVAILABILITY_UNMEASURED,
-        reset_at=halt_resets_at(decision), event=event)
-    if stabilized != decision.cap:
-        # `rec <= cap` 是既有不變式（見 `quota_policy._bound()`）：cap 被平穩機制改寫後，
-        # 建議值也必須跟著夾一次，否則畫面會出現「建議 4、上限 7」這種自相矛盾的組合。
-        decision = replace(decision, cap=stabilized,
-                           recommended_fanout=min(decision.recommended_fanout, stabilized))
+    # QVD §3.1：派工閘與判決共用同一條管線（`dispatch_decision`，cap 唯一來源）。
+    decision = dispatch_decision(state, now, env, active_model, event, unmeasured=unmeasured)
+    # QVD §3.5 C1：有注入判決（hook 端傳 `ruling_io.rule_from_decision`）⇒ 動作只依判決；
+    # 沒注入 ⇒ 既有 band 判讀逐字不變（扁平 hub 不 import 套件）。
+    verdict = rule(state, decision, now, payload, active_model) if rule is not None else None
     if unmeasured:
         # DEF-200-466：出聲在平穩機制**之後**——姿態句印的上限必須是致動器真的會用的值。
         # 此前先出聲、印 `decide()` 的未平穩值：持久 cap=0 被沿用時印「收到 2」、實際擋在 0。
@@ -1169,12 +1097,18 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
     # ⇒ 兩個條件互斥，先後不影響任何一條路。併成一道是為了不多佔 tier 餘裕（本檔只剩
     # 2 行），而語意上它們確實是同一件事：**這一次不是「派發邊緣」，所以沒有帳要記、
     # 也沒有節流要擋**——派發帳只屬於 PreToolUse 那一刻（見本函式 docstring）。
-    if decision.cap is None or event != "PreToolUse":
+    if verdict is not None and verdict.action != "CONTINUE" and event == "PreToolUse":
+        sys.stderr.write(quota_ruling.block_message(verdict, tool))  # QVD C1
+        return 2
+    if verdict is not None:  # AC-QV-01g：派發帳與判決行同一 cap（free 帶 None ⇒ max_fanout）
+        decision = replace(decision, cap=verdict.cap)
+    cap = decision.cap
+    if cap is None or event != "PreToolUse":
         return 0
-    if tool in WEB_READ_TOOLS and decision.cap > 0:
+    if tool in WEB_READ_TOOLS and cap > 0:
         return 0  # DEF-200-590：不記帳、不比 cap（halt 已在上面擋；cap=0 落到下面照擋）
     quota_rush.log_floor(decision, now)  # §2.15：只在派發邊緣落一列（M-P4 分子；失敗吞掉）
-    cap, root = decision.cap, fanout_ledger_path()
+    root = fanout_ledger_path()
     # 🔴 R82 訂正判準（舊版是「只要不是 normal 帶就擋 Workflow」）：那條在新階梯下會讓
     # 55% 這種**還很寬鬆**的水位把 `Workflow` 整個鎖死。改成「cap 已收斂到 converge 檔
     # 以下才擋」——notice 帶（cap 8）放行，prepare／halt 仍然擋。

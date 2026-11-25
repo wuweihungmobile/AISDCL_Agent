@@ -101,13 +101,16 @@ def tick(args, now: datetime | None = None, S: dict | None = None, env=None) -> 
         if not parkprobe.has_baseline(marker):
             verdict = parkprobe.evaluate(marker, None, None, now)  # state 不會被讀（無基準先返回）
         else:
-            state = (S.get("quota") or park._pace_state)(now)  # noqa: SLF001
-            policy = (S.get("policy") or park._policy)()  # noqa: SLF001
-            verdict = parkprobe.evaluate(marker, state, policy, now)
+            from . import park_reset  # noqa: PLC0415 — QVD C21：同 park 前置的當下判決
+
+            snap = park_reset.ruling_for(sid, S, now, env, default_est=False)
+            state = snap.state
+            verdict = parkprobe.evaluate(marker, state, snap.ruling, now)
         extra = {} if not parkprobe.has_baseline(marker) else {"stale": not state.axes}
         switch.trace(parkprobe.EV_PROBE, sid=sid, reason=verdict["reason"], reading=verdict["cur"],
                      parked_pct=verdict["baseline"], recovered=verdict["recovered"],
-                     account_changed=verdict["account_changed"], **extra)
+                     account_changed=verdict["account_changed"], action=verdict["action"],
+                     vid=verdict["vid"], **extra)
         if verdict["recovered"]:
             verdict["fired"] = fire_early(sid, marker, verdict, env, now, S)
         return verdict

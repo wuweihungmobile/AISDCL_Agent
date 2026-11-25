@@ -51,8 +51,8 @@ def plan_render(inputs, decision) -> str:
             f"handed_over={inputs.handed_over} mode={inputs.mode} unattended={inputs.unattended} "
             f"since_takeover_min={_fmt(inputs.since_takeover_min)} "
             f"pending_age_min={_fmt(inputs.pending_age_min)} keepwarm_ok={inputs.keepwarm_ok}",
-            f"Quota: stage={q.stage} short_pct={_fmt(q.short_pct)} weekly_pct={_fmt(q.weekly_pct)} "
-            f"prepare_pct={_fmt(q.prepare_pct)} credential={q.credential} "
+            f"Quota: action={_fmt(q.action)} win={_fmt(q.win)} wk={_fmt(q.wk)} vid={_fmt(q.vid)} "
+            f"credential={q.credential} "
             f"wait_min={_fmt(q.wait_min)} target_axis={q.target_axis}",
             f"Decision: {decision.action}", f"reason: {decision.reason}",
             f"carrier: {_fmt(decision.carrier)}", f"credential: {_fmt(decision.credential)}",

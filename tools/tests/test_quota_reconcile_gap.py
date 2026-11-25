@@ -122,7 +122,7 @@ class PaceWiresTheGapLineTest(unittest.TestCase):
         with unittest.mock.patch.object(planner, "resolve_transcript_source",
                                         return_value=(None, "")), \
                 unittest.mock.patch.object(planner.modelmix, "pace_line", return_value=""), \
-                unittest.mock.patch.object(planner.quota_gate, "pace_report",
+                unittest.mock.patch.object(planner.ruling_io, "pace_report",
                                            return_value="PACE-REPORT\n"), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             rc = planner.main(["--pace"])

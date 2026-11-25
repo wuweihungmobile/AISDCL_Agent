@@ -155,7 +155,7 @@ def _cmd_park(opts, sid: str, env, S: dict, now: datetime) -> int:
         return 1
     marker = {"schema": park.SCHEMA, "sid": sid, "route": park.ROUTE_H, "status": "armed",
               "parked_at": now.isoformat(), "reset_at": reset.isoformat(),
-              "fire_at": fire.isoformat(), "axis": axis, "pkg": str(pkg), "why": opts.why,
+              "fire_at": fire.isoformat(), "axis": axis, "pkg": str(pkg), "why": opts.note,
               "valid_until": (fire + timedelta(seconds=park.YIELD_GRACE_SECONDS)).isoformat(),
               "jobs": [{"label": label, "role": "primary", "fire_at": fire.isoformat(),
                         "credential": str(cred)}], "reason": reason, "outcome": None,
@@ -359,8 +359,9 @@ def _parser() -> argparse.ArgumentParser:
     group = ap.add_mutually_exclusive_group()
     for flag in ("done", "cancel", "status", "fire"):
         group.add_argument(f"--{flag}", action="store_true")
-    for flag in ("session-id", "pkg", "at", "why", "job", "fire-at", "claude"):
+    for flag in ("session-id", "pkg", "at", "why", "note", "job", "fire-at", "claude"):
         ap.add_argument(f"--{flag}")
+    ap.add_argument("--next-est", type=float, default=None)  # QVD §5：取代 --why（只能往上調）
     ap.add_argument("--verify", action="store_true")
     return ap
 
@@ -381,6 +382,10 @@ def run(argv: list[str], *, env=None, now: datetime | None = None,
         return _RC_NOSID
     if not park._SID_RE.match(sid):
         _err("❌ session id 格式不合（只收英數與 -_）")
+        return _RC_PRECOND
+    if opts.why and not opts.done:  # QVD §5／C6：--why 退役（R-4.1.6-5）；只留給 --done
+        _err("❌ --why 已退役（不能再推翻額度判決）：下一棒放不下請改用 --next-est <pp>"
+             "（下一棒估計額度百分點）；--at 的說明改 --note。--why 只留給 --done。")
         return _RC_PRECOND
     clock = S.get("clock") or (lambda: now or datetime.now().astimezone())
     if opts.fire:

@@ -1,7 +1,8 @@
-"""`sessionctl park` 的 reset 時刻解析（自 `park_cli._cmd_park` 搬出，行為逐字不變）。
+"""`sessionctl park` 的前置：當下重算單一權威判決，取 reset 時刻（QVD §3.5 C6、§5；R-4.1.6-5）。
 
-為何獨立成檔：`park_cli.py` 貼著 guardrail_lib 400 行線，S2（副作用隔離）要在 `_cmd_park` 加登記前
-L1 判準、`--claude` 與沙盒自毀時刻，淨增行數只能靠把「短窗軸／`--at` 解析」這一整段搬出去換。
+park 只在判決 `PARK｜HALT_WEEKLY` 時登記；其餘一律 rc 4 並印判決行（訊息與判決動作一致）。
+`--why` 已退役（只留給 `--done`），改 `--next-est <pp>`：缺省＝`cal_agent × max(1, n_plan)`，
+給的值低於缺省取缺省（只能往上調）。`--at` 保留，但判決須為 `HALT_WEEKLY` 或 `PARK`。
 回 `(reset, axis, skew, rc)`：`rc` 非 0 ＝拒絕（文字已印到 stderr、`park_refused` 痕跡已落）。
 """
 from __future__ import annotations
@@ -19,9 +20,7 @@ def _err(text: str) -> None:
 
 
 def _reset_from_at(opts, now: datetime):
-    """`--at`：`(reset, 錯誤)`。須帶 `--why`（≥8 字）、aware、在未來、≤8 天。"""
-    if len((opts.why or "").strip()) < park.MIN_WHY_CHARS:
-        return None, f"❌ --at 需要 --why（至少 {park.MIN_WHY_CHARS} 字的原因）。"
+    """`--at`：`(reset, 錯誤)`。aware、在未來、≤8 天（自由文字理由改 `--note`，只進痕跡）。"""
     try:
         at = datetime.fromisoformat(opts.at)
     except ValueError:
@@ -31,57 +30,63 @@ def _reset_from_at(opts, now: datetime):
     return at, ""
 
 
-def _close_stage(S: dict, sid: str, state, env, now: datetime) -> bool:
-    """QW §7.1：額度牆 plan 判 `close`（校準後的 V 帶）也算前置成立，不必先爬到準備門檻。
-    縫：`S["plan"]`；任何例外 ⇒ 不成立（照舊走準備門檻判準）。"""
-    try:
-        from . import quotawall  # noqa: PLC0415 — lazy：park 頂層不得 import quotawall 家族
+def ruling_for(sid: str, S: dict, now: datetime, env=None, next_est: float | None = None, *,
+               default_est: bool = True):
+    """當下判決（縫：`S["quota"](now)` 取讀數、`S["plan"]` 取計畫；缺＝`ruling_io.gather`）。
+    park 前置的 `next_est` 一律取 `max(給的值, 缺省值)`（F-25：方向保守，多 park、不少 park）；
+    提前恢復（C21）不帶下一棒估計（`default_est=False`）。"""
+    import quota_gate  # noqa: PLC0415
 
-        fn = S.get("plan") or quotawall.plan
-        return fn(sid, None, env, now, read_quota=lambda _n: state).stage == quotawall.CLOSE
-    except Exception:  # noqa: BLE001
-        return False
+    from . import ruling_io  # noqa: PLC0415 — lazy：park 頂層不 import 判決取數
+
+    run_env = dict(quota_gate.policy_env())
+    run_env.update(env or {})
+    if S.get("quota"):
+        state = S["quota"](now)
+        dec = quota_gate.dispatch_decision(state, now, run_env, peek=True)
+        plan = (S["plan"](sid, None, run_env, now, read_quota=lambda _n: state)
+                if S.get("plan") else None)
+        snap = ruling_io.compose(state, dec, now, sid=sid, env=run_env, plan=plan)
+    else:
+        snap = ruling_io.gather(sid, env=run_env, now=now)
+    est = (max(float(next_est or 0.0), ruling_io.default_next_est(snap.plan, run_env))
+           if default_est else next_est)
+    return ruling_io.compose(snap.state, snap.decision, now, sid=sid, env=run_env,
+                             plan=snap.plan, next_est=est)
+
+
+def _refuse(sid: str, text: str) -> tuple:
+    _err(text)
+    switch.trace("park_refused", sid=sid, why=text, code=_RC_REFUSED)
+    return None, None, 0, _RC_REFUSED
 
 
 def resolve(opts, sid: str, S: dict, now: datetime, env=None):
-    """`(reset, axis, skew, rc)`；`--at` 走明示時刻，否則取短窗軸達準備門檻者（或 plan 判 `close`）
-    的 reset。"""
+    """`(reset, axis, skew, rc)`。判決非 `PARK｜HALT_WEEKLY` ⇒ rc 4（訊息附判決行）。"""
+    import quota_ruling as QR  # noqa: PLC0415
+
+    snap = ruling_for(sid, S, now, env, getattr(opts, "next_est", None))
+    r = snap.ruling
+    line = QR.line(r)
+    if r.action not in (QR.PARK, QR.HALT_WEEKLY):
+        hint = {QR.WAIT_RESET: "短窗即將重置：掛 `sessionctl keepwarm` 等重置，不 park。",
+                QR.NODISPATCH: "不派新、在飛照跑；判決過期後重算（量不到 reset 一律拒絕）。",
+                QR.CONTINUE: "判決准許續跑，不需要 park；下一棒放不下請帶 `--next-est <pp>`。"}
+        return _refuse(sid, f"❌ park 拒絕：判決 {r.action}。{hint[r.action]}\n{line}")
     if opts.at:
         reset, text = _reset_from_at(opts, now)
         if reset is None:
             _err(text)
             return None, None, 0, _RC_PRECOND
+        switch.trace("park_at_note", sid=sid, note=getattr(opts, "note", None), vid=r.vid)
         return reset, None, 0, 0
-    import quota_gate  # noqa: PLC0415
-    import quota_policy  # noqa: PLC0415
-
-    state = (S.get("quota") or quota_gate.pace_state)(now)
-    pol = (S.get("policy") or (lambda: quota_policy.load_policy(quota_gate.policy_env())[0]))()
-    hits = park.prepare_hits(state, pol, now)
-    why_ok = len((opts.why or "").strip()) >= park.MIN_WHY_CHARS
-    if hits == [] and not why_ok and _close_stage(S, sid, state, env, now):
-        hits = park.measured_short(state, now)
-    if hits == [] and why_ok:
-        hits = park.measured_short(state, now)  # 未達門檻但主控判斷下一棒放不下
-    reset = park.reset_of(hits) if hits else None
-    # 已達標但 reset 解不出＝reset 不明，不是沒達標
-    high = [a for a in park.short_axes(state.axes)
-            if park._real_pct(a.pct) and a.pct >= pol.prepare_pct]
-    if hits is None or (not hits and (high or why_ok)):
-        text = ("❌ park 拒絕：量不到短窗軸的 reset 時刻（"
-                f"{state.source}／{state.reason}）。reset 是滾動視窗、只能觀測不能算，"
-                "本工具不假設 5 小時。請稍後重試，或明示 --at <ISO> --why \"<WHY>\"。")
-    elif not hits:
-        text = (f"❌ park 拒絕：沒有短窗軸達準備門檻（{pol.prepare_pct:.0f}pp）。"
-                "若判斷下一棒這一窗放不下，加 --why \"<WHY≥8字>\"（reset 取短窗觀測值）；"
-                "若因週額度等停工，請明示 --at <ISO> --why \"<WHY≥8字>\"（上限 8 天）。")
-    else:
-        text = ""
-    if text:
-        _err(text)
-        switch.trace("park_refused", sid=sid, why=text, code=_RC_REFUSED)
-        return None, None, 0, _RC_REFUSED
-    top = max(hits, key=lambda a: a.pct)
+    reset = QR._aware(r.win if r.action == QR.PARK else r.wk)  # noqa: SLF001
+    if reset is None:
+        return _refuse(sid, "❌ park 拒絕：判決沒有可等的 reset（月度支出上限要人提額，"
+                            f"不是等重置）。\n{line}")
+    hits = park.measured_short(snap.state, now)
+    top = max(hits, key=lambda a: a.pct) if hits else None
     import quota_messages  # noqa: PLC0415
 
-    return reset, {"kind": top.kind, "pct": top.pct}, quota_messages.HALT_RESET_SKEW_SECONDS, 0
+    axis = {"kind": top.kind, "pct": top.pct} if top is not None else None
+    return reset, axis, quota_messages.HALT_RESET_SKEW_SECONDS, 0

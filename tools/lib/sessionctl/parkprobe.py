@@ -57,22 +57,25 @@ def account_changed(marker, now_key) -> bool:
     return bool(then) and bool(now_key) and then != now_key
 
 
-def evaluate(marker: dict, state, policy, now: datetime) -> dict:
-    """純判準：回 `{reason, recovered, cur, baseline, account_changed}`。讀不到 ⇒ `unmeasured`；
-    無基準 ⇒ `no_baseline`（不判）；否則 `recovered ⇔ cur ≤ parked_pct − 5pp ∧ cur < 準備門檻`。
-    `now` 保留給簽名一致（讀數年齡由 `park._pace_state` 的 TTL 負責，陳舊先補量、補不到＝空軸）。"""
+def evaluate(marker: dict, state, ruling, now: datetime) -> dict:
+    """純判準：回 `{reason, recovered, cur, baseline, account_changed, action, vid}`。讀不到 ⇒
+    `unmeasured`；無基準 ⇒ `no_baseline`（不判）。QVD §3.5 C21：准許與否**只由判決**決定——
+    `recovered ⇔ ruling.action == CONTINUE ∧ ¬deg ∧ cur ≤ parked_pct − 5pp`；後半是判決之後只收緊
+    的遲滯閘（Control_Handover DES §8.3：避免讀數在門檻附近抖動時來回翻轉），不是第二個判讀家。"""
     base = marker.get(MK_PARKED_PCT)
     out = {"reason": REASON_NO_BASELINE, "recovered": False, "cur": None,
-           "baseline": base if has_baseline(marker) else None, "account_changed": False}
+           "baseline": base if has_baseline(marker) else None, "account_changed": False,
+           "action": getattr(ruling, "action", None), "vid": getattr(ruling, "vid", None)}
     if not has_baseline(marker):
         return out
     cur = reading(state) if state.axes else None
     if cur is None:
         return dict(out, reason=REASON_UNMEASURED)
-    hit = cur <= base - EARLY_DROP_PP and cur < policy.prepare_pct
+    allowed = (getattr(ruling, "action", None) == "CONTINUE"
+               and not getattr(ruling, "degraded", True))
+    hit = allowed and cur <= base - EARLY_DROP_PP
     return dict(out, cur=cur, recovered=hit, reason=REASON_RECOVERED if hit else REASON_HOLD,
                 account_changed=account_changed(marker, state.account_key))
-
 
 def probe_rows(sid: str) -> list[dict]:
     """本 sid 的 `park_early_probe` 痕跡列（舊→新；讀不到 ⇒ 空）。"""

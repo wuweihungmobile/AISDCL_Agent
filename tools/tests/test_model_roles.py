@@ -496,7 +496,7 @@ class ModelHintLineTest(unittest.TestCase):
     def test_pace_report_is_wired_to_the_model_lines(self) -> None:
         """接線鎖：`--pace` 的全文真的經 `model_lines`（`pace_report` 的取數面要打真快取，
         行為面由 `test_context_budget_guard.py` 既有的 pace 測試承擔，這裡只鎖接線）。"""
-        self.assertIn("model_lines(", inspect.getsource(quota_gate.pace_report))
+        self.assertIn("model_lines(", inspect.getsource(__import__('lib.sessionctl.ruling_io', fromlist=['x']).pace_report))
         self.assertIs(quota_gate.quota_messages, quota_messages)
 
 

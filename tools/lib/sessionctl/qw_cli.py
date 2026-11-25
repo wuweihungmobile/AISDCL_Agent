@@ -20,8 +20,9 @@ from . import keepwarm, park, park_status, qw_plan, qw_schema, roster
 USAGE_RC = 2
 
 
-def _target_line(sid: str, transcript, env, now: datetime, plan: qw_plan.Plan) -> str:
-    when, source, _ref = qw_plan.wake_target(sid, transcript, env, now, plan_=plan)
+def _target_line(sid: str, transcript, env, now: datetime, plan: qw_plan.Plan,
+                 ruling=None) -> str:
+    when, source, _ref = qw_plan.wake_target(sid, transcript, env, now, plan_=plan, ruling=ruling)
     return (f"QUOTAWALL_TARGET={'none' if when is None else qw_schema.iso(when)} "
             f"source={source}")
 
@@ -42,9 +43,14 @@ def cli(argv: list[str], env: Mapping | None = None, *, now: datetime | None = N
     now = now or datetime.now().astimezone()
     transcript = keepwarm.find_transcript(sid, args.projects_dir)
     plan = qw_plan.plan(sid, transcript, env, now, **seams)
+    from . import ruling_io  # noqa: PLC0415 — QVD C17：首行＝判決行，計畫細節降為診斷段
+
+    ruling = ruling_io.current(sid, transcript, env, now, read_quota=seams.get("read_quota"),
+                               plan=plan).ruling
+    print(ruling.line(), file=out)
     for line in qw_plan.plan_lines(plan):
         print(line, file=out)
-    print(_target_line(sid, transcript, env, now, plan), file=out)
+    print(_target_line(sid, transcript, env, now, plan, ruling), file=out)
     return 0
 
 

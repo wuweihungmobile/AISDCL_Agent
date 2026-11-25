@@ -40,21 +40,20 @@ class Action:
 
 @dataclass(frozen=True)
 class Quota:
-    """額度面的輸入（DES §7.1）。`stage` 是 QW 的階段字面（none／wall／close／nodispatch／free）；
-    `credential`＝本 session 已有有效的續航憑證（`park.credential_ok`）；`wait_min`＝距目標 reset 的
-    分鐘；`target_axis`＝short｜weekly｜at（`park --at`）。量不到的欄位保持 `None`，不猜。"""
+    """額度面的輸入（DES §7.1；QVD §3.5 C13：v2.1.28 起帶**判決欄**，判讀欄 stage／short_pct／
+    weekly_pct／prepare_pct 退役——本檔不再自比門檻）。`action`＝`quota_ruling` 的 ACTION（`None`＝
+    取數失敗，偏續跑）；`win`／`wk`＝短窗／週 reset；`credential`＝本 session 已有有效的續航憑證
+    （`park.credential_ok`）；`wait_min`＝`plan.d_min`（只供 `long_wait` 輪詢形態）；`target_axis`＝
+    short｜weekly｜at。量不到的欄位保持 `None`，不猜。"""
 
-    stage: str = "none"
-    short_pct: float | None = None
-    short_reset: str | None = None
-    weekly_pct: float | None = None
-    weekly_reset: str | None = None
-    prepare_pct: float | None = None
+    action: str | None = None
+    win: str | None = None
+    wk: str | None = None
+    vid: str | None = None
     credential: bool = False
     stale: bool = False
     wait_min: float | None = None
     target_axis: str = "short"
-
 
 @dataclass(frozen=True)
 class Inputs:
@@ -97,28 +96,26 @@ class Decision:
     target: str | None = None  # PARK_*：目標 reset 的 ISO 字串
 
 
-def _short_hit(q: Quota) -> bool:
-    if q.stage in ("close", "wall"):
-        return True
-    return (q.short_pct is not None and q.prepare_pct is not None
-            and q.short_pct >= q.prepare_pct and not q.credential)
-
-
 def _wall(i: Inputs, flags: Flags, note: str) -> Decision | None:
+    """QVD §3.5 C13 ②：依判決 ACTION 對映，不自比門檻。`WAIT_RESET` ⇒ STAY（保溫單跳到重置），
+    絕不出 PARK_*；有效 park 憑證 ⇒ 不重出 PARK（v1.3 R-06 行為變更：已停好就不再要主控 park
+    一次，免得 `_supersede` 白做一次撤裝重登記）；`NODISPATCH`／`CONTINUE`／`None` ⇒ 交下一列。"""
     q = i.quota
-    weekly = (q.target_axis != "short" and q.weekly_pct is not None and q.prepare_pct is not None
-              and q.weekly_pct >= q.prepare_pct and not q.credential)
-    if not (_short_hit(q) or weekly):
+    if q.action == "WAIT_RESET":
+        return Decision(Action.STAY, "wait_reset" + note, Flags(True, flags.prefer_fresh),
+                        "keepwarm（ruling_wait_reset）", "KEEPWARM_PLAN／QUOTA_VERDICT")
+    if q.action not in ("PARK", "HALT_WEEKLY") or q.credential:
         return None
-    long_wait = q.wait_min is not None and q.wait_min > 6 * 60  # D > 6 小時
-    poll = q.target_axis != "short" or long_wait
-    reason = ("wall" if q.stage in ("close", "wall") else "prepare_no_credential") + note
+    if q.action == "HALT_WEEKLY" and q.wk is None:
+        return Decision(Action.STAY, "spend_limit" + note, flags)  # 月度支出上限：沒有 reset 可等
+    reason = ("halt_weekly" if q.action == "HALT_WEEKLY" else "park") + note
     if i.agents > 0:
         reason += "+taskstop_first"  # 先 TaskStop 在飛代理、重派資訊入交接包第 12 欄（QW D-D）
-    target = q.weekly_reset if weekly and not _short_hit(q) else q.short_reset
+    long_wait = q.wait_min is not None and q.wait_min > 6 * 60  # D > 6 小時
+    poll = q.action == "HALT_WEEKLY" or q.target_axis != "short" or long_wait
+    target = q.wk if q.action == "HALT_WEEKLY" else q.win
     return Decision(Action.PARK_POLL if poll else Action.PARK_UNTIL, reason, flags,
                     "keepwarm+park", "QW 雙憑證（PARK_VERDICT=armed … next_run=）", target)
-
 
 def decide(i: Inputs) -> Decision:
     """自上而下第一個命中即回（DES §7.2）。`ctx` 為 None ⇒ H、F 不成立（量不到偏續跑）。"""

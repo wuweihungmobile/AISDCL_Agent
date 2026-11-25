@@ -111,26 +111,42 @@ def takeover_min(sid: str, env, now: datetime) -> float | None:
 
 
 def quota_facts(sid: str, transcript, env, now: datetime, S: Mapping | None = None):
-    """額度面輸入。縫：`S["state"](now)`＝`park._pace_state`、`S["plan"]`＝`qw_plan.plan`。"""
-    S = S or {}
-    state = _guard(lambda: (S.get("state") or park._pace_state)(now), None)  # noqa: SLF001
-    plan = _guard(lambda: (S.get("plan") or qw_plan.plan)(sid, transcript, env, now), None)
-    policy = _guard(lambda: (S.get("policy") or park._policy)(), None)  # noqa: SLF001
-    marker = _guard(lambda: park.read_marker(sid), None)
-    short = (_guard(lambda: park.measured_short(state, now), []) if state is not None else [])
-    top = max(short, key=lambda a: a.pct, default=None)
-    weekly = [a for a in (getattr(state, "axes", ()) or ()) if a.kind in ("seven_day", "weekly_all")
-              and park._real_pct(a.pct)]  # noqa: SLF001
-    wk = max(weekly, key=lambda a: a.pct, default=None)
-    cred = bool(_guard(lambda: park.credential_ok(marker, now)[0], False))
-    d_min = getattr(plan, "d_min", None)
-    return switchplan.Quota(
-        stage=getattr(plan, "stage", "none"), short_pct=getattr(top, "pct", None),
-        short_reset=getattr(top, "resets_at", None), weekly_pct=getattr(wk, "pct", None),
-        weekly_reset=getattr(wk, "resets_at", None),
-        prepare_pct=getattr(policy, "prepare_pct", None), credential=cred,
-        stale=bool(getattr(plan, "stale", False)), wait_min=d_min)
+    """額度面輸入（QVD §3.5 C13 ④）：由 `ruling_io` 取**判決**組 `Quota`，本檔不自讀門檻。
+    縫：`S["state"](now)` 換讀數、`S["plan"]` 換計畫（只取 `d_min`／`stale`）。取數失敗 ⇒
+    `action=None`（`_wall` 回 None，與量不到偏續跑同向）。"""
+    from . import ruling_io  # noqa: PLC0415 — lazy：ruling_io 依賴 qw_plan／keepwarm
 
+    S = S or {}
+
+    def _snap():
+        if S.get("state") is None:
+            return ruling_io.gather(sid, transcript, env=_merged(env), now=now)
+        import quota_gate  # noqa: PLC0415
+
+        state = S["state"](now)
+        seam = S["plan"](sid, transcript, env, now) if S.get("plan") else None
+        dec = quota_gate.dispatch_decision(state, now, _merged(env), peek=True)
+        return ruling_io.compose(state, dec, now, sid=sid, transcript=transcript,
+                                 env=_merged(env), plan=seam)
+
+    snap = _guard(_snap, None)
+    r = getattr(snap, "ruling", None)
+    # 診斷／排程用（QVD §3.5.3 白名單）：只取 d_min／stale 供輪詢形態，不據以決定五類。
+    plan = _guard(lambda: (S.get("plan") or qw_plan.plan)(sid, transcript, env, now), None)
+    marker = _guard(lambda: park.read_marker(sid), None)
+    cred = bool(_guard(lambda: park.credential_ok(marker, now)[0], False))
+    return switchplan.Quota(
+        action=getattr(r, "action", None), win=getattr(r, "win", None),
+        wk=getattr(r, "wk", None), vid=getattr(r, "vid", None), credential=cred,
+        stale=bool(getattr(plan, "stale", False)), wait_min=getattr(plan, "d_min", None))
+
+
+def _merged(env) -> dict:
+    import quota_gate  # noqa: PLC0415
+
+    out = dict(quota_gate.policy_env())
+    out.update(env or {})
+    return out
 
 def account_changed(sid: str, now: datetime, S: Mapping | None = None) -> bool:
     """park 標記的 `parked_account` 與當下快取 `account_key` 皆非空且不同才為真（量不到＝假）。

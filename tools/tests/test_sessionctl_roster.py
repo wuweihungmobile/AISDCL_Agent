@@ -722,7 +722,7 @@ class PlannerWiringTest(unittest.TestCase):
         blank = type("S", (), {"axes": (), "reason": "test"})()
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), \
-                unittest.mock.patch.object(planner.quota_gate, "pace_report",
+                unittest.mock.patch.object(planner.ruling_io, "pace_report",
                                            lambda **kw: "PACE\n"), \
                 unittest.mock.patch.object(planner.quota_gate, "read_quota", lambda now: blank), \
                 unittest.mock.patch.object(planner.quota_reconcile, "ledger_gap_line",

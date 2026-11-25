@@ -83,7 +83,8 @@ def begin(sid, transcript, env, now: float, t_kw: float, idle: float, *, soft: s
     """啟動時讀一次 `plan` 與 `wake_target`（DES §5.2）。"""
     c = Carrier(sid, transcript, env, t_kw, idle, read_quota, refresh, soft, anchor_fn)
     p = _measure(c, now)
-    c.target, c.source, c.ref = qw_plan.wake_target(sid, transcript, env, dt_of(now), plan_=p)
+    c.target, c.source, c.ref = qw_plan.wake_target(sid, transcript, env, dt_of(now), plan_=p,
+                                                    read_quota=read_quota)
     return c
 
 
@@ -96,7 +97,8 @@ def kind_of(c: Carrier, anchor) -> tuple[str, int, bool]:
     if c.target is None:
         return "periodic", 0, False
     p = c.plan
-    if anchor is None or p is None or p.r is None or c.soft:
+    # QVD §3.6：判決 WAIT_RESET 的來源只單跳到 win＋s、不付費 ping（不計 n*、不受 small_ctx 限制）
+    if anchor is None or p is None or p.r is None or c.soft or c.source == "ruling_wait_reset":
         return "single", 0, False
     k = qw_calc.k_of((c.target - anchor) / 60 - qw_calc.skew_min(), p.ctx, c.env,
                      t_kw_min=c.t_kw, idle=c.idle)

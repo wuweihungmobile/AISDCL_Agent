@@ -205,12 +205,14 @@ def _pkg_live(marker) -> bool:
 
 
 def wake_target(sid: str, transcript, env, now: datetime, *, marker=None,
-                plan_: Plan | None = None, **plan_seams) -> tuple[float | None, str, tuple]:
-    """§3：回 `(epoch｜None, source∈{park,reset,none}, ref)`。優先序：本 sid park 標記 armed
-    且其交接包 live ⇒ 標記 `primary_wake_at`；否則 stage ∈ {close, wall} 且 reset 已知 ⇒
-    reset＋s；否則無。`ref`＝`(ref_reset, ref_pct, ref_at)`（S-19／S-23⑥）：來源 reset ⇒ 該
+                plan_: Plan | None = None, ruling=None,
+                **plan_seams) -> tuple[float | None, str, tuple]:
+    """§3：回 `(epoch｜None, source∈{park,ruling_wait_reset,reset,none}, ref)`。優先序：本 sid park
+    標記 armed 且其交接包 live ⇒ 標記 `primary_wake_at`；否則**判決 WAIT_RESET**（QVD §3.6；來源
+    `ruling_wait_reset`：`win＋s`，只單跳不 ping）；否則 stage ∈ {close, wall} 且 reset 已知 ⇒
+    reset＋s；否則無。`ref`＝`(ref_reset, ref_pct, ref_at)`（S-19／S-23⑥）：來源 reset／判決 ⇒ 該
     reset、當下讀數、讀數時刻；來源 park 且 `primary_source=reset` ⇒ `primary_wake_at−s`；
-    `primary_source=at` 或無目標 ⇒ 全 None（S-19 不適用）。"""
+    `primary_source=at` 或無目標 ⇒ 全 None（S-19 不適用）。`ruling`＝已算好的判決（缺＝當下取）。"""
     from . import park  # noqa: PLC0415
 
     empty = (None, None, None)
@@ -225,12 +227,29 @@ def wake_target(sid: str, transcript, env, now: datetime, *, marker=None,
                 ref = (prim.wake_at - qw_calc.skew_min() * 60, pct, p.reading_at) \
                     if prim.source == "reset" else empty
                 return prim.wake_at, "park", ref
+        win = _wait_reset_win(sid, transcript, env, now, ruling, p, plan_seams.get("read_quota"))
+        if win is not None:
+            return win + qw_calc.skew_min() * 60, "ruling_wait_reset", (win, pct, p.reading_at)
         if p.stage in (CLOSE, WALL) and p.reset is not None:
             return p.reset + qw_calc.skew_min() * 60, "reset", (p.reset, pct, p.reading_at)
     except Exception:  # noqa: BLE001
         pass
     return None, "none", empty
 
+
+def _wait_reset_win(sid, transcript, env, now: datetime, ruling, p, read_quota) -> float | None:
+    """判決為 `WAIT_RESET` 時的短窗 reset（epoch）；否則／取不到 ⇒ None（不擋其餘來源）。"""
+    try:
+        if ruling is None:
+            from . import ruling_io  # noqa: PLC0415 — lazy：ruling_io 依賴本檔
+
+            ruling = ruling_io.current(sid, transcript, env, now, read_quota=read_quota,
+                                       plan=p).ruling
+        if getattr(ruling, "action", None) != "WAIT_RESET" or not ruling.win:
+            return None
+        return datetime.fromisoformat(ruling.win).timestamp()
+    except Exception:  # noqa: BLE001 — 判決取不到不得讓保溫崩潰
+        return None
 
 def trace_plan(sid: str, p: Plan, caller: str) -> None:
     """`quotawall_plan` 痕跡（`caller`＝呼叫端；一律只寫持久痕跡目錄）。"""

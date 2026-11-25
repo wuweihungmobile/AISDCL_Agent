@@ -102,7 +102,13 @@ import transcript_activity  # noqa: E402  # DEF-200-560／562：session 存活�
 import unattended_authz  # noqa: E402  # DEF-200-575：無人回合時間邊界（牆鐘／harness 背景等待上限）的家（tools/lib）
 
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
-from lib.sessionctl import modelmix, parkearly, qw_cli, switch  # noqa: E402  # 選路/模型/park/QW
+from lib.sessionctl import (  # noqa: E402,F401  # 選路/模型/park/QW/判決（modelmix／qw_cli 經 ruling_io.pace_block 的 deps 取用）
+    modelmix,
+    parkearly,
+    qw_cli,
+    ruling_io,
+    switch,
+)
 from lib.sessionctl import park as sessionctl_park  # noqa: E402  # park 標記讓路（ADR §2.17 D7）
 from lib.sessionctl import (  # noqa: E402  # QW §7.6 哨兵接手 park 失敗
     park_takeover as sessionctl_takeover,
@@ -1565,21 +1571,8 @@ def main(argv: list[str]) -> int:
     # 🔴 R84／SA-02：內容由 `tools/lib/quota_gate.py` 產（判讀與渲染同一個家），本檔只當
     # 人機入口。放在最前面那幾道之後、逐字稿解析之前：它**不需要逐字稿**，掛在需要逐字稿
     # 的路徑上會讓「這台機器上找不到 session」變成查不到額度（同 --check-autocompact 的理由）。
-    if args.pace:
-        print(endurance_env.unattended_outcome_banner(), end="")  # noqa: E501 — FIX3(b)：無人續跑停下未讀結局，開頭主動印
-        # 修3（R95；ADR §2.9）：哨兵活性欄，同時 D23 用 sid 判本 session 是否 halt 未過期
-        # （見 pace_report 的 sid 分支）。定位不到 session 時靜默跳過（不依賴逐字稿的契約
-        # 不變）；定位得到而 stamp 與排程器現查不一致才出聲。
-        aim, source = resolve_transcript_source(args.session_id, args.transcript)
-        print(quota_gate.pace_report(model=args.model or harness_feed.active_model_of(aim, guard), sid=guard.session_id_of(aim) if aim else None), end="")  # noqa: E501 — DEF-200-420：自動推導，顯式 --model 優先
-        print(quota_reconcile.ledger_gap_line(), end="")  # DEF-200-203：落款斷層提醒（只出聲）
-        print(modelmix.pace_line(quota_gate, guard.model_family(args.model or harness_feed.active_model_of(aim, guard)) or None), end="")  # noqa: E501 — sessionctl D8：模型平衡建議（只出聲）
-        print(qw_cli.pace_line(guard.session_id_of(aim) if aim else None, aim), end="")  # noqa: E501 — REQ-QW-79：QW 行（量不到不印）
-        if aim:  # DEF-200-431：印出 session 來源（stderr，stdout 的四欄判定不動）
-            print(harness_feed.session_line(source, guard.session_id_of(aim)), file=sys.stderr)
-            if (liveness := sentinel_lifecycle.liveness_line(guard.session_id_of(aim))):
-                print(liveness, file=sys.stderr)
-        return 0
+    if args.pace:  # QVD §9／C3：區塊抽到 ruling_io（首行＝QUOTA_VERDICT= 判決行）
+        return ruling_io.pace_block(args, sys.modules[__name__])
 
     # 這三個模式不需要逐字稿，先處理（否則在找不到 session 的機器上連查姿態都做不到）。
     if args.check_autocompact:

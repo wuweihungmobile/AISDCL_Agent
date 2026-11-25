@@ -54,8 +54,6 @@ DISPOSAL = {
     "handed_over": "本視窗已交棒（備援已在別的 session 接手）：不得動工作樹、不得重掛，"
                    "直接結束回合",
 }
-#: watch 額度閂鎖的帶級（R218 Q2：四級 prepare＜nodispatch＜close＜halt；REQ-QW-17）。
-_BANDS = {"prepare": 1, "nodispatch": 2, "close": 3, "halt": 4}
 
 
 def _warn(msg: str) -> None:
@@ -155,21 +153,31 @@ def is_keepwarm_task(task: dict) -> bool:
 
 
 # ───────────────────────────────────────────────────────────── Stop 保溫閘（D6）
-def stop_verdict(payload: dict, env=None, now: datetime | None = None) -> str:
-    """回 reason；不推回 ⇒ `""`；任何例外 `""`（fail-open）。推回 ⇔ 非 `stop_hook_active`、
-    payload 有 `background_tasks` 欄且**沒有任何 running 項**（舊 harness 沒有該欄＝量不到＝
-    不判）、非不掛的情形、保溫帳 pings < n*。不寫閂鎖：第二次 Stop 放行。"""
+def stop_verdict(payload: dict, env=None, now: datetime | None = None, *, ruling_fn=None) -> str:
+    """回 reason；不推回 ⇒ `""`；任何例外 `""`（fail-open）。不寫閂鎖：第二次 Stop 放行。
+    前置：非 `stop_hook_active`、payload 有 `background_tasks` 欄（舊 harness 沒有＝量不到＝不判）、
+    `skip_reason` 前四項（unattended／mode／off／handed_over）皆不成立。
+    ②判決分支（QVD §3.6〈掛載的推動者〉，先判）：當下判決 `WAIT_RESET` 且沒有 running 的 keepwarm
+    shell ⇒ 推回一次要求掛 keepwarm（`small_ctx`／`no_usage`／保溫帳 n* 皆不豁免；其他 running
+    背景任務不算叫醒載具）。縫 `ruling_fn(sid, transcript)->Ruling`；取數失敗 ⇒ 落回③。
+    ③原判準：沒有任何 running 項、`skip_reason` 全六項皆不成立、保溫帳 pings < n*。"""
     env = os.environ if env is None else env
     try:
         if not isinstance(payload, dict) or payload.get("stop_hook_active"):
             return ""
         sid, raw = roster._payload_sid(payload), payload.get("transcript_path")
         tasks = roster._tasks(payload)
-        if (not sid or not isinstance(raw, str) or not Path(raw).is_file() or tasks is None
-                or any(str(t.get("status") or "running") == "running" for t in tasks)):
+        if not sid or not isinstance(raw, str) or not Path(raw).is_file() or tasks is None:
             return ""
         ctx = roster._scan(Path(raw), False)["ctx_tokens"]
-        if skip_reason(sid, env, ctx=ctx, now=now):
+        why = skip_reason(sid, env, ctx=ctx, now=now)
+        if why in HARD_SKIPS:
+            return ""
+        running = [t for t in tasks if str(t.get("status") or "running") == "running"]
+        pushed = _wait_reset_push(sid, Path(raw), running, ruling_fn)
+        if pushed is not None:
+            return pushed
+        if running or why:
             return ""
         star, pings = n_star(ctx), load_ledger(sid, raw)["pings"]
         if pings >= star:
@@ -185,6 +193,31 @@ def stop_verdict(payload: dict, env=None, now: datetime | None = None) -> str:
     except Exception:  # noqa: BLE001 — hook 內任何例外一律放行
         return ""
 
+
+#: `skip_reason` 的前四項：成立時任何分支都不推（模式非 auto／保溫關閉由判決理由句明寫無載具；
+#: 無人窗口交哨兵；已交棒由新 session 自己判）。
+HARD_SKIPS = ("unattended", "mode", "off", "handed_over")
+
+
+def _wait_reset_push(sid: str, transcript: Path, running: list, ruling_fn) -> str | None:
+    """判決分支：`None`＝不適用（非 WAIT_RESET／取不到判決，落回原判準）；`""`＝已掛 keepwarm。"""
+    try:
+        if ruling_fn is None:
+            from . import ruling_io  # noqa: PLC0415 — lazy：ruling_io 依賴本檔
+
+            r = ruling_io.gather(sid, transcript).ruling
+        else:
+            r = ruling_fn(sid, transcript)
+    except Exception:  # noqa: BLE001 — 取數失敗 ⇒ 跳過本分支
+        return None
+    if getattr(r, "action", None) != "WAIT_RESET":
+        return None
+    if any(is_keepwarm_task(t) for t in running):
+        return ""
+    switch.trace(EV_STOP_BLOCK, sid=sid, ruling="WAIT_RESET", vid=getattr(r, "vid", None))
+    return (f"判決 WAIT_RESET（短窗 {r.win} 重置）：請掛 `python tools/sessionctl.py keepwarm "
+            f"--sid {sid}`（run_in_background、輸出導檔）——它只單跳到重置後叫醒、不付費 ping。\n"
+            f"{r.line()}\n（只推回這一次；第二次 Stop 放行。）")
 
 # ───────────────────────────────────────────────────────────── 指令本體（D7／D8）
 def run(sid: str, transcript, **kw) -> int:
@@ -288,14 +321,16 @@ def latch_path(sid: str) -> Path:
     return endurance_env.trace_dir() / "watch" / f"{sid}.quota.json"
 
 
-#: 閂鎖檔 schema v2（r9 W11d；REQ-QW-75）：兩條序列各自一格。舊（v1 單一序列）檔讀回＝無閂鎖。
-QUOTA_LATCH_SCHEMA = "autosdd.watch.quota/2"
-#: 帶級所屬序列：原始讀數序列 prepare＜halt、計畫序列 nodispatch＜close（序列內才比級）。
-SERIES = {"prepare": "raw", "halt": "raw", "nodispatch": "plan", "close": "plan"}
+#: 閂鎖檔 schema v3（QVD §3.5 C5；v2.1.28 取代 r9 W11d 的兩序列）：**單一序列**，鍵＝
+#: `(acct, ACTION, win)`。舊（v1／v2）檔讀回＝無閂鎖。`keepwarm.SERIES` 退役（兩序列兩句並陳的
+#: 形狀正是 E2 自相矛盾的來源）。帳號不同的鍵自然不命中（換帳號＝新序列）。
+QUOTA_LATCH_SCHEMA = "autosdd.watch.quota/3"
+#: 判決動作的升級序：NODISPATCH＜WAIT_RESET＜PARK＜HALT_WEEKLY（同窗升級才再觸發）。
+_ACTION_RANK = {"NODISPATCH": 1, "WAIT_RESET": 2, "PARK": 3, "HALT_WEEKLY": 4}
 
 
 def _read_latch(path: Path) -> dict:
-    """v2 閂鎖列；不存在、舊 schema ⇒ `{}`（視為無閂鎖、不報錯）；壞檔 ⇒ 出聲後 `{}`（照觸發）。"""
+    """v3 閂鎖列；不存在、舊 schema ⇒ `{}`（視為無閂鎖、不報錯）；壞檔 ⇒ 出聲後 `{}`（照觸發）。"""
     try:
         got = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(got, dict):
@@ -308,32 +343,29 @@ def _read_latch(path: Path) -> dict:
     return got if got.get("schema") == QUOTA_LATCH_SCHEMA else {}
 
 
-def quota_latch(sid: str, band: str, reset: str, *, n: int | None = None) -> bool:
-    """`True`＝該觸發（並記入閂鎖）；`False`＝該序列在同 reset 窗、同帶或更低帶已觸發過。閂鎖鍵＝
-    `(序列, 帶級, reset)`：序列內升級（prepare→halt、nodispatch→close）或 reset 改變（新窗）⇒
-    再觸發；兩條序列各自閂鎖，互不吃掉對方的訊號。`n`＝當下在飛代理數：計畫序列已閂鎖後 `n` 比
-    `n_latched` 大（新派工）⇒ 再觸發一次並更新 `n_latched`（REQ-QW-76；呼叫端只在 stage ≥
-    nodispatch 才帶計畫序列的鍵，N 不增不連發）。閂鎖讀／寫失敗一律照觸發並出聲（寧可再吵一次，
-    也不靜默吞掉額度事件；PRD 原則 5）。"""
-    path, rank, series = latch_path(sid), _BANDS.get(band, 1), SERIES.get(band, "raw")
+def quota_latch(sid: str, action: str, reset: str, *, acct: str | None = None,
+                n: int | None = None) -> bool:
+    """`True`＝該觸發（並記入閂鎖）；`False`＝同帳號、同 reset 窗、同動作或更低動作已觸發過。
+    動作升級（例 WAIT_RESET→PARK）或 reset 改變（新窗）或帳號改變 ⇒ 再觸發；`n`＝當下在飛代理數：
+    已閂鎖後 `n` 比 `n_latched` 大（新派工）⇒ 再觸發一次（REQ-QW-76 沿用）。讀／寫失敗一律照觸發
+    並出聲（寧可再吵一次，也不靜默吞掉額度事件；PRD 原則 5）。"""
+    path, rank = latch_path(sid), _ACTION_RANK.get(action, 1)
     row = _read_latch(path)
-    cur = row.get(series)
-    if isinstance(cur, dict) and isinstance(cur.get("reset"), str) and cur.get("band") in _BANDS \
-            and _same_reset(cur["reset"], reset):
-        latched_rank = _BANDS[cur["band"]]
-        grown = (series == "plan" and isinstance(n, int) and not isinstance(n, bool)
+    if (row.get("acct") == (acct or None) and row.get("action") in _ACTION_RANK
+            and isinstance(row.get("reset"), str) and _same_reset(row["reset"], reset)):
+        latched_rank = _ACTION_RANK[row["action"]]
+        grown = (isinstance(n, int) and not isinstance(n, bool)
                  and isinstance(row.get("n_latched"), int) and n > row["n_latched"])
         if latched_rank >= rank and not grown:
             return False
-        if latched_rank > rank:  # 新派工重判：帶級不降（閂鎖記該窗該序列最高帶）
-            band = cur["band"]
+        if latched_rank > rank:  # 新派工重判：動作不降（閂鎖記該窗最高動作）
+            action = row["action"]
     n_known = isinstance(n, int) and not isinstance(n, bool)
-    row = {"schema": QUOTA_LATCH_SCHEMA, "sid": sid, "raw": row.get("raw"), "plan": row.get("plan"),
-           "n_latched": n if n_known else row.get("n_latched"),
-           series: {"band": band, "reset": reset}}
+    new = {"schema": QUOTA_LATCH_SCHEMA, "sid": sid, "acct": acct or None, "action": action,
+           "reset": reset, "n_latched": n if n_known else row.get("n_latched")}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(row), encoding="utf-8", newline="\n")
+        path.write_text(json.dumps(new), encoding="utf-8", newline="\n")
     except OSError as exc:
         _warn(f"額度閂鎖寫不進 {path}（{type(exc).__name__}）⇒ 照觸發")
     return True

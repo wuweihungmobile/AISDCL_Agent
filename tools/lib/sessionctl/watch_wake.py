@@ -3,8 +3,8 @@
 自 `watch.py` 抽出（LOC 分級；判準本體在 `kw_wake`／`qw_plan`，這裡只做 watch 專屬的接線）：
   · `PlanCache`：額度牆 `plan` 的節流讀取（每 `PLAN_EVERY_SECONDS` 一次；補量由 `qw_wall` 的
     S-23 年齡規則決定，零 token）。
-  · `quota_key`：額度事件的閂鎖鍵，帶級四級 prepare＜nodispatch＜close＜halt（階段來自 `plan`，
-    不另算第二套）；`quota_disposal`：處置依階段（nodispatch／close 不再出現「快完成 ⇒ 重掛」）。
+  · `quota_keys`：額度事件的閂鎖鍵＝單一權威判決（QVD §3.5 C4：`(acct, ACTION, win)`，
+    不另算第二套）；`quota_disposal`：處置依判決動作（一個動作一列）。
   · `WakeCtl`：watch 持有保溫錨時的叫醒控制——有目標（`wake_target`）時用同一份 `schedule`、
     牆內延後、`resume`、交棒重判（REQ-QW-29）；無目標時退回 R216 的 periodic（叫醒預算 cap／idle）。
 """
@@ -16,20 +16,28 @@ from pathlib import Path
 from . import holder, keepwarm, kw_ledger, kw_run, kw_wake, qw_calc, qw_plan, roster, seal, switch
 
 PLAN_EVERY_SECONDS = 120.0
-_RANK = {"prepare": 1, "nodispatch": 2, "close": 3, "halt": 4}
+_RANK = {"NODISPATCH": 1, "WAIT_RESET": 2, "PARK": 3, "HALT_WEEKLY": 4}
+#: 觸發 watch 額度事件的判決動作（QVD §3.5 C4；CONTINUE 不觸發）。
+EVENT_ACTIONS = tuple(_RANK)
+RECOMPUTE = ("先 `python tools/sessionctl.py quota` 重算（判決過期一律重算，舊 vid 不據以行動），"
+             "再依新 ACTION：")
 CLOSE_STEPS = ("TaskStop 全部在飛代理（成品留工作樹）→ 封存（`handoff --finalize`）→ "
-               "`park` → 掛 `sessionctl keepwarm`（run_in_background）")
+               "`sessionctl park` → 掛 `sessionctl keepwarm`（run_in_background）")
+#: 處置表：一個判決動作一列（QVD C4；`WAIT_RESET` 列不含停工排程字樣，AC-QV-05b）。
 QUOTA_DISPOSAL = {
-    "nodispatch": "已進擋派區：不再派新代理（PreToolUse 會擋）；在飛代理照跑、主控自己的工作照做；"
-                  "重掛同一條 watch（同一 reset 窗同一帶不會再觸發）",
-    "close": f"已進收尾區：{CLOSE_STEPS}",
-    "halt": f"額度已到停止線：{CLOSE_STEPS}",
+    "NODISPATCH": RECOMPUTE + ("仍 NODISPATCH ⇒ 不再派新代理（派工閘會擋）；在飛代理照跑、主控"
+                               "自己的工作照做；重掛同一條 watch（同窗同動作不會再觸發）"),
+    "WAIT_RESET": RECOMPUTE + ("仍 WAIT_RESET ⇒ 短窗即將重置：不派新、在飛照跑；掛 `sessionctl "
+                               "keepwarm`（run_in_background；判決來源 ruling_wait_reset 只單跳到"
+                               "重置後叫醒、不付費）；重掛 watch"),
+    "PARK": RECOMPUTE + f"仍 PARK ⇒ {CLOSE_STEPS}",
+    "HALT_WEEKLY": RECOMPUTE + f"仍 HALT_WEEKLY ⇒ {CLOSE_STEPS}（週重置用 `park --at <週 reset>`）",
 }
 
 
-def quota_disposal(band: str) -> str | None:
-    """依階段的處置；`prepare`（或未知帶級）回 `None`＝沿用既有處置表。"""
-    return QUOTA_DISPOSAL.get(band)
+def quota_disposal(action: str) -> str | None:
+    """依判決動作的處置；未知動作回 `None`＝沿用既有處置表。"""
+    return QUOTA_DISPOSAL.get(action)
 
 
 class PlanCache:
@@ -44,50 +52,54 @@ class PlanCache:
         return self.plan
 
 
-def quota_keys(now: float | None, plan=None) -> list[tuple]:
-    """額度事件閂鎖鍵 `[(帶級, reset 分鐘, 原始讀數 pct｜None), …]`，兩條序列各至多一把（r9 W11d）：
-    ①原始讀數序列＝讀數 ≥ prepare 門檻（`park.prepare_hits`，讀到 halt 門檻為 `halt`、否則
-    `prepare`，pct 帶最高讀數）；②計畫序列＝`plan.stage` 為 `nodispatch`／`close`（pct 為 `None`）。
-    沒命中／讀不到／牆中（`wall` 不判事件）／任何例外 ⇒ `[]`。"""
+def quota_keys(sid: str, transcript, env, now: float | None, plan=None,
+               read_quota=None) -> list[tuple]:
+    """額度事件閂鎖鍵（QVD §3.5 C4：**單一序列**，只由判決觸發）：
+    `[(ACTION, reset 分鐘, acct, vid, expires_at, 判決行)]`，至多一把。只有
+    `WAIT_RESET｜PARK｜HALT_WEEKLY｜NODISPATCH` 觸發；牆中（`wall`）不判；讀不到／例外 ⇒ `[]`。
+    縫：`read_quota(now)` 換讀數（同一條派工閘管線組 cap）；缺＝`ruling_io.gather`。"""
     try:
-        from . import park  # noqa: PLC0415 — lazy：park 吃 quota 模組，監督迴圈不該為此付匯入成本
+        import quota_ruling as QR  # noqa: PLC0415
+
+        from . import ruling_io  # noqa: PLC0415 — lazy：判決取數吃 quota 匯入鏈
 
         if plan is not None and plan.stage == qw_plan.WALL:
             return []
         when = datetime.fromtimestamp(now).astimezone() if now else datetime.now().astimezone()
-        keys: list[tuple] = []
-        policy = park._policy()
-        hits = park.prepare_hits(park._pace_state(when), policy, when)
-        if hits:
-            top = max(a.pct for a in hits)
-            at = park.reset_of(hits)
-            keys.append(("halt" if top >= policy.halt_pct else "prepare",
-                         at.astimezone().replace(second=0, microsecond=0).isoformat() if at
-                         else "unknown", top))
-        if plan is not None and plan.stage in ("nodispatch", "close"):
-            keys.append((plan.stage, kw_wake.dt_of(plan.reset).replace(
-                second=0, microsecond=0).isoformat() if plan.reset is not None else "unknown",
-                None))
-        return keys
+        if read_quota is not None:
+            import quota_gate  # noqa: PLC0415
+
+            run_env = dict(quota_gate.policy_env())
+            run_env.update(env or {})
+            state = read_quota(when)
+            dec = quota_gate.dispatch_decision(state, when, run_env, peek=True)
+            r = ruling_io.compose(state, dec, when, sid=sid, transcript=transcript, env=run_env,
+                                  plan=plan).ruling
+        else:
+            r = ruling_io.gather(sid, transcript, now=when).ruling
+        if r.action not in EVENT_ACTIONS:
+            return []
+        at = QR._aware(r.wk if r.action == QR.HALT_WEEKLY else r.win)  # noqa: SLF001
+        reset = at.replace(second=0, microsecond=0).isoformat() if at else "unknown"
+        return [(r.action, reset, r.acct, r.vid, r.expires_at, QR.line(r))]
     except Exception:  # noqa: BLE001 — 額度快取讀不到不得讓監督崩潰
         return []
 
 
 def norm_hits(hit) -> list[tuple]:
-    """`quota_fn` 縫的回傳統一成 `[(帶級, reset, pct｜None), …]`：`None`／假值＝無；`True`＝無鍵的
-    `prepare`；二元組（舊縫）補 `pct=None`；list／tuple 的 list＝多把鍵。"""
+    """`quota_fn` 縫的回傳統一成 `[(ACTION, reset, acct, vid, expires_at, 判決行), …]`：`None`／
+    假值＝無；`True`＝無鍵的 `NODISPATCH`；短元組補 `None`。"""
     if not hit:
         return []
     if hit is True:
-        return [("prepare", "unknown", None)]
+        return [("NODISPATCH", "unknown", None, None, None, None)]
     rows = [hit] if isinstance(hit, tuple) else list(hit)
-    return [tuple(r) + (None,) * (3 - len(r)) for r in rows]
+    return [tuple(r) + (None,) * (6 - len(r)) for r in rows]
 
 
 def fire_hits(sid: str, hits: list[tuple], n: int | None) -> list[tuple]:
-    """逐鍵過閂鎖（`keepwarm.quota_latch`，序列各自閂鎖）；回「該觸發」的鍵。`n`＝在飛代理數，只有
-    計畫序列（stage ≥ nodispatch 才有鍵）用它做新派工重判。"""
-    return [h for h in hits if keepwarm.quota_latch(sid, h[0], h[1], n=n)]
+    """逐鍵過閂鎖（`keepwarm.quota_latch`，單一序列 `(acct, ACTION, win)`）；回「該觸發」的鍵。"""
+    return [h for h in hits if keepwarm.quota_latch(sid, h[0], h[1], acct=h[2], n=n)]
 
 
 def top_band(hits: list[tuple]) -> str:
@@ -95,23 +107,15 @@ def top_band(hits: list[tuple]) -> str:
 
 
 def quota_detail(fired: list[tuple], plan=None) -> str:
-    """事件文案依來源分開（REQ-QW-77）：原始讀數序列觸發才寫「短窗原始讀數…已達」；計畫序列觸發寫
-    「額度牆判 …（R／L／ping_pp 來源）」；兩條同時成立兩句並陳。"""
-    parts = []
-    for band, _reset, pct in fired:
-        if keepwarm.SERIES.get(band) == "raw":
-            head = (f"短窗原始讀數 {pct:.0f}% 已達" if isinstance(pct, (int, float))
-                    else "短窗額度原始讀數已達")
-            parts.append(f"{head} {band} 門檻（reset 在未來）")
-        else:
-            facts = ""
-            if plan is not None and plan.stage == band and plan.r is not None \
-                    and plan.limit is not None:
-                facts = f"（R={plan.r:.1f}pp、L={plan.limit:.2f}；ping_pp 來源={plan.ping_pp_src}"
-                facts += f"；在飛 N={plan.n_live}）" if plan.n_live is not None else "）"
-            parts.append(f"額度牆判 {band}{facts}")
-    return "；".join(parts) or "額度事件成立（短窗額度）"
+    """事件文案＝判決行（單一序列：一個判決、一句話；QVD C4）。"""
+    top = max(fired, key=lambda h: _RANK.get(h[0], 0))
+    return top[5] or f"額度判決 {top[0]}"
 
+
+def verdict_tail(fired: list[tuple]) -> str:
+    """`WATCH_VERDICT=quota` 末行的附加欄：`action=<A> vid=<v> expires_at=<t>`。"""
+    top = max(fired, key=lambda h: _RANK.get(h[0], 0))
+    return f" action={top[0]} vid={top[3] or 'none'} expires_at={top[4] or 'none'}"
 
 def due_merge(sid: str, transcript, agents: list, env, verdict, family: tuple):
     """`switch_due`（DES §7.4；REQ-CTL-24）：回 `(有效 pending｜None, 合併後判決)`。代理全數交卷且有

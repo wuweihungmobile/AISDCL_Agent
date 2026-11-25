@@ -139,12 +139,12 @@ def measured_short(state, now: datetime) -> list:
             if _real_pct(a.pct) and _aware_future(a.resets_at, now) is not None]
 
 
-def recovered(marker: dict, state, policy, now: datetime) -> bool:
-    """提前恢復（Control DES §8.2）：`parked_pct` 存在 ∧ 讀數 ≤ 它 − 5pp ∧ 讀數 < 準備門檻。
+def recovered(marker: dict, state, ruling, now: datetime) -> bool:
+    """提前恢復（Control DES §8.2；QVD C21）：判決 CONTINUE（非降級）∧ 讀數 ≤ `parked_pct` − 5pp。
     判準與基準欄常數住葉模組 `parkprobe`（惰性匯入：它反向 import 本檔取讀數輔助）。"""
     from . import parkprobe  # noqa: PLC0415
 
-    return parkprobe.evaluate(marker, state, policy, now)["recovered"]
+    return parkprobe.evaluate(marker, state, ruling, now)["recovered"]
 
 
 def reset_of(hits: list) -> datetime | None:
@@ -301,13 +301,12 @@ def handed_off(sid: str, env=None) -> bool:
     return False
 
 
-def _block_text(hits: list, now: datetime, reset: datetime, why: str, policy) -> str:
-    top = max(hits, key=lambda a: a.pct)
+def _block_text(line: str, action: str, now: datetime, reset: datetime, why: str) -> str:
     mins = max(0, int((reset - now).total_seconds() // 60))
-    return (f"額度停工守衛（Stop）：短窗額度 {top.kind} 已 {top.pct:.0f}pp"
-            f"（≥ 準備門檻 {policy.prepare_pct:.0f}pp），{mins} 分鐘後"
+    return (f"額度停工守衛（Stop）：額度判決 {action}，{mins} 分鐘後"
             f"（{reset.isoformat()}）reset，"
-            f"但本 session 沒有任何續航憑證（{why}）。現在結束回合，reset 後沒有東西叫醒工作，"
+            f"但本 session 沒有任何續航憑證（{why}）。\n{line}\n"
+            "現在結束回合，reset 後沒有東西叫醒工作，"
             "只剩人回來說「繼續」——而那個舊視窗上下文已冷，一開口整份重寫。請現在執行：\n"
             f"  {PARK_CMD}\n"
             "它會掛好「到點由新 session 帶交接包接手」的排程並印出排程憑證"
@@ -336,28 +335,42 @@ def stop_verdict(payload: dict, env=None, *, now: datetime | None = None, read_q
         if not _SID_RE.match(sid):
             return ""
         now = now or datetime.now().astimezone()
-        state = (read_quota or _pace_state)(now)
-        policy = (policy_fn or _policy)()
-        hits = prepare_hits(state, policy, now)
-        if hits is None:
-            switch.trace("park_verdict_unmeasured", sid=sid, source=state.source,
-                         reason=state.reason)
+        r = _stop_ruling(sid, now, read_quota, env)  # QVD C7：只依判決，不自比門檻
+        if r.degraded:
+            switch.trace("park_verdict_unmeasured", sid=sid, vid=r.vid)
+        if r.action not in ("PARK", "HALT_WEEKLY"):  # WAIT_RESET 由保溫閘推（§3.6），不推 park
             return ""
-        reset = reset_of(hits) if hits else None
+        reset = _aware_future(r.win if r.action == "PARK" else r.wk, now)
         if reset is None or (spawned_fn or handed_off)(sid, env):
             return ""
         marker = read_marker(sid)
         ok, why = credential_ok(marker, now)
         if ok:
             return ""
-        top = max(hits, key=lambda a: a.pct)
-        switch.trace("park_stop_block", sid=sid, kind=top.kind, pct=top.pct,
+        switch.trace("park_stop_block", sid=sid, action=r.action, vid=r.vid,
                      reset_at=reset.isoformat(),
                      marker=None if marker is None else
                      {"route": marker["route"], "status": marker["status"]}, why=why)
-        return _block_text(hits, now, reset, why, policy)
+        import quota_ruling  # noqa: PLC0415
+
+        return _block_text(quota_ruling.line(r), r.action, now, reset, why)
     except Exception:  # noqa: BLE001 — fail-open（P0）
         return ""
+
+
+def _stop_ruling(sid: str, now: datetime, read_quota, env):
+    """Stop 用的當下判決：縫 `read_quota(now)` 注入讀數（同一條派工閘管線組 cap），缺＝取數。"""
+    import quota_gate  # noqa: PLC0415
+
+    from . import ruling_io  # noqa: PLC0415 — lazy：ruling_io 反向依賴本檔的讀數輔助
+
+    if read_quota is None:
+        return ruling_io.gather(sid).ruling
+    run_env = dict(quota_gate.policy_env())
+    run_env.update(env or {})
+    state = read_quota(now)
+    dec = quota_gate.dispatch_decision(state, now, run_env, peek=True)
+    return ruling_io.compose(state, dec, now, sid=sid, env=run_env).ruling
 
 
 def _has_carrier() -> bool:
