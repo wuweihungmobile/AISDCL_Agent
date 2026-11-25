@@ -372,5 +372,6 @@
 | N-10 `park --done` 上限 | QVD §3.5.2 B7（劃界文字；由 AC-QV-10f 的白名單形狀覆蓋） |
 | N-05 WAIT_RESET 掛載推動者 | REQ-AP-QV-11；AC-QV-11e～f；MU-QV-34～37；E2E-AP-QV-11 Stop 段 |
 | N-03 clone 缺主樹機器本地狀態 | REQ-AP-MG-03；AC-MG-03e～f；MU-MG-9～12；E2E-AP-MG-03 基線段 |
+| N-08 SI 檔案清單 | §0 既有改動列（已為五檔，本輪核對一致） |
 | N-04 詢問閘擋掉必填齊全的「是否繼續」且叫模型代決 | REQ-AP-ASK-01；AC-ASK-01g 改寫、AC-ASK-01j 改寫、AC-ASK-01k～l；MU-ASK-12～14；E2E-AP-ASK-01 合成正例補 `是否繼續` 題 |
 | N-06 `plan.cap` 不存在 | AC-QV-01g 改寫；MU-QV-26 |

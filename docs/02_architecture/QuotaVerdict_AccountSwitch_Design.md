@@ -305,7 +305,7 @@ engine-bridge 閉包（SSOT §4 第 6 點）：`quota_ruling` 只被 `quota_gate
 | `tools/lib/session_brief.py`（lib 400） | 398／400 | +2 | `quota_line()`（L219～L250）→ `quota_ruling.brief_line()`；L505～L506 第二處改讀注入判決 | 約 +28 |
 | `tools/lib/quota_escalation.py`（lib 400） | 400／400 | 0（L335 同行數替換） | 若替換超出一行：把 L335 所在的判帶函式整段（實作棒現查邊界）搬到 `quota_halt_marker.py`（escalation 判定的自然家同為 halt 族） | 0 |
 | `.claude/hooks/context_budget_guard.py`（special 1104） | 1104／1104 | +5（PostToolUse 呼叫 `acctswitch.tick()`、PreToolUse 傳 `rule` 依賴） | `_known_table_cache_path()`／`known_model_windows_path()`／`load_known_model_windows()`（L380～L447）→ 新扁平檔 `tools/lib/model_window_table.py`（前綴 `model` 現 1 支，加入後 2 支 <3）；CLOSE 把 `SPECIAL_FILES` 該檔門檻下修為新實值（棘輪雙邊咬人） | 約 +53，門檻下修後歸 0 |
-| `tools/lib/relay_machine.py`、`sessionctl/switchfacts.py`、`handoff_build.py`、`converge.py`、`qw_guard.py`（擋派分支退役，淨減）、`qw_verdict.py`、`qw_cli.py`、`qw_plan.py`、`kw_wake.py`、`kw_run.py`、SI `sched.py`／`patrol.py`／`fourq.py` | 現查 | 各 ≤ +15 | 實作棒逐檔現查；任一檔超過分級 90% 時先列抽出清單交主控 | — |
+| `tools/lib/relay_machine.py`、`sessionctl/switchfacts.py`、`handoff_build.py`、`converge.py`、`qw_guard.py`（擋派分支退役，淨減）、`qw_verdict.py`、`qw_cli.py`、`qw_plan.py`、`kw_wake.py`、`kw_run.py`、SI `sched.py`／`patrol.py`／`fourq.py`／`writeverbs.py`／`evspec.py` | 現查 | 各 ≤ +15 | 實作棒逐檔現查；任一檔超過分級 90% 時先列抽出清單交主控 | — |
 | 其他觸及檔 | `watch.py` 283、`watch_wake.py` 142、`keepwarm.py` 220、`park_cli.py` 320、`park_reset.py` 61、`quota_rush.py` 186、`quota_halt_marker.py` 20、`quota_meter.py` 327、`check_claim_provenance.py` 510／750 | 各 ≤ +30 | 不需抽出 | — |
 
 抽出原則：只搬、不改行為（搬移 commit 與行為變更 commit 分開，搬移那一個 commit 全套必須綠，證明搬移零行為差異）。
@@ -324,7 +324,7 @@ engine-bridge 閉包（SSOT §4 第 6 點）：`quota_ruling` 只被 `quota_gate
 | watch 閂鎖鍵 | `keepwarm.py` | — | `watch_wake.py` | WP-QV |
 | 叫醒來源 `ruling_wait_reset` | `qw_plan.py`、`kw_run.py` | 本檔 §3.6 | keepwarm、哨兵 | WP-QV |
 | `ENV_SPEC` 新鍵 `QV_WAIT_RESET_MIN` | `quota_policy_env.py` | `env.shared` 不改（別名） | `quota_ruling` | WP-QV |
-| SelfImproving 判決消費 | `selfimproving/sched.py`、`patrol.py`、`fourq.py` | SelfImproving_PRD AC-SI-30-1／NFR-SI-07-5／FC-l 註記 | SI 巡邏 | WP-QV（SI 套件只改消費端；`sched.py` 的既有 SI 測試改斷言同 commit） |
+| SelfImproving 判決消費 | `selfimproving/{sched,patrol,fourq,writeverbs,evspec}.py`（v1.2 統一清單，N-08） | SelfImproving_PRD AC-SI-30-1／NFR-SI-07-5／FC-l 註記 | SI 巡邏 | WP-QV（SI 套件只改消費端；`sched.py` 的既有 SI 測試改斷言同 commit） |
 | `SPECIAL_FILES` 門檻、c1c2、`_TREE_FILE_FLOORS` | `AutoClaude/tools/check_loc_budget.py`、`tools/tests/test_adr_xplat001_c1c2_lock.py`、`tools/lib/skip_tag_policy.py` | 兩站點 guard-total | 全套 | **CLOSE 單一窗口**（並行包只回報建議值） |
 | `.claude/hooks/*` 改動 | — | — | — | WP-HOOK（staged diff 交主控親套；本檔涉及 `context_budget_guard.py` 兩處、`check_claim_provenance.py` 新族） |
 | 帳本 | — | — | — | CLOSE |
@@ -400,4 +400,5 @@ WP-QV 與 WP-AC 動同一組 quota 檔 ⇒ **串行**。SI 套件測試（`tools
 | N-09 白名單定義使鎖無法綠 | §3.5.3 白名單定義（含診斷／排程用 C 站點逐項 WHY） |
 | N-10 `park --done` 上限未列 | §3.5.2 新 B7 |
 | N-05 WAIT_RESET 時沒有推動者叫主控掛 keepwarm | §3.6 末〈掛載的推動者〉、§3.5.1 C7；PRD R-4.1.6-4【v2.1.29 勘誤（續）】 |
+| N-08 SI 實作檔清單四處不一致 | §9、§10 統一為 `{sched,patrol,fourq,writeverbs,evspec}`；PRD §16.6 再追加勘誤列；APD §12 WP-QV 同步 |
 | N-06 `plan.cap` 不存在、與 PRD「cap 唯一來源」衝突 | §3.1 `plan` 列、§3.2 `cap` 段（只取 `decision.cap`；`None` ⇒ `max_fanout`） |

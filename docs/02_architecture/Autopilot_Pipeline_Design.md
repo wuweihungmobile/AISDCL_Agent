@@ -268,7 +268,7 @@ python tools/autopilot.py push [--dry-run]
 
 | WP | 內容（本檔節） | 持有面 | 守衛面 | 與誰串行 |
 |---|---|---|---|---|
-| WP-QV | QV 設計全部（含 SI 消費端） | quota 族＋sessionctl watch／park＋`selfimproving/{sched,patrol,fourq}.py` | 是 | 先於 WP-AC |
+| WP-QV | QV 設計全部（含 SI 消費端） | quota 族＋sessionctl watch／park／parkearly／parkprobe／switchplan／switchfacts／keepwarm＋`selfimproving/{sched,patrol,fourq,writeverbs,evspec}.py`（v1.2 統一清單，N-08） | 是 | 先於 WP-AC |
 | WP-AC | QV 設計 §7 | 同上 | 是 | WP-QV 收工親驗後 |
 | WP-MERGE | §3、§4、§5 | `tools/lib/autopilot/**`、`tools/autopilot.py`、`ledger_closing_guards.py`、`human_escape.py`、`tools/git-hooks/pre-push` | 是（`human_escape.py`） | 可與 WP-AC、WP-CI 並行（持有面不交集） |
 | WP-CI | §6 | `tools/lib/ciwait/core.py`、`tools/ci_wait.py`、`tools/tests/test_ci_wait.py` | 否 | 可並行 |
@@ -355,4 +355,5 @@ python tools/autopilot.py push [--dry-run]
 | 發現 | 本檔落點 |
 |---|---|
 | N-03 獨立 clone 缺主樹機器本地狀態 | §3.2 步 4.5 ④、新步 4.7 基線、步 5 判定；ADR-XPLAT-018 D5 |
+| N-08 SI 檔案清單不一致 | §12 WP-QV 持有面 |
 | N-04 詢問閘擋掉必填齊全的「是否繼續？」、阻斷訊息叫模型代決 | §7 判準 4（疑問詞之後 12 字元內的複合動作詞；單詞「繼續」不收）、阻斷訊息三分；PRD R-4.5.12-3【v2.1.29 勘誤（續）】 |
