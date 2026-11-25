@@ -1,21 +1,18 @@
 """QuotaWall 判決：擋派、Stop 推回、牆中靜音（R218 Q1；DES §6、REQ-QW-10～16）。
 
-本檔只回**判決值**（rc／訊息／靜音分類），不 import hook、不擋任何東西；`converge`、兩支 hook 的接線
-在 Q4（守衛面，主控親套）。任何例外 ⇒ 放行（`(0, "")`／`""`）＝fail-open。
+本檔只回**判決值**（Stop 推回訊息／靜音分類；擋派分支已退役，QVD C2），不 import hook、
+不擋任何東西；`converge`、兩支 hook 的接線在 Q4（守衛面，主控親套）。任何例外 ⇒ 放行（`(0, "")`／`""`）＝fail-open。
 `AUTOSDD_QUOTAWALL_OFF` 只關擋派與推回；牆中偵測、牆內延後、牆中靜音是正確性，不受影響。
 """
 from __future__ import annotations
 
 import os
-import re
 from datetime import datetime
 from pathlib import Path
 
 from . import holder, qw_calc, qw_latch, qw_plan, qw_schema, qw_wall, roster, switch
 
 DISPATCH_TOOLS = ("Agent", "Task", "Workflow")
-ESCAPE_MIN_CHARS = 8
-_ESCAPE_RE = re.compile(r"續派理由[：:]\s*([^\r\n]+)")
 _STEPS = ("python tools/sessionctl.py handoff --build", "補完交接包主控層",
           "python tools/sessionctl.py handoff --finalize <包>", "python tools/sessionctl.py park")
 _KEEPWARM = "python tools/sessionctl.py keepwarm --sid <sid>（run_in_background、輸出導檔）"
@@ -26,38 +23,10 @@ def _off(env) -> bool:
         or switch.switch_mode(env) == "off"
 
 
-def _texts(value) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, dict):
-        return [t for v in value.values() for t in _texts(v)]
-    if isinstance(value, list):
-        return [t for v in value for t in _texts(v)]
-    return []
-
-
-def _escape(tool_input) -> bool:
-    """`續派理由：<≥8 字>`（記入工具輸入任何一段文字）。"""
-    return any(len(m.group(1).strip()) >= ESCAPE_MIN_CHARS
-               for text in _texts(tool_input) for m in _ESCAPE_RE.finditer(text))
-
-
 def _facts(p: qw_plan.Plan) -> str:
     return (f"階段 {p.stage}｜短窗剩餘 R={p.r:.1f}pp、V={p.v:.2f}、L={p.limit:.2f}"
             f"｜距 reset D={p.d_min:.0f} 分"
             f"｜calibrated={'yes' if p.calibrated else 'no'}")
-
-
-def block_text(p: qw_plan.Plan) -> str:
-    """擋派訊息：含階段、D、R、V、L、calibrated 與該階段確切步驟（REQ-QW-11）。"""
-    if p.stage == qw_plan.CLOSE:
-        todo = ("額度已進收尾帶：不再派新代理。步驟：①TaskStop 全部在飛代理（成品留工作樹）→ ②"
-                + "、".join(_STEPS) + " → ③掛主載具 " + _KEEPWARM)
-    else:
-        todo = ("額度已進擋派帶：不再派新代理（在飛代理照跑、主控自己的工作照做）；"
-                "重掛同一條 sessionctl watch，讀數再降到收尾帶時會有下一步指示。")
-    return (f"額度牆（PreToolUse）：{_facts(p)}\n{todo}\n"
-            f"真的需要再派：在 prompt 開頭寫 `續派理由：<至少 {ESCAPE_MIN_CHARS} 字的原因>`。")
 
 
 def snapshot(payload: dict, env, now: datetime, seams: dict | None = None):

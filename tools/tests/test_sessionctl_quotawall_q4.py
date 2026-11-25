@@ -36,6 +36,7 @@ from lib.sessionctl import (  # noqa: E402
     qw_plan,
     qw_prompt,
     qw_schema,
+    ruling_io,
 )
 
 SID = "6c1d2e3f-8a41-4c1d-9d0e-3a52c1d8e911"
@@ -125,63 +126,30 @@ class PreToolWiringTest(_Base):
             pct, **{k: v for k, v in extra.items() if k in ("n", "ledger", "reset_min")}))
 
     def test_at_qw_83_block_text_and_boundaries(self) -> None:
-        """c＝20 萬、D＝150 ⇒ V＝7.5、L＝12.5：R＝13 放行、12.5／7.5 擋；訊息含階段／D／R／V／L／
-        calibrated 與 ping_pp 來源（W11a）；Agent／Task／Workflow 一視同仁。"""
-        for r, stage, rc in ((13, "free", 0), (12.5, "nodispatch", 2), (7.5, "close", 2)):
-            for tool in ("Agent", "Task", "Workflow"):
+        """QVD §3.5 C2（WP-QV 改寫；AT-QW-83／15／16／14／17、MU-QW-52 被取代）：額度牆的 PreToolUse
+        擋派分支**退役**——判決第 3、4 列已涵蓋 stage close／wall／nodispatch，致動器只留派工閘 C1
+        （`quota_gate(rule=…)`，見 `test_sessionctl_qv.ConsumerTest`）。本接線對任何讀數、工具、模式、
+        逃生語一律不擋、不出「額度牆（PreToolUse）」字樣、不記 override。"""
+        for r in (13, 12.5, 7.5):
+            for tool in ("Agent", "Task", "Workflow", "Read"):
                 with self.subTest(r=r, tool=tool):
-                    got_rc, msg = self.verdict(100 - r, tool)
-                    self.assertEqual(got_rc, rc)
-                    if rc == 2:
-                        for needle in (f"階段 {stage}", "R=", "V=7.50", "L=12.50", "D=",
-                                       "calibrated=no", "ping_pp=0.500（來源 scaled）"):
-                            self.assertIn(needle, msg)
-        self.assertEqual(self.verdict(50, "Read"), (0, ""))  # 非展開型工具不擋
-
-    def test_at_qw_16_subagent_and_escape_hatch(self) -> None:
-        """WHY：子代理的呼叫放行（閘管主控）；`續派理由：<≥8 字>` 放行並記 override；太短不放行；
-        無人窗口下理由無效（plan 本身 none，連 override 都不記）。"""
-        self.assertEqual(self.verdict(92.5, agent_id="sub-1"), (0, ""))  # 子代理：連附註都沒有
-        ok = {"prompt": "續派理由：補最後一個測試檔案\n其餘內容"}
-        rc, msg = self.verdict(92.5, tool_input=ok)
-        self.assertEqual(rc, 0)
-        self.assertNotIn("額度牆（PreToolUse）", msg)  # 放行；只剩既有的「掛監督」附註
-        self.assertIn("quotawall_override", self.events())
-        short = self.verdict(92.5, tool_input={"prompt": "續派理由：短"})
-        self.assertEqual(short[0], 2)
-        before = self.events().count("quotawall_override")
-        self.assertEqual(self.verdict(92.5, tool_input=ok, env={"AUTOSDD_UNATTENDED": "1"})[0], 0)
-        self.assertEqual(self.events().count("quotawall_override"), before)
-
-    def test_modes_and_off_switch(self) -> None:
-        """AT-QW-14：auto 擋、notify 只出訊息（rc 0）、off／`AUTOSDD_QUOTAWALL_OFF` 無聲放行。"""
-        self.assertEqual(self.verdict(93)[0], 2)
-        rc, msg = self.verdict(93, env={"AUTOSDD_SESSION_SWITCH_MODE": "notify"})
-        self.assertEqual(rc, 0)
-        self.assertIn("額度牆", msg)
-        for env in ({"AUTOSDD_SESSION_SWITCH_MODE": "off"}, {"AUTOSDD_QUOTAWALL_OFF": "1"}):
+                    rc, msg = self.verdict(100 - r, tool)
+                    self.assertEqual(rc, 0)
+                    self.assertNotIn("額度牆（PreToolUse）", msg)
+        for env in ({}, {"AUTOSDD_SESSION_SWITCH_MODE": "notify"}, {"AUTOSDD_QUOTAWALL_OFF": "1"}):
             with self.subTest(env=env):
-                rc, msg = self.verdict(93, env=env)
-                self.assertEqual(rc, 0)
-                self.assertNotIn("額度牆", msg)  # 只剩既有的「掛監督」附註
+                self.assertNotIn("額度牆", self.verdict(93, env=env)[1])
+        ok = {"prompt": "續派理由：補最後一個測試檔案\n其餘內容"}
+        self.assertEqual(self.verdict(92.5, tool_input=ok)[0], 0)
+        self.assertNotIn("quotawall_override", self.events())
 
     def test_at_qw_17_convergence_gate_wins_with_one_line_summary(self) -> None:
-        """WHY：兩閘同時成立只出收斂閘訊息＋一行額度牆摘要（REQ-QW-10），不是兩段各說各話。"""
+        """收斂閘照舊（與額度判決無關）：上下文達硬線 ⇒ rc 2「收斂閘」；額度牆摘要隨擋派分支退役。"""
         self.transcript = _write_transcript(self.tmp / f"{SID}.jsonl", HARD)
         rc, msg = self.verdict(99)
         self.assertEqual(rc, 2)
         self.assertIn("收斂閘", msg)
-        self.assertIn("額度牆摘要：", msg)
-        self.assertEqual(msg.count("額度牆（PreToolUse）"), 1)
-
-    def test_mu_qw_52_the_block_comes_only_from_the_wiring(self) -> None:
-        """MU-QW-52：拿掉 converge 對 qw_guard.pretool 的呼叫（或對主控放行）⇒ 同輸入不再被擋——
-        證明 AT-QW-83 的 rc 2 確實來自這條接線，不是別處。"""
-        self.assertEqual(self.verdict(93)[0], 2)
-        with mock.patch.object(qw_guard, "pretool", return_value=(0, "")):
-            rc, msg = self.verdict(93)
-        self.assertEqual(rc, 0)
-        self.assertNotIn("額度牆", msg)
+        self.assertNotIn("額度牆（PreToolUse）", msg)
 
 
 class OrderLockTest(_Base):
@@ -220,10 +188,15 @@ class OrderLockTest(_Base):
         mutated = {"schema": "autosdd.keepwarm/2", "ping_costs": [{"pp": 6.0, "clean": True}]}
         with (mock.patch.object(qw_calc, "MIN_CLEAN_SAMPLES", 1),
               mock.patch.object(qw_calc, "OUTLIER_X", 1000)):
-            rc, msg, plan = self.run_case(47, 289_728, ledger=mutated)
+            rc, _msg, plan = self.run_case(47, 289_728, ledger=mutated)
+            seams = self.seams(47, 204, ledger=mutated)
+            r = ruling_io.current(SID, self.transcript, {}, NOW, read_quota=seams["read_quota"],
+                                  plan=plan).ruling
         self.assertEqual(plan.ping_pp_src, "measured")
-        self.assertEqual(rc, 2)
-        self.assertIn("來源 measured", msg)
+        # WP-QV（QVD C2）：擋派改由判決驅動（C1）；污染值被當真成本 ⇒ 計畫收緊 ⇒ 判決不再 CONTINUE
+        self.assertNotEqual(plan.stage, "free")
+        self.assertNotEqual(r.action, "CONTINUE")
+        self.assertEqual(rc, 0, "converge 的額度牆擋派已退役，擋派只在 C1")
 
 
 # ═══════════════════════════════════════════════════════════ Stop 側
@@ -297,18 +270,18 @@ class StopSideTest(_Base):
             self.assertEqual(self.verdict(self.stop(tasks=[KEEPWARM_SHELL]), 93), "")
 
     def test_at_qw_68_nodispatch_and_free_do_not_push_park_none_keeps_the_old_gate(self) -> None:
-        """S-16：讀數 88（校準後 free／nodispatch）額度照樣用到接近滿，不推 park；量不到（none）
-        ⇒ 既有 `park.stop_verdict` 原樣。"""
+        """QVD C2／C7（WP-QV 改寫；S-16 的「校準後 free 不推」被單一判決取代）：閒置側只在判決
+        `PARK｜HALT_WEEKLY` 時落到 park 判準——讀數 60 ⇒ CONTINUE 不推；讀數 88（原始 ≥ prepare、
+        150 分後 reset）⇒ 判決 PARK ⇒ 交 park；量不到 ⇒ 判決 CONTINUE（降級）⇒ 不推、也不呼叫。"""
         with mock.patch.object(park, "stop_verdict", return_value="LEGACY-PARK") as legacy:
-            for pct in (88, 60):
-                with self.subTest(pct=pct):
-                    why = self.verdict(self.stop(tasks=[KEEPWARM_SHELL]), pct)
-                    self.assertNotIn("LEGACY-PARK", why)
+            self.assertNotIn("LEGACY-PARK", self.verdict(self.stop(tasks=[KEEPWARM_SHELL]), 60))
             self.assertEqual(legacy.call_count, 0)
             blind = converge.stop_verdict(
                 self.stop(tasks=[KEEPWARM_SHELL]), {}, now=NOW, read_quota=_reader(None),
                 live_fn=_live(0), ledger={}, carrier_fn=lambda: True)
-            self.assertIn("LEGACY-PARK", blind)
+            self.assertNotIn("LEGACY-PARK", blind)
+            self.assertEqual(legacy.call_count, 0)
+            self.assertIn("LEGACY-PARK", self.verdict(self.stop(tasks=[KEEPWARM_SHELL]), 88))
 
     def test_at_qw_18_and_67_primary_gate(self) -> None:
         """§6.3：armed park ∧ 沒有 running 的 keepwarm／watch ⇒ 推一次（含 `keepwarm --sid`、

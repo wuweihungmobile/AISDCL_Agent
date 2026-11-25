@@ -73,7 +73,7 @@ def resolve(opts, sid: str, S: dict, now: datetime, env=None):
                 QR.NODISPATCH: "不派新、在飛照跑；短窗 reset 量不到一律拒絕，不假設 5 小時。",
                 QR.CONTINUE: "判決准許續跑，不需要 park；下一棒放不下請帶 `--next-est <pp>`。"}
         if r.degraded:  # 量不到讀數：不是「額度夠」，是「量不到就不登記」（不假設 5 小時）
-            hint[QR.CONTINUE] = "額度量不到：照降級上限續跑，不 park（量不到 reset 不假設 5 小時）。"
+            hint[QR.CONTINUE] = "額度量不到：照降級上限續跑、不 park（量不到 reset 不假設 5 小時）"
         return _refuse(sid, f"❌ park 拒絕：判決 {r.action}。{hint[r.action]}\n{line}")
     if opts.at:
         reset, text = _reset_from_at(opts, now)

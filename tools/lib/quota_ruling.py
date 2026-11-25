@@ -102,7 +102,7 @@ def classify(state, now: datetime) -> dict:
         if axis.kind in quota_policy.FALLBACK_KINDS:
             out["spend"].append(axis)
         elif reset is None and axis.kind in SHORT_KINDS:
-            out["short"].append(axis)  # 短窗讀數在、reset 量不到 ⇒ 仍進第 3 列（判 NODISPATCH，F-07）
+            out["short"].append(axis)  # reset 量不到仍進第 3 列（判 NODISPATCH，F-07）
         elif reset is None or reset <= now:
             continue
         elif axis.kind in quota_policy.MODEL_SCOPED_KINDS or axis.kind in WEEKLY_KINDS \

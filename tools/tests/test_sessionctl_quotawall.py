@@ -399,48 +399,38 @@ class VerdictTest(_Base):
                                          read_quota=_reader(_state(pct)), ledger={}, **kw)
 
     def test_matrix_of_modes(self):
-        """close × auto／notify／off／UNATTENDED／QUOTAWALL_OFF。"""
-        self.assertEqual(self.verdict(93)[0], 2)
-        rc, msg = self.verdict(93, env={"AUTOSDD_SESSION_SWITCH_MODE": "notify"})
-        self.assertEqual(rc, 0)
-        self.assertTrue(msg)
-        for env in ({"AUTOSDD_SESSION_SWITCH_MODE": "off"}, {"AUTOSDD_UNATTENDED": "1"},
-                    {qw_calc.OFF_ENV: "1"}):
-            with self.subTest(env=env):
-                self.assertEqual(self.verdict(93, env=env), (0, ""))
-
-    def test_dispatch_boundaries(self):
-        """R＝13 放行／12.5 擋／7.5 擋（AT-QW-15）。"""
-        self.assertEqual(self.verdict(87)[0], 0)
-        self.assertEqual(self.verdict(87.5)[0], 2)
-        self.assertEqual(self.verdict(93.5)[0], 2)
+        """QVD C2（WP-QV 改寫；AT-QW-14／15 被取代）：擋派分支退役，任何模式、任何讀數一律
+        `(0, "")`；擋派只在派工閘 C1（判決非 CONTINUE）。"""
+        for pct in (87, 87.5, 90, 93, 93.5):
+            for env in ({}, {"AUTOSDD_SESSION_SWITCH_MODE": "notify"},
+                        {"AUTOSDD_SESSION_SWITCH_MODE": "off"}, {"AUTOSDD_UNATTENDED": "1"},
+                        {qw_calc.OFF_ENV: "1"}):
+                with self.subTest(pct=pct, env=env):
+                    self.assertEqual(self.verdict(pct, env=env), (0, ""))
 
     def test_non_dispatch_tools_and_subagents_pass(self):
         self.assertEqual(self.verdict(93, payload=self.payload(tool_name="Read")), (0, ""))
         self.assertEqual(self.verdict(93, payload=self.payload(agent_id="a1")), (0, ""))
 
     def test_escape_phrase_needs_eight_chars_and_is_traced(self):
+        """`續派理由：` 逃生語隨擋派分支退役（沒有東西可逃）：不記 override、恆放行。"""
         ok = self.payload(tool_input={"prompt": "續派理由：補最後一個測試檔案"})
-        short = self.payload(tool_input={"prompt": "續派理由：短"})
         self.assertEqual(self.verdict(93, payload=ok), (0, ""))
         trace = Path(os.environ["AUTOSDD_TRACE_DIR"]) / "autosdd_session_switch.jsonl"
-        self.assertIn("quotawall_override", trace.read_text(encoding="utf-8"))
-        self.assertEqual(self.verdict(93, payload=short)[0], 2)
+        self.assertFalse(trace.exists() and "quotawall_override" in trace.read_text("utf-8"))
 
     def test_escape_ignored_when_unattended(self):
         ok = self.payload(tool_input={"prompt": "續派理由：補最後一個測試檔案"})
         self.assertEqual(self.verdict(93, payload=ok, env={"AUTOSDD_UNATTENDED": "1"}), (0, ""))
-        trace = Path(os.environ["AUTOSDD_TRACE_DIR"]) / "autosdd_session_switch.jsonl"
-        self.assertFalse(trace.exists() and "quotawall_override" in trace.read_text("utf-8"))
 
     def test_block_text_carries_facts_and_steps(self):
-        msg = self.verdict(93)[1]
-        for needle in ("R=", "V=", "L=", "D=", "calibrated=", "TaskStop", "--finalize", "park",
+        """擋派訊息的家（`block_text`）隨退役刪除（不留死碼）；Stop 收尾訊息仍帶計畫事實與判決行。"""
+        self.assertFalse(hasattr(quotawall, "block_text"))
+        idle = quotawall.stop_verdict(self.payload(), {}, NOW, inflight=False,
+                                      read_quota=_reader(_state(93)), ledger={})
+        for needle in ("R=", "V=", "L=", "D=", "calibrated=", "QUOTA_VERDICT=PARK", "park",
                        "keepwarm"):
-            self.assertIn(needle, msg)
-        nod = self.verdict(90)[1]
-        self.assertIn("不再派新代理", nod)
-        self.assertNotIn("--finalize", nod)
+            self.assertIn(needle, idle)
 
     def test_stop_verdict_stage_and_loop_guard(self):
         pay = self.payload()
@@ -508,8 +498,13 @@ class WakeTargetTest(_Base):
         self.assertEqual(self.target(40, None), (None, "none", (None, None, None)))
 
     def test_wall_with_known_reset_targets_reset_plus_s(self):
+        """牆中（100%、40 分後 reset）：判決 WAIT_RESET（D ≤ 45）⇒ 來源 `ruling_wait_reset`（QVD §3.6
+        優先序：park → 判決 WAIT_RESET → stage close／wall），目標同為 reset＋s；D > 45 才落 `reset`。"""
         at, src, _ref = self.target(100, None, reset_min=40)
-        self.assertEqual((src, at), ("reset", NOW.timestamp() + 40 * 60
+        self.assertEqual((src, at), ("ruling_wait_reset", NOW.timestamp() + 40 * 60
+                                     + qw_calc.skew_min() * 60))
+        at, src, _ref = self.target(100, None, reset_min=90)
+        self.assertEqual((src, at), ("reset", NOW.timestamp() + 90 * 60
                                      + qw_calc.skew_min() * 60))
 
 
