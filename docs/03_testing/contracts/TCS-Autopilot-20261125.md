@@ -100,9 +100,9 @@
 | AC-QV-10a | 單一家鎖：判決輸入原語的呼叫站點集合 == `RULING_INPUT_SITES` | `QV::SingleHouseTest::test_sites_equal_allowlist` |
 | AC-QV-10b | 鎖有鑑別力：合成樹多一個私有判讀站點 ⇒ 紅；白名單多一個不存在站點 ⇒ 紅；別名 import 仍可認 | `QV::SingleHouseTest::test_lock_discriminates` |
 | AC-QV-10c | 扁平檔（`tools/lib/*.py`）不 import `lib.sessionctl`（AST） | `QV::SingleHouseTest::test_flat_files_do_not_import_sessionctl` |
-| AC-QV-10d | 包裝入口可見（N-02）：合成樹新增一個函式，以 `park._pace_state(now)` 取數（不直接呼叫任何原語）⇒ 鎖紅並列出該檔＋函式；以 `quota_gate.pace_state`、`settled_quota`、`qw_wall.default_read` 各取一次同樣紅 | `QV::SingleHouseTest::test_wrapper_entry_sites_are_seen` |
+| AC-QV-10d | 包裝入口可見（N-02）：合成樹新增一個函式，以 `park._pace_state(now)` 取數（不直接呼叫任何原語）⇒ 鎖紅並列出該檔＋函式；以 `quota_gate.pace_state`、`settled_quota`、`qw_wall.default_read` 各取一次同樣紅；**縫形（v1.3，R-01）**：合成樹新增 `(S.get("quota") or park._pace_state)(now)`（`BoolOp` 注入縫）⇒ 紅；新增 `fn = quota_gate.pace_state` 後 `fn(now)`（函式參照賦值）⇒ 紅，且命中站點為賦值所在函式；新增 `def f(read_quota=None): return (read_quota or default_read)(now)`（`default_read` 由 `from … qw_wall import default_read` 綁定）⇒ 紅、命中來自 `default_read`；**反例**：同一函式只把參數 `read_quota` 轉手（`g(read_quota=read_quota)`）而無任何模組層綁定或屬性引用 ⇒ 不計；以 `getattr(quota_gate, "read_quota")` 取得 ⇒ 不計（照實劃界，斷言為「不計」以免日後靜默改義） | `QV::SingleHouseTest::test_wrapper_entry_sites_are_seen`、`QV::SingleHouseTest::test_seam_references_are_seen` |
 | AC-QV-10e | 門檻比較可見（N-02）：合成樹新增 `if axis.pct >= policy.prepare_pct:`（取數由參數傳入、無任何呼叫原語）⇒ 鎖紅；同一比較寫在 `quota_policy*.py`／`quota_ruling.py` 內 ⇒ 不計 | `QV::SingleHouseTest::test_threshold_compare_sites_are_seen` |
-| AC-QV-10f | 白名單形狀（N-09）：`RULING_INPUT_SITES` 每項帶非空 WHY 與分類（`B1`…`B7`／`ruling`／`diag`）；`diag` 項恰為 QVD §3.5.3 列舉的四處（watch `plan_fn`、`kw_wake`、`switchfacts` 的 `qw_plan.plan`、`qw_cli`）；改接後真樹上鎖綠 | `QV::SingleHouseTest::test_allowlist_entries_have_category_and_why` |
+| AC-QV-10f | 白名單形狀（N-09）：`RULING_INPUT_SITES` 每項帶非空 WHY 與分類（`B1`…`B8`／`ruling`／`diag`）；`diag` 項恰為 QVD §3.5.3 列舉的五處（watch `plan_fn`、`kw_wake`、`watch_wake.WakeCtl.start` 的轉手〔v1.3〕、`switchfacts` 的 `qw_plan.plan`、`qw_cli`）；改接後真樹上鎖綠，且白名單與 QVD §3.5.3〈預期命中站點清單〉「改接後白名單＝是」各列逐一對得上（多、少皆紅） | `QV::SingleHouseTest::test_allowlist_entries_have_category_and_why` |
 | AC-QV-11a | 互動 auto：判決 `WAIT_RESET`、`stage=free`、ctx 小於 `AUTOSDD_KEEPWARM_MIN_CTX_TOKENS` ⇒ `wake_target` 回 `(win＋skew, "ruling_wait_reset", …)`，`skip_reason` 不使指令不掛 | `KW::RulingWaitResetTest::test_small_ctx_still_wakes_at_win` |
 | AC-QV-11b | 保溫帳 pings 已達 n* ⇒ `ruling_wait_reset` 仍單跳、不付費 ping | `KW::RulingWaitResetTest::test_cap_does_not_block_single_hop` |
 | AC-QV-11c | 無人窗口 ⇒ 不掛 keepwarm；哨兵判定（C11）對 `WAIT_RESET` 維持撞線等待並以 `win＋skew` 武裝 | `KW::RulingWaitResetTest::test_unattended_hands_to_sentinel` |
@@ -241,6 +241,8 @@
 | MU-QV-35 | 判決分支套 `pings ≥ n*` 不推 | AC-QV-11e |
 | MU-QV-36 | 判決分支把任何 running 背景任務視為載具（只要有 running 就不推） | AC-QV-11e |
 | MU-QV-37 | 判決分支拿掉前四項豁免 | AC-QV-11f |
+| MU-QV-38 | 鎖的 (i) 收集改回只看 `Call.func`（v1.2 的直接呼叫判準；R-01） | AC-QV-10d（`BoolOp` 縫與函式參照兩例轉紅） |
+| MU-QV-39 | (i) 的 `ast.Name` 判準拿掉「解析到模組層綁定」（只認屬性），或改成連參數同名也收 | AC-QV-10d（`default_read` 例不紅，或參數轉手反例被計入） |
 | MU-AC-1 | reconcile 不比對 `account`（只看存在） | AC-AC-02a |
 | MU-AC-2 | 舊格式標記一律保留 | AC-AC-02b |
 | MU-AC-3 | 逐字稿觸發器不記 byte offset（每次全讀） | AC-AC-03b |

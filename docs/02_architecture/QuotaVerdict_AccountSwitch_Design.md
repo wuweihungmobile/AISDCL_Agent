@@ -108,7 +108,7 @@ QUOTA_VERDICT=<ACTION> acct=<12 碼|none> win=<短窗 reset ISO|none> wk=<週 re
 
 ### 3.5 消費端普查與處置（F-01；同一個 commit 改齊；舊判讀刪除，不留第二個家）
 
-**普查方法**（SD-1 當回合以 Grep 掃 `tools/**`、`.claude/hooks/*.py`，樣式：`read_quota(`、`quota_policy.decide(`、`decide(state`、`prepare_hits(`、`qw_plan.plan(`、`halt_verdict(`、`read_halt_marker(`、`weekly_forces_fresh(`、`.band`；v1.2 依 QA 複審 N-02 加包裝入口 `pace_state(`、`_pace_state(`、`settled_quota(`、`default_read(`／`default_refresh(` 與 `prepare_pct`／`halt_pct` 的比較運算；實作棒第一動作以同一組樣式重掃，表外新出現的站點一律預設「改接」，且 §3.5.3 的鎖會讓漏掉的站點轉紅，不靠記得）。
+**普查方法**（SD-1 當回合以 Grep 掃 `tools/**`、`.claude/hooks/*.py`，樣式：`read_quota(`、`quota_policy.decide(`、`decide(state`、`prepare_hits(`、`qw_plan.plan(`、`halt_verdict(`、`read_halt_marker(`、`weekly_forces_fresh(`、`.band`；v1.2 依 QA 複審 N-02 加包裝入口 `pace_state(`、`_pace_state(`、`settled_quota(`、`default_read(`／`default_refresh(` 與 `prepare_pct`／`halt_pct` 的比較運算；v1.3 依 QA 第三輪 R-01 改以 AST「引用」判準普查（不只字面 `name(`，`BoolOp` 縫與函式參照一併收；結果見 §3.5.3 預期命中站點清單）；實作棒第一動作以同一組樣式重掃，表外新出現的站點一律預設「改接」，且 §3.5.3 的鎖會讓漏掉的站點轉紅，不靠記得）。
 
 #### 3.5.1 改接（據以行動的判讀；一律改讀判決）
 
@@ -132,7 +132,7 @@ QUOTA_VERDICT=<ACTION> acct=<12 碼|none> win=<短窗 reset ISO|none> wk=<週 re
 | C15 | escalation | `tools/lib/quota_escalation.py` L335（`decide(read_quota(now)…)`） | 改讀判決（第 1 列 spend ⇒ escalate 既有路徑）；同行數替換，淨增 0（該檔 400／400，§9） |
 | C16 | 原始讀數工具 | `tools/lib/quota_meter.py --json` | 首行印「診斷用，判斷請看 `python tools/sessionctl.py quota`」（R-4.1.6-7） |
 | C17 | QuotaWall CLI | `sessionctl/qw_cli.py` L44／L59 | 首行印判決行；計畫細節降為診斷段 |
-| C18 | **SelfImproving 巡邏與研究免掃**（主控代決 ①；REQ-AP-QV-09） | `tools/lib/selfimproving/sched.py` `quota_check()`／`quota_verdict()` L232～L265、`patrol.py` `_quota()` L96～L105（L233 呼叫）、`fourq.py` `_free_band()` L35 | 經子行程 `python tools/sessionctl.py quota --json` 取判決（SI 套件不得 import sessionctl，SSOT §2；也不 import 扁平 `quota_ruling`，因為它需要 sessionctl 的取數）：跳過＝`ACTION ≠ CONTINUE` **或** `deg=unmeasured`（保留 SI 一向的 fail-closed）；降載＝`--json` 的 `band ∈ {notice, converge}`（與現行降載集合同義）；子行程失敗或輸出不可解析＝跳過（fail-closed）。`writeverbs.py` L254 與 `evspec.py` 的 `--band` 值改記判決的 `ACTION`（`quota-band` 附註值＝判決行） |
+| C18 | **SelfImproving 巡邏與研究免掃**（主控代決 ①；REQ-AP-QV-09） | `tools/lib/selfimproving/sched.py` `quota_check()`／`quota_verdict()` L232～L265（含 `measured_state()` L248～L249 的取數，v1.3 依引用普查點名）、`patrol.py` `_quota()` L96～L105（L233 呼叫）、`fourq.py` `_free_band()` L35 | 經子行程 `python tools/sessionctl.py quota --json` 取判決（SI 套件不得 import sessionctl，SSOT §2；也不 import 扁平 `quota_ruling`，因為它需要 sessionctl 的取數）：跳過＝`ACTION ≠ CONTINUE` **或** `deg=unmeasured`（保留 SI 一向的 fail-closed）；降載＝`--json` 的 `band ∈ {notice, converge}`（與現行降載集合同義）；子行程失敗或輸出不可解析＝跳過（fail-closed）。`writeverbs.py` L254 與 `evspec.py` 的 `--band` 值改記判決的 `ACTION`（`quota-band` 附註值＝判決行） |
 | C19 | 新 CLI 動詞 | — | `python tools/sessionctl.py quota [--json] [--next-est <pp>] [--model <family>]`（入口薄殼只分派，判準在 `quota_ruling`，取數在 `ruling_io`） |
 | C20 | Stop 宣稱守衛 | `.claude/hooks/check_claim_provenance.py` | 新增一族（只出聲）：最後一則回覆含額度判斷詞（「已重置」「可以派」「不需要 park」「halt」「額度夠」）而本回合 tool_result 無未過期 `QUOTA_VERDICT=` ⇒ 出聲（R-4.1.6-7）；假紅以真實語料量（TCS E2E-AP-QV-06） |
 
@@ -140,22 +140,68 @@ QUOTA_VERDICT=<ACTION> acct=<12 碼|none> win=<短窗 reset ISO|none> wk=<週 re
 
 | # | 站點 | WHY |
 |---|---|---|
-| B1 | 判決管線內部（取數與組帶）：`quota_gate.read_quota`／`refresh_quota_blocking`／`settled_quota`／`pace_state`／`dispatch_decision`／`quota_floor_reading`、`quota_policy.decide`（含 `quota_policy*.py` 內部的門檻比較與 `quota_policy_env.py` L378 跨欄位不變式驗證）、`quota_burndown.py` L145／L159／L299～L351（halt 門檻內的清倉判定）、`quota_availability.py`、`quota_stability.py`、`quota_reconcile.py`、`quota_pace_floor.py`、`quota_gate.py` L618／L657（`pace_floor=False` 對照）；**包裝入口**（v1.2 補列，N-02）：`sessionctl/park.py` `_pace_state()` L369～L372、`sessionctl/qw_wall.py` `default_read()`／`default_refresh()` L36～L53——只有 `ruling_io.gather()` 與 C 站點中明文標「診斷用」者可呼叫它們（§3.5.3）；**計畫內部取數**：`sessionctl/qw_plan.py` `plan()` L133～L166 與 `qw_wall.py` `fresh_reading()` L89／L97、`wall_state()` L184（計畫本身＝判決輸入 `plan`；`ruling_io.gather()` 以 `read_quota=lambda _n: state` 注入同一份 state，§3.4 第 4 步，故不構成第二次取數） | 它們是判決的**輸入**，不據以行動；判決只此一家呼叫它們組合成動作。包裝入口只轉手讀數，本身不比門檻 |
+| B1 | 判決管線內部（取數與組帶）：`quota_gate.read_quota`／`refresh_quota_blocking`／`settled_quota`／`pace_state`／`dispatch_decision`／`quota_floor_reading`、`quota_policy.decide`（含 `quota_policy*.py` 內部的門檻比較與 `quota_policy_env.py` L378 跨欄位不變式驗證）、`quota_burndown.py` L145／L159／L299～L351（halt 門檻內的清倉判定）、`quota_availability.py`、`quota_stability.py`、`quota_reconcile.py`、`quota_pace_floor.py`、`quota_gate.py` L618／L657（`pace_floor=False` 對照）、`quota_gate.py` `endpoint_probe_verdict()` L756～L757（v1.3 補列，R-01 引用普查：L0 零成本探針，只回「端點快取每軸 <100%＝額度開著」的伺服器事實，供哨兵省下付費探針；不比 prepare／halt、從不回 closed，續跑准許仍由 C11 的判決決定）；**包裝入口**（v1.2 補列，N-02）：`sessionctl/park.py` `_pace_state()` L369～L372、`sessionctl/qw_wall.py` `default_read()`／`default_refresh()` L36～L53——只有 `ruling_io.gather()` 與 C 站點中明文標「診斷用」者可呼叫它們（§3.5.3）；**計畫內部取數**：`sessionctl/qw_plan.py` `plan()` L133～L166 與 `qw_wall.py` `fresh_reading()` L89／L97、`wall_state()` L184、`_quota_reset()` L197（v1.3 補列，R-01：只取 live 軸的 reset 時刻供計畫）（計畫本身＝判決輸入 `plan`；`ruling_io.gather()` 以 `read_quota=lambda _n: state` 注入同一份 state，§3.4 第 4 步，故不構成第二次取數） | 它們是判決的**輸入**，不據以行動；判決只此一家呼叫它們組合成動作。包裝入口只轉手讀數，本身不比門檻 |
 | B2 | 續跑選路成本：`tools/lib/resume_route.py` `weekly_forces_fresh()` L161～L185、`tools/lib/resume_cost.py` L165 | 輸出是「怎麼續」（resume 或 fresh），不是五類決定；前提是呼叫端已由判決（C11／C12）准許續跑。選路門檻 `converge_pct` 屬成本模型（ADR-XPLAT-004 §2.13），不是准許與否 |
 | B3 | 模型平衡建議：`sessionctl/modelmix.py` L79、`tools/sessionctl.py` L49 | 資訊性建議（「改派哪個家族較省」），輸出標「建議（非判決）」，不據以擋派或停工 |
 | B4 | 量測與重放：`tools/probe/**`、`tools/lib/wastecensus/**`（含 `pace_replay.py`）、`tools/lib/realverify/**` | 不接閘門 rc、不據以行動（各檔頭自述） |
 | B5 | 測試：`tools/tests/**` | 測試本身 |
 | B6 | **壓縮可否**（非五類決定；v1.2 自 B1 拆出，N-07）：`quota_gate.py` `draining()` L503～L525（`decide(read_quota(at), …, pace_floor=False)`＋`compact_margin_breached`：`pct + compact_cost_budget_pp > prepare_pct`），經 `context_budget_guard.py` L1067 決定 84% 提示要不要叫主控壓縮 | 回答的是「現在壓縮會不會把五小時水位推過線」（PRD §4.3 壓縮條件），不是停工／park／續跑／等重置／可派數；它不是判決的輸入，判決也不吃它。v1.1 把它寫成「`decide` 的姿態探針」列進 B1，WHY 不成立，故獨立成列。若日後要讓它據以擋派或停工，必須先改接判決 |
 | B7 | **`park --done` 的時限上限**（v1.2，N-10）：`sessionctl/park_cli.py` L196～L199（`quota_gate.pace_state(now).axes` 取短窗 `resets_at`，`limit = min(5 小時, 短窗 reset)`） | 只取「reset 時刻」作為收工標記的有效期上限，不比任何門檻、不判准許與否；`--done` 本身是人／主控宣告「沒有剩餘工作」（§5），不是額度決定 |
+| B8 | **park 基準與換帳號偵測的取讀**（v1.3，R-01／R-04）：`sessionctl/parkprobe.py` `baseline()` L43（`(S.get("quota") or park._pace_state)(now)` 取讀數，把 `parked_pct` 與 `parked_account` 併進 park 標記）、`sessionctl/switchfacts.py` `account_changed()` L141（同形縫取 `state.account_key`，交 `parkprobe.account_changed` 比對） | 只**記錄**登記當下的水位與帳號鍵（基準），或只取 `account_key` 判「帳號換了沒」；兩者都不比 prepare／halt、不決定五類。`parked_pct` 日後只在 C21 的遲滯閘被讀（判決 `CONTINUE` 之後、只收緊）；帳號鍵是判決的輸入（§7，換帳號作廢），判決本身以新帳號 `state` 重算 |
 
 #### 3.5.3 機械鎖（REQ-AP-QV-10；F-01 ③）
 
 - `QV::SingleHouseTest`：AST 掃 `tools/**/*.py`（除 B4、B5 目錄）與 `.claude/hooks/*.py`，收集兩類站點（檔＋外層函式名），與白名單常數 `RULING_INPUT_SITES` **相等比對**：多一處（新增私有判讀）紅；少一處而白名單未改也紅（同 `hook_wiring.SHELL_FORM_CENSUS` 的相等判準）。
-  - **(i) 呼叫站點**：呼叫 `read_quota`、`refresh_quota_blocking`、`settled_quota`、`pace_state`、`_pace_state`、`default_read`、`default_refresh`、`quota_policy.decide`（含 `decide(` 之以 `quota_policy` 別名或屬性取得者）、`prepare_hits`、`qw_plan.plan`、`halt_verdict`、`read_halt_marker`、`weekly_forces_fresh`（v1.2 加包裝入口，N-02：v1.1 只收直接原語，經 `park._pace_state` 取數再自比門檻的站點——parkearly、parkprobe、switchfacts、qw_guard、qw_wall、watch_wake、park_cli——鎖看不見）。
+  - **(i) 引用站點**（v1.3 自「呼叫站點」改為「引用站點」，R-01）：清單名稱＝`read_quota`、`refresh_quota_blocking`、`settled_quota`、`pace_state`、`_pace_state`、`default_read`、`default_refresh`、`prepare_hits`、`halt_verdict`、`read_halt_marker`、`weekly_forces_fresh`，加兩個限定名 `decide`（值的末段名解析為 `quota_policy`，含 import 別名與 `quota_gate.quota_policy.decide` 鏈）、`plan`（值的末段名解析為 `qw_plan`）。收集規則：
+    - `ast.Attribute`（Load 語境）其 `attr` 為清單名稱 ⇒ 命中，**不論根是什麼**（import 的模組、以參數注入的模組〔`session_brief.quota_line(quota_gate, …)` 這類扁平 hub 寫法〕、物件欄位〔`self.read_quota`〕），也**不論出現在哪個位置**：呼叫的 `func`、`BoolOp` 注入縫 `(S.get("quota") or park._pace_state)(now)`、賦值右側 `fn = quota_gate.pace_state`、引數 `f(read_quota=c.read_quota)`、參數預設值、容器字面；
+    - `ast.Name`（Load 語境）其 id **解析到模組層綁定**（`from … import` 進來的名稱含別名，或本模組頂層 `def`）且綁定的實名在清單內 ⇒ 命中（如 `qw_wall.fresh_reading` 的 `(read_quota or default_read)(now)` 中的 `default_read`）；
+    - 不算：`def` 定義本身、import 行、賦值目標（Store 語境）、**與清單同名的函式參數或區域變數**（例 `(read_quota or default_read)` 中的 `read_quota` 是參數）。WHY：參數只轉手呼叫端注入的值；那個值的源頭——參數預設值或呼叫端傳入的參照——必然以上兩條之一被收在源頭站點，不會整片失明；若連參數同名都收，純轉手的 `qw_plan.plan`、`kw_wake.begin`、`kw_run.run`、`WakeCtl.__init__` 都得入白名單，白名單會被轉手站點淹沒（SD-3 實測：收參數同名 54 站、不收 50 站，差的 4 站全是轉手）。
+    - 站點粒度＝（檔，最外層 `def` 名；模組層引用記 `<module>`）。
+    - v1.2 只收「直接呼叫」（`Call.func` 為名稱或屬性），看不見 repo 主流的注入縫寫法——parkearly L104、parkprobe L43、qw_guard L123、switchfacts L116／L141、park L339、park_reset L58、park_cli L197、qw_wall L89／L97／L184／L197 都是 `BoolOp` 縫——而白名單又列了這些站點，相等比對必紅（QA 第三輪 R-01）。v1.2 之前（v1.1）連包裝入口都不收（N-02）。
   - **(ii) 門檻比較站點**：`ast.Compare` 節點的任一運算元子樹含屬性名 `prepare_pct` 或 `halt_pct`（`ast.Attribute.attr`），且所在檔不屬 `quota_policy*.py`／`quota_ruling.py`（N-02）。v1.2 普查（SD-2 當回合 `git grep -n -E "(prepare_pct|halt_pct)"` 過濾比較運算）的現存站點：`quota_burndown.py` L145／L159（B1）、`quota_gate.py` L499 `compact_margin_breached`（B6）、`sessionctl/park.py` L132 `prepare_hits`（C4／C6／C7 改接後無呼叫端即刪；仍有者必入表）、`park_reset.py` L69（C6）、`parkprobe.py` L72（C21）、`switchplan.py` L104／L110（C13）、`watch_wake.py` L64（C4）。改接完成後 (ii) 的白名單只剩 B1、B6 兩列的站點。誠實劃界：以區域變數轉存門檻（`p = policy.prepare_pct; if x >= p`）的比較，(ii) 看不見；(i) 仍會抓到該站點取數那一呼叫，故不構成整片失明。
-- **白名單 `RULING_INPUT_SITES` 的定義**（v1.2，N-09）：＝B1～B3、B6、B7 的站點 ＋ `quota_ruling`／`ruling_io` 本身 ＋ **C 站點中明文標「診斷／排程用、不據以決定五類」者**，逐項附 WHY；後者現有：C4 `watch.py` L296 的 `plan_fn`（只取 `d_min` 決定 watch 的下一次 tick 時刻；判決另取）、C9 `kw_wake.py` L76（`qw_plan.plan` 決定保溫 ping 的時刻與 `wake_target`；叫醒時刻不是五類決定，五類決定由叫醒後的判決重算）、C13 `switchfacts.quota_facts()` 的 `qw_plan.plan`（只取 `d_min`／`stale` 供輪詢形態）、C17 `qw_cli.py` L44／L59（計畫細節診斷段，首行為判決行）。C 站點改接後若仍有一般呼叫（非上列），即屬漏改，鎖紅。
+- **白名單 `RULING_INPUT_SITES` 的定義**（v1.2，N-09；v1.3 加 B8 與 `watch_wake.start`，R-01）：＝B1～B3、B6～B8 的站點 ＋ `quota_ruling`／`ruling_io` 本身 ＋ **C 站點中明文標「診斷／排程用、不據以決定五類」者**，逐項附 WHY；後者現有：C4 `watch.py` L296 的 `plan_fn`（只取 `d_min` 決定 watch 的下一次 tick 時刻；判決另取）、C9 `kw_wake.py` L76（`qw_plan.plan` 決定保溫 ping 的時刻與 `wake_target`；叫醒時刻不是五類決定，五類決定由叫醒後的判決重算）與同一鏈的 `watch_wake.py` `WakeCtl.start()` L155（`self.read_quota` 把注入的取數縫轉手給 `kw_wake.begin`，v1.3 補列）、C13 `switchfacts.quota_facts()` 的 `qw_plan.plan`（只取 `d_min`／`stale` 供輪詢形態）、C17 `qw_cli.py` L44／L59（計畫細節診斷段，首行為判決行）。C 站點改接後若仍有一般呼叫（非上列），即屬漏改，鎖紅。
 - 白名單常數住測試檔，每項附一句 WHY；改白名單＝改本節表（同一 commit）。
-- 誠實劃界：AST 只看見直接呼叫；以 `getattr` 字串、`importlib` 動態呼叫的站點看不見；別名 import（`from lib.quota_gate import read_quota as rq`）由 AST 解析 import 別名後仍可認。
+- 誠實劃界（v1.3 改寫，R-01）：(i) 看不見的只剩以 `getattr(mod, "read_quota")` 字串取得、`importlib` 動態載入後取用的站點；別名 import（`from lib.quota_gate import read_quota as rq`）由綁定解析仍可認；參數同名的轉手不收，但其源頭會被收（見 (i) 不算條的 WHY）。
+- **預期命中站點清單**（v1.3，SD-3 當回合以 (i) 判準的 AST 普查腳本對 b96ee367 真樹實跑：50 站、74 處引用；(ii) 另見上段）。改接前（＝實作棒起點）每一站都必須落在下表某一列；改接完成後，「改接」欄為 C 的站點不得再以本清單名稱引用（改讀 `ruling_io`），只剩「白名單」欄為是者，加上 `quota_ruling.py`／`ruling_io.py` 自身的站點——此即 `RULING_INPUT_SITES` 的初值，實作棒以同一判準重跑核對，不一致者先改本表再改常數：
+
+| 站點（檔::外層函式） | 引用（行） | 歸屬 | 改接後白名單 |
+|---|---|---|---|
+| `quota_burndown.py::issue`、`::status` | L299；L338、L351 | B1 | 是 |
+| `quota_escalation.py::_idle_prepare_watch` | L335 | C15 | 否（改接） |
+| `quota_gate.py::degraded_posture` | L657 | B1 | 是 |
+| `quota_gate.py::draining` | L518 | B6 | 是 |
+| `quota_gate.py::endpoint_probe_verdict` | L756～L757 | B1（v1.3 補列） | 是 |
+| `quota_gate.py::pace_report` | L924～L926、L941 | C3 | 否（`pace_block()` 取代；若保留為 B1 取數則須先改本表） |
+| `quota_gate.py::pace_state`、`::settled_quota` | L894、L901；L617～L618 | B1 | 是 |
+| `quota_gate.py::quota_gate` | L1059、L1067～L1068、L1086 | C1 | 取數部分屬 B1（`read_quota`／`refresh_quota_blocking`／`settled_quota` 為判決輸入）＝是；L1086 `quota_policy.decide` 改為注入的 `rule` ⇒ 移除。粒度劃界：站點鍵是（檔，函式），本站入白名單後鎖看不見同函式內殘留的 `decide`；這一半由 AC-QV-01 系（派工閘只依判決）與 (ii) 承擔 |
+| `quota_messages.py::halted_pace_text` | L169 | C3 | 否 |
+| `relay_machine.py::current_band` | L157 | C12 | 否 |
+| `resume_cost.py::five_hour_reading`、`resume_route.py::weekly_why` | L165；L184～L185 | B2 | 是 |
+| `selfimproving/patrol.py::_quota`、`selfimproving/sched.py::measured_state`、`::quota_check` | L103；L248～L249；L265 | C18 | 否（改子行程取判決） |
+| `session_brief.py::quota_line`、`::schtasks_trigger` | L240～L241；L505～L506 | C10 | 否 |
+| `sessionctl/handoff_build.py::_quota_text` | L125 | C14 | 否 |
+| `sessionctl/kw_wake.py::_measure` | L76 | C9（診斷／排程） | 是 |
+| `sessionctl/modelmix.py::pace_line`、`tools/sessionctl.py::_advice` | L79；L49 | B3 | 是 |
+| `sessionctl/park.py::_pace_state` | L372 | B1（包裝入口） | 是 |
+| `sessionctl/park.py::stop_verdict` | L339、L341 | C7 | 否 |
+| `sessionctl/park_cli.py::_cmd_done` | L197 | B7 | 是 |
+| `sessionctl/park_reset.py::resolve` | L58、L60 | C6 | 否 |
+| `sessionctl/parkearly.py::tick` | L104 | C21 | 否 |
+| `sessionctl/parkprobe.py::baseline` | L43 | B8（v1.3，R-04） | 是 |
+| `sessionctl/qw_cli.py::cli`、`::pace_line` | L44；L59 | C17（診斷） | 是 |
+| `sessionctl/qw_guard.py::_park_facts`、`::_plan` | L123～L124；L106 | C2 | 否（擋派分支退役） |
+| `sessionctl/qw_verdict.py::pretool_verdict`、`::stop_verdict`、`::absent_notice`、`::stop_mute` | L74；L105；L132；L157 | C2 | 否 |
+| `sessionctl/qw_wall.py::default_read`、`::default_refresh` | L39；L53 | B1（包裝入口） | 是 |
+| `sessionctl/qw_wall.py::fresh_reading`、`::wall_state`、`::_quota_reset` | L89、L97；L184；L197 | B1（計畫內部取數；`_quota_reset` v1.3 補列） | 是 |
+| `sessionctl/switchfacts.py::quota_facts` | L116～L117 | C13 | `qw_plan.plan`（L117，只取 `d_min`／`stale`）＝是；L116 `park._pace_state` 移除 |
+| `sessionctl/switchfacts.py::account_changed` | L141 | B8（v1.3 補列） | 是 |
+| `sessionctl/watch.py::run` | L296 | C4（診斷／排程） | 是 |
+| `sessionctl/watch_wake.py::quota_keys` | L60 | C4 | 否 |
+| `sessionctl/watch_wake.py::start` | L155（`self.read_quota` 轉手給 `kw_wake.begin`） | C9 鏈（診斷／排程，v1.3 補列） | 是 |
+| `session_resume_planner.py::sentinel_decide`、`::_sentinel_tick` | L664；L1482 | C11 | 否 |
+| `session_resume_planner.py::main` | L1617 | C3 | 否（halted 行改依判決） |
+
+  `.claude/hooks/*.py` 現存命中 0（hook 端以注入方式把 `quota_gate` 交給 hub，引用落在 hub 內）。AC-QV-10d 的兩種縫形正例（`BoolOp` 縫、函式參照賦值）在上表中分別有真實對應：`parkearly.py::tick` L104、`parkprobe.py::baseline` L43（`BoolOp`），以及 `quota_gate.py::endpoint_probe_verdict` L756～L757（`read = read_quota if read is None else read`，條件式取函式參照）。
 
 ### 3.6 叫醒載具（F-03；REQ-AP-QV-11；判決之外的「誰在 reset 後叫醒主控」）
 
