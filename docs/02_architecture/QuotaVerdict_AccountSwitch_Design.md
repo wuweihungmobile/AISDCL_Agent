@@ -120,7 +120,7 @@ QUOTA_VERDICT=<ACTION> acct=<12 碼|none> win=<短窗 reset ISO|none> wk=<週 re
 | C4 | watch 額度事件 | `sessionctl/watch_wake.py` `quota_keys()` L60（`park.prepare_hits`）；`watch.py` L296（`plan_fn`） | 單一序列：鍵＝`(acct, ACTION, win)`，只有 `WAIT_RESET｜PARK｜HALT_WEEKLY｜NODISPATCH` 觸發；末行 `WATCH_VERDICT=quota action=<A> vid=<v> expires_at=<t>`；處置表一個動作一列，`WAIT_RESET` 列不含「park」字樣 |
 | C5 | watch 閂鎖 | `sessionctl/keepwarm.py` `quota_latch`、`SERIES`（raw／plan 兩序列） | 一序列，鍵加 `acct`；`SERIES` 表退役 |
 | C6 | park 前置 | `sessionctl/park_reset.py` `resolve()` L46～L61（`why_ok` 分支、`_close_stage`、`prepare_hits`） | 當下重算判決；非 `PARK｜HALT_WEEKLY` ⇒ rc 4 並印判決行；`--why` 參數自 `park_cli` 移除（傳入即 argparse 錯誤並指路 `--next-est`）；`--at` 保留，但判決須為 `HALT_WEEKLY` 或 `--next-est` 判放不下；拒絕文案不再出現 `--why`（`--done --why` 除外，F-07） |
-| C7 | Stop 停工推回 | `sessionctl/park.py` `stop_verdict()` L319～L341（`prepare_hits`） | 判決為 `PARK｜HALT_WEEKLY` 且無續航憑證才推回；`WAIT_RESET` ⇒ 依 §3.6 掛叫醒載具，不推 park |
+| C7 | Stop 停工推回 | `sessionctl/park.py` `stop_verdict()` L319～L341（`prepare_hits`） | 判決為 `PARK｜HALT_WEEKLY` 且無續航憑證才推回；`WAIT_RESET` ⇒ 不推 park；**推主控掛叫醒載具的是 `keepwarm.stop_verdict()`**（§3.6 末「掛載的推動者」，v1.2，N-05），本分支不重複推 |
 | C8 | Stop 收斂閘的額度牆摘要 | `sessionctl/converge.py` `stop_verdict()`（合成封存／park／保溫三閘） | 額度相關句一律引判決行；不得另行判帶 |
 | C9 | 保溫叫醒目標 | `sessionctl/qw_plan.py` `wake_target()` L207～L232；`kw_wake.py` L76；`kw_run.py` | 新增來源 `ruling_wait_reset`（§3.6） |
 | C10 | SessionStart 簡報 | `tools/lib/session_brief.py` `quota_line()` L219～L250（L240 `decide`）、L505～L506（第二處 `decide`） | 兩處皆改：由呼叫端（SessionStart hook）注入判決，簡報以 `quota_ruling.brief_line(r)` 呈現（扁平檔不 import 套件，§8） |
@@ -171,6 +171,14 @@ QUOTA_VERDICT=<ACTION> acct=<12 碼|none> win=<短窗 reset ISO|none> wk=<週 re
 | `NODISPATCH` | 全部 | 不需叫醒：在飛照跑；下一次 watch tick、保溫 ping 或工具呼叫時以 `expires_at` 重算 | — |
 
 `wake_target` 回傳來源字串集合改為 `{park, ruling_wait_reset, reset, none}`；`kw_run` 對 `ruling_wait_reset` 只單跳不 ping（不付費）。
+
+**掛載的推動者**（v1.2，QA 複審 N-05；上表只規定「掛上之後」不受限制，這一段規定「誰叫主控掛」）：Stop 時由既有 Stop 保溫閘 `sessionctl/keepwarm.py` `stop_verdict()`（L158～L186，經 `converge.stop_verdict` 合成）負責，**不另開分支、不由 `park.stop_verdict` 推**（WHY：保溫閘本來就是「回合結束後沒有東西會叫醒它 ⇒ 推回一次要求掛 keepwarm」的那一支，訊息、閂鎖、`stop_hook_active` 放行語意都已在；`park.stop_verdict` 推的是 park，混進去會讓 C7 的「`WAIT_RESET` 不推 park」失守）。判準改為兩段：
+
+1. 前置照舊：非 `stop_hook_active`；payload 有 `background_tasks` 欄（舊 harness 無此欄＝量不到＝不判）；`skip_reason()` 的**前四項**（`unattended`／`mode`／`off`／`handed_over`）任一成立 ⇒ 不推（模式非 auto／保溫關閉時由判決理由句明寫無載具，上表第三列；無人窗口交哨兵，上表第二列）。
+2. **判決分支（新，先判）**：以 `ruling_io.gather()` 取當下判決（keepwarm 在 sessionctl 套件內，可直接呼叫；取數失敗 ⇒ 跳過本分支、落回第 3 段）；`ACTION == WAIT_RESET` 且 `background_tasks` 內**沒有 running 的 keepwarm shell**（`is_keepwarm_task`）⇒ 推回一次，`small_ctx`／`no_usage` 與保溫帳 `pings ≥ n*` **皆不豁免**；其他 running 背景任務（watch、代理）不視為叫醒載具（WHY：它們在 reset 之前就可能結束或不在 `win` 叫醒；E2 情境即 watch 已結束）。推回文案：「判決 WAIT_RESET（短窗 <win> 重置）：請掛 `python tools/sessionctl.py keepwarm --sid <sid>`（`run_in_background`、輸出導檔）——它只單跳到重置後叫醒、不付費 ping。」並附判決行。
+3. 非 `WAIT_RESET`：原判準不變（無任何 running 背景任務、`skip_reason` 全六項、`pings < n*`）。
+
+第二次 Stop 放行（`stop_hook_active`）照舊，不寫閂鎖——每回合至多一個額外回合。
 
 ---
 
@@ -391,4 +399,5 @@ WP-QV 與 WP-AC 動同一組 quota 檔 ⇒ **串行**。SI 套件測試（`tools
 | N-07 `draining()` 誤列 B1 | §3.5.2 新 B6 |
 | N-09 白名單定義使鎖無法綠 | §3.5.3 白名單定義（含診斷／排程用 C 站點逐項 WHY） |
 | N-10 `park --done` 上限未列 | §3.5.2 新 B7 |
+| N-05 WAIT_RESET 時沒有推動者叫主控掛 keepwarm | §3.6 末〈掛載的推動者〉、§3.5.1 C7；PRD R-4.1.6-4【v2.1.29 勘誤（續）】 |
 | N-06 `plan.cap` 不存在、與 PRD「cap 唯一來源」衝突 | §3.1 `plan` 列、§3.2 `cap` 段（只取 `decision.cap`；`None` ⇒ `max_fanout`） |

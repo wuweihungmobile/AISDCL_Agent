@@ -42,7 +42,7 @@
 | REQ-AP-QV-08 | LOC 抽出為純搬移：搬移 commit 全套綠、行為零差異；抽出後各檔在分級內、`SPECIAL_FILES` 門檻下修 | QVD §9 | 待實作 |
 | REQ-AP-QV-09 | SelfImproving 巡邏、研究免掃、四問降載改讀判決（經 CLI `--json`，不 import sessionctl）：跳過＝`ACTION ≠ CONTINUE` 或 `deg=unmeasured`；降載＝`band ∈ {notice, converge}`；子行程失敗＝跳過 | 主控代決 ①；SelfImproving_PRD AC-SI-30-1、NFR-SI-07-5、FC-l 註記；QVD §3.5 C18 | 待實作 |
 | REQ-AP-QV-10 | 單一判讀家機械鎖：判決輸入原語的呼叫站點與白名單相等；扁平檔不得 import `lib.sessionctl` | R-4.1.6-8；QVD §3.5.3 | 待實作 |
-| REQ-AP-QV-11 | `WAIT_RESET` 叫醒載具：互動窗口由 keepwarm 以 `ruling_wait_reset` 來源單跳到 `win＋skew`（不受 `small_ctx`／`no_usage`／n* 限制）；無人窗口交哨兵；模式非 auto／保溫關閉時理由句明寫無載具 | R-4.1.6-4【v2.1.29 勘誤】；QVD §3.6 | 待實作 |
+| REQ-AP-QV-11 | `WAIT_RESET` 叫醒載具：互動窗口由 keepwarm 以 `ruling_wait_reset` 來源單跳到 `win＋skew`（不受 `small_ctx`／`no_usage`／n* 限制）；無人窗口交哨兵；模式非 auto／保溫關閉時理由句明寫無載具 ；Stop 時判決為 `WAIT_RESET` 且無 running keepwarm ⇒ 保溫閘推回一次要求掛載，`small_ctx`／`no_usage`／n* 不豁免（v1.2） | R-4.1.6-4【v2.1.29 勘誤】【v2.1.29 勘誤（續）】；QVD §3.6 | 待實作 |
 | REQ-AP-AC-01 | halt 標記、rush 戳記、閂鎖、保溫帳新寫入帶 `account`；量不到寫 `null` 並出聲 | R-4.1.7-1 | 待實作 |
 | REQ-AP-AC-02 | 帳號不符 ⇒ 標記改名 `.void-<ts>` 作廢、落 `account_switch`、出聲一次；舊格式標記依同軸讀數判 | R-4.1.7-3～5 | 待實作 |
 | REQ-AP-AC-03 | 三個零 API 觸發器（憑證檔 mtime／size、逐字稿 `/login`、指紋變化）皆觸發補量；觸發器本身不作廢任何標記 | R-4.1.7-2、R-4.1.7-3 | 待實作 |
@@ -116,6 +116,8 @@
 | AC-QV-12b | 換手計畫依判決對映：`PARK` ⇒ `PARK_UNTIL` 目標＝`win`（D>6 小時 ⇒ `PARK_POLL`）；`HALT_WEEKLY` ⇒ `PARK_POLL` 目標＝`wk`；`HALT_WEEKLY wk=none`（spend）⇒ `STAY spend_limit`；`CONTINUE`／`NODISPATCH` ⇒ 不由額度列命中；週軸 80%（≥ prepare、< halt）而判決 `CONTINUE` ⇒ 不出 PARK（舊判準以 prepare 判週軸）；取數失敗（`action=None`）⇒ 不出 PARK；`switchplan.Quota` 無 `short_pct`／`weekly_pct`／`prepare_pct` 欄（結構斷言） | `QV::ConsumerTest::test_switchplan_maps_ruling_actions` |
 | AC-QV-13a | park 提前恢復受判決約束（N-01 ①）：park 標記 `parked_pct=92`、當下讀數 80（< prepare、比基準低 12pp）、但 `plan.stage=close` ⇒ 判決 `PARK` ⇒ `parkearly.tick` 不呼叫 `fire_early`（以縫計數 0）、痕跡 `park_early_probe` 帶 `action=PARK` | `QV::ConsumerTest::test_parkearly_respects_park_ruling` |
 | AC-QV-13b | 判決 `CONTINUE` 且讀數比基準低 ≥ 5pp ⇒ fire 一次；判決 `CONTINUE` 但只低 3pp ⇒ 不 fire（遲滯閘保留）；判決 `CONTINUE deg=unmeasured` ⇒ 不 fire；`parkprobe.evaluate` 原始碼不再引用 `prepare_pct`（AST） | `QV::ConsumerTest::test_parkearly_fires_only_on_continue_with_drop` |
+| AC-QV-11e | 掛載推動者（N-05）：判決 `WAIT_RESET`＋ctx 小於 `AUTOSDD_KEEPWARM_MIN_CTX_TOKENS`＋`background_tasks` 無 running 項 ⇒ `keepwarm.stop_verdict` 回非空推回文字（含 `keepwarm --sid` 與判決行）；同條件改 `no_usage`（ctx 量不到）、或保溫帳 `pings ≥ n*` ⇒ 仍推回；`background_tasks` 只有 running 的 watch（無 keepwarm）⇒ 仍推回；有 running keepwarm ⇒ 不推；`stop_hook_active` ⇒ 不推；`park.stop_verdict` 對同一 payload 回空 | `KW::RulingWaitResetTest::test_stop_pushes_keepwarm_on_wait_reset_despite_small_ctx` |
+| AC-QV-11f | 前四項仍豁免：同 AC-QV-11e 條件但 `AUTOSDD_UNATTENDED`／模式非 auto／`AUTOSDD_KEEPWARM_OFF`／已交棒 ⇒ 不推；判決非 `WAIT_RESET` ⇒ 回到原判準（小上下文不推） | `KW::RulingWaitResetTest::test_stop_first_four_still_exempt` |
 | AC-AC-01a | 三種持久狀態新寫入 schema 必有 `account`；量不到 ⇒ `null`＋出聲 | `QV::AcctSwitchTest::test_writes_carry_account` |
 | AC-AC-02a | 標記 `34cd3507237f`、快取 `eaf5241f6fe2` ⇒ 改名 `.void-<ts>`、`account_switch` 一列、出聲一次、`--pace` 不印 halted | `QV::AcctSwitchTest::test_mismatch_voids_marker` |
 | AC-AC-02b | 舊格式標記＋同軸讀數低於門檻 ⇒ 作廢；高於 ⇒ 保留並補寫 `account` | `QV::AcctSwitchTest::test_legacy_marker_by_reading` |
@@ -227,6 +229,10 @@
 | MU-QV-31 | 鎖的呼叫樣式拿掉 `pace_state`／`_pace_state`／`settled_quota`／`default_read`（回到 v1.1 只收直接原語） | AC-QV-10d |
 | MU-QV-32 | 拿掉 (ii) 門檻比較站點的收集 | AC-QV-10e |
 | MU-QV-33 | 白名單 `diag` 類放寬成「任何 C 站點」 | AC-QV-10f |
+| MU-QV-34 | 保溫閘判決分支恢復 `small_ctx`／`no_usage` 豁免 | AC-QV-11e |
+| MU-QV-35 | 判決分支套 `pings ≥ n*` 不推 | AC-QV-11e |
+| MU-QV-36 | 判決分支把任何 running 背景任務視為載具（只要有 running 就不推） | AC-QV-11e |
+| MU-QV-37 | 判決分支拿掉前四項豁免 | AC-QV-11f |
 | MU-QV-27 | `switchplan._wall` 恢復 `short_pct ≥ prepare_pct` 或 `stage∈{close,wall}` 判準（不看判決） | AC-QV-12a、AC-QV-12b |
 | MU-QV-28 | `switchplan` 把 `WAIT_RESET` 對映成 `PARK_UNTIL` | AC-QV-12a |
 | MU-QV-29 | `parkprobe.evaluate` 恢復 `cur < prepare_pct` 為唯一准許條件（不看判決） | AC-QV-13a |
@@ -285,7 +291,7 @@
 | LOC 純搬移（QV-08） | E2E-AP-QV-08 | 真 pre-push（合成 stdin）於搬移 commit 與前一 commit 各跑一次，leg 結果相同 | `RV-AP-QV08` | 無 |
 | SI 改讀判決（QV-09） | E2E-AP-QV-09 | 沙盒 repo 副本＋載具 E：真跑 SelfImproving 排程巡邏入口（`tools/selfimproving.py` 的巡邏動詞；實作棒現查乾跑旗標，無則於沙盒副本真跑），三種錄製讀數（free、87% 近重置、量不到）各一次 | `RV-AP-QV09` | 無；斷言三次的 `research.skip`／不跳過與判決動作一致、量不到必跳過 |
 | 單一家鎖（QV-10） | E2E-AP-QV-10 | 沙盒 git repo 副本植入一個私有判讀站點，真跑 `python -m unittest discover -s tools/tests -p test_sessionctl_qv.py`（子行程） | `RV-AP-QV10` | 無；斷言 rc≠0 且訊息列出該站點；移除後 rc 0 |
-| WAIT_RESET 叫醒（QV-11） | E2E-AP-QV-11 | 互動面：載具 E 讀數 87%、reset＝now＋3 分（平移），合成小上下文逐字稿，真 `sessionctl keepwarm` 背景行程 ⇒ 在 `win＋skew` ± 30 秒內結束並印叫醒末行；無人面：同讀數於 `AUTOSDD_UNATTENDED` 下真跑哨兵武裝（沙盒排程命名空間）⇒ NextRunTime≈`win＋skew` | `RV-AP-QV11` | macOS 排程憑證是 rc（既有劃界） |
+| WAIT_RESET 叫醒（QV-11） | E2E-AP-QV-11 | 互動面：載具 E 讀數 87%、reset＝now＋3 分（平移），合成小上下文逐字稿，真 `sessionctl keepwarm` 背景行程 ⇒ 在 `win＋skew` ± 30 秒內結束並印叫醒末行；無人面：同讀數於 `AUTOSDD_UNATTENDED` 下真跑哨兵武裝（沙盒排程命名空間）⇒ NextRunTime≈`win＋skew`；Stop 段（v1.2，N-05）：載具 H，以同一沙盒（小上下文逐字稿、判決 `WAIT_RESET`、`background_tasks` 空）真跑 Stop hook（`sessionctl_guard.py` 經載具）⇒ `decision:block` 且理由含 `keepwarm --sid`；第二次（`stop_hook_active`）⇒ 放行 | `RV-AP-QV11` | macOS 排程憑證是 rc（既有劃界） |
 | 標記帶帳號（AC-01） | E2E-AP-AC-01 | 載具 H＋E：真 PostToolUse hook（`context_budget_guard.py`）以錄製讀數 ≥ halt 觸發 halt 寫入，讀真寫出的沙盒標記檔驗 `account` | `RV-AP-AC01` | 無 |
 | 換帳號作廢（AC-02） | E2E-AP-AC-02 | 載具 H＋E：沙盒 HOME 內換一份憑證檔（真 mtime 變化），替身改回第二帳號標頭；真 PostToolUse hook 下一次呼叫後落 `account_switch`、halt 作廢、真 `--pace` 首行為判決行 | `RV-AP-AC02` | 不切換真帳號（不可、也不該）；以真憑證檔變化＋錄製標頭取代 |
 | `/login` 觸發（AC-03） | E2E-AP-AC-03 | 載具 H：逐字稿 406454ea L173～L210 重放，真 hook 讀增量 | `RV-AP-AC03` | 無；斷言 L210 時刻判決為新帳號。**本列是 AC 家族結案主證** |
@@ -353,4 +359,5 @@
 | N-07 `draining()` 誤列 B1 | QVD §3.5.2 B6（劃界文字；無 AT：不改接） |
 | N-09 白名單定義 | AC-QV-10f；MU-QV-33 |
 | N-10 `park --done` 上限 | QVD §3.5.2 B7（劃界文字；由 AC-QV-10f 的白名單形狀覆蓋） |
+| N-05 WAIT_RESET 掛載推動者 | REQ-AP-QV-11；AC-QV-11e～f；MU-QV-34～37；E2E-AP-QV-11 Stop 段 |
 | N-06 `plan.cap` 不存在 | AC-QV-01g 改寫；MU-QV-26 |
