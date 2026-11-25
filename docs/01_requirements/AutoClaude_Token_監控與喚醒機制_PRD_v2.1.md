@@ -30,6 +30,7 @@
 | **v2.1.25（§16.5 (i)：真機驗證載具的副作用隔離——產品面拒絕沙盒目標、居所帶過排程邊界、副作用帳、每案快照）** | 2026-11-20 | **掌舵者 2026-11-20 直接立案（原文：「這個Sesseion是誰開的, 根本是狀況外, 若沒有功能, 請關閉, 不要浪費TOKEN, 並回報BUG, 看要如何防止這種情況」「將以上情況以AISDLC的程序(請Architect/SA/SD/Developer考慮如何規劃設計實作, 把BUG徹底清除! 請進入檢討AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md」；同日稍早「這個是異常, 請徹底改善!」）；R218-B Architect／SA 分析、SD 規格 r5（r1 經 SCG 獨立審查 FAIL、依主控裁示改版：排程 job 環境改允許表並以命令列攜帶、正控一律以命令列帶入的替身 `claude`、產品面拒絕為終局不進失敗鏈；r2 經第二輪 QA FAIL 再改版：同一次到點的每一次 spawn 嘗試用同一替身、沙盒目標拒用沙盒外執行檔、替身可模擬成功、無頭 `claude` 站點納入；r3 經第三輪 QA FAIL 與 R218 QuotaWall 聯合改版：開窗前一刻的產品面拒絕同為終局、不允許的開關值只在沙盒目標拒絕、沙盒工作樹保持乾淨、兩份規格的交叉介面以單一對照表對齊；r4 依聯合 QA 第四輪再改版：正式目標替身驗證不得留下哨兵排程孤兒、開窗前一刻拒絕一律以專屬結束碼比對）；規格待 SCG 獨立審查後依凍結常態規則凍結，實作未開始＝本列條文尚未生效**。版號說明：v2.1.23 由 R217 預留；v2.1.24 由 R218 QuotaWall r3（含 R218-C）佔用；本列取 v2.1.25 | 立案證據＝沙盒 session 57d0ccad：RealVerify 案例以產品正式前綴登記 park 排程後被額度中斷、未清理，10:47 真排程器以真環境到點、在掌舵者桌面開出 `claude -r` 互動視窗（`~/.autosdd/traces/autosdd_session_switch.jsonl` L480～L485；逐字稿 `C--Users-wuwei-AppData-Local-Temp-AutoSDD-RV-sbx-78znhvop/57d0ccad-fa1b-4e17-bc44-e31c7642f8a3.jsonl` L37～L148），幽靈階段 output 6,504、cache_read 560,249、cache_create 83,497（`message.id` 去重），視窗佔桌面 7 小時 2 分；普查：沙盒 park 排程 17 筆入正式命名空間、11 筆被真排程器觸發（其中 2 次真 spawn），另有 handback／`.checked`／context_feed 三種真目錄外洩與 `~/.claude.json` 兩把失效沙盒信任鍵。條文缺口＝本 PRD 無任何條文規範「驗證載具不得對真環境產生副作用」（§4.5.7 隔離表只管單元測試的痕跡存取器）、§4.5 的喚醒／續跑只驗「有沒有人在動」不驗「喚醒對象是否合法」、§11.3／§11.4 要求真註冊排程卻無命名空間與崩潰清理要求。改法＝新增 §11.9（R-VER-1～6：副作用清單、隔離契約〔含排程觸發的 job〕、崩潰安全清理、產品面拒絕〔判準只吃目標自帶資料、不讀環境變數〕、每案快照 diff、全域設定不寫）、§11.4 註記、§15.5 紅線 13。設計 `docs/02_architecture/RealVerify_SideEffect_Isolation_Design.md`、驗收 `docs/03_testing/contracts/TCS-SideEffectIsolation-20261120.md`；結案格見 §16.6 2026-11-20 第二列 |
 | **v2.1.26（§16.5 (i)：背景代理的主控掌控、自動換 session 演算法與新 session 接續——控制權不變式 CI-1／CI-2、封存有效期單一謂詞、換手決策表、park 等待期間額度提前恢復、交接包第 12／13 欄）** | 2026-11-22 | **掌舵者 2026-11-22 直接立案（原文：「有背景Subagent執行, 沒有主Agent去掌控Subagent! 這是嚴重問題」「自動化機制會適時的自動切換新Sesseion嗎?若不會,請設計自動切換新Sesseion演算法, 並且做好新Session的接續機制, 不要遺漏必要資訊! ==> 請Architect / SA / SD / QA 四方專家進行規劃，分析，設計，實作」；同日另要求「所有功能的E To E測試」，本項新功能自帶真機 E2E 家族 `control`）**。條文缺口＝本 PRD 對「在飛背景子代理由誰監督、封存後派工算不算仍在工作、換 session 何時換、新 session 要拿到什麼」零條文：§4.4.3 只有 Agent 硬性預算、沒有在飛代理的歸屬；§4.5.7 只管主控閒置加水位；§4.5.4 管喚醒成本、不管交接包是否含在飛代理與鏈上原話；§4.5.11 沒有「在飛代理 × 換 session」與「park 等待期間額度提前恢復」兩格。2026-11-22 實證：`65389f03` 逐字稿第 2332～2335、2516～2519 行冷叫醒閘與封存閘對同一事實給出相反答案（14 天 12 次推回）；park 等 73 小時而額度因換帳號早已恢復、封存到接手 19.5 小時靠人手貼上一輪輸出。改法＝§1.2 原則 1 後加【v2.1.26 註記】（CI-1 控制權、CI-2 可見）、§4.5.11 末加【v2.1.26 註記】（兩格）、§16.6 新增兩列；既有條文字面不變。**第四點「park 提前恢復」為主控依 2026-11-22 暴露證據追加，非掌舵者原文，掌舵者可隨時以 T1 推翻。**設計 `docs/02_architecture/Control_Handover_Design.md`、驗收 `docs/03_testing/contracts/TCS-Control-20261122.md`（REQ 48／AT 92／E2E 24／MU 49）；結案格見 §16.6 2026-11-22 兩列 |
 | **v2.1.27（§16.5 (i)：額度牆 RCA 增補——擋派接線順序鎖、可行性算式加在飛燒量、保溫 ping 樣本乾淨門檻、閂鎖拆兩序列、`--pace` 標題補短窗最高帶、realverify 額度閘）** | 2026-11-23 | **掌舵者 2026-11-23 直接立案（原文：「以上的情況, 是否需要進行改善, 請進行分析改進!」，針對同日 10:00～10:40 撞五小時上限的畫面）**。條文缺口＝§4.2.3【v2.1.24】額度牆預留閘的可行性算式（`L＝V＋AGENT_EST`）未計在飛代理與背景 `claude` 行程到 reset 前的燒量；§4.5.11 的 ping 實測 Δ 未排除在飛代理區間且 n＝1 即覆蓋校準值；watch 額度閂鎖為單一序列；`--pace` 標題只印 binding 軸的帶別；realverify 無額度前置。2026-11-23 實證：逐字稿 `8feb3081…jsonl` seq 494／711／739／768／857／869／879／880／915、`quota_burn.jsonl` 10:00:02 列；12:16 保溫帳 `ping_costs=[6.0]`（約為校準值 16 倍）致過度保守擋派；12:20 被停的 Q4／W6 未驗證半成品已被運作中的 `sessionctl_guard` 載入並以污染樣本硬擋派工（證明 ②③ 須先於或同於 W11a 上線）。**本項不改 PRD 任何既有條文字面**；設計＝`docs/02_architecture/QuotaWall_CacheContinuity_Design.md` 附錄 H（r9，W11a～e）、驗收＝`docs/03_testing/contracts/TCS-QuotaWall-20261120.md` §8（REQ 70～81、AT 83～96、E2E 31～36、MU 52～65）；結案格見 §16.6 2026-11-23 列 |
+| **v2.1.28（§16.5 (i)：單一權威額度判決與換帳號作廢——QuotaVerdict 唯一判決行、判決有效期、park 覆寫口退役、halt／rush／閂鎖綁帳號指紋並於換帳號時作廢與立即補量；無人值守的人工依賴點零化——舊視窗關閉不交人、AskUserQuestion 類別閘）** | 2026-11-25 | **掌舵者 2026-11-25 直接立案（原文：「以後這種不用詢問, 我要達到是真正的自動駕駛開發, 若無法達到這個目標, 請派出Architect / SA / SD / QA 四方專家進行規劃，分析，設計，實作，與獨立審查,請確認以上功能都已經解決完備！以上若需要我決策，請依照最佳化, 最理想, 最適當的解決方案(不需要顧慮成本)，我授權幫我決策」；同日再指令：「短窗其實已重置（現在 five_hour 8%、stage=free），先前的 park 不需要了。撤銷 park 與保溫，直接繼續：==> 這裡個判斷也是有誤, 請靠程序與程式解決誤判問題」「也記得更新AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md」）；AP-A Architect＋SA 分析（報告＝sid 406454ea scratchpad `ap_arch_report.md`，CLOSE 窗口轉存證據檔）；SD-0 規格與設計落檔；QA 另派；規格待 SCG 獨立審查後依凍結常態規則凍結，實作未開始＝本列條文尚未生效** | 立案證據＝sid `406454ea-91fc-4481-9c11-b28ed7d9e95f`：①同一則 `--pace` 輸出自相矛盾（逐字稿 L2447：「🔴 halted…沒有新鮮快取可讀」與同輸出 `QUOTAWALL_PLAN … R=94.0`）；②同一則 watch 輸出自相矛盾（`watch9.log` 03:46：`QUOTAWALL_PLAN stage=free D=14` 與 `WATCH_VERDICT=quota` 處置「封存→park」；`quota_burn.jsonl` 03:46:19 five_hour 87%、04:00:32 0%）；③halt 標記不帶帳號、/login 後仍生效（`~/.autosdd/traces/halt_406454ea-….json` at 21:32:50，/login 於 L173 21:36:47，L210 仍印舊帳號讀數；§4.1.4「最多 180 秒自我修正」因 halt 分支不補量而失效）；④park 正確拒絕後被 `--why` 推翻（L2504→L2508），5.5 小時前的判決被當現況（L2445）；⑤主控卡在 AskUserQuestion 6 小時 19 分（L2431→L2432），期間額度事件無人處理；⑥舊視窗自動關閉重試 3 次即交人（`~/.autosdd/traces/oldwin/events.jsonl` 2026-11-24 20:50～21:08；逐字稿 L181／L222）。條文缺口＝§4.1 無「單一判決」條文，各消費端各自判讀；§4.1.4 帳號指紋只用於攤提樣本分區，未用於標記；INV-H3（halt 期間不補量）與 §4.1.4 自我修正承諾衝突且前提錯誤（usage 端點不吃額度）；§4.5.11 無「不得把可代決的動作交人」條文。harness 事實（SD-0 經官方文件現查，2026-11-25）：`/login` 無專屬 hook 事件；AskUserQuestion 預設永不逾時（`askUserQuestionTimeout` 僅 user 層設定、逾時即以模型判斷自動續行、背景 session 不計時），PreToolUse 可以 matcher `AskUserQuestion` 攔截；子代理工具呼叫與主控同經 auto mode 分類器。改法＝新增 §4.1.6（R-4.1.6-1～8）、§4.1.7（R-4.1.7-1～6）、§4.5.12（R-4.5.12-1～5）、§15.5 紅線 14；§4.1.4、§4.2.3【v2.1.24】、§4.5.10、§4.5.11 就地追加【v2.1.28 註記】（以新增行實作）；既有條文字面不變。設計 `docs/02_architecture/QuotaVerdict_AccountSwitch_Design.md`（QV／AC）、`docs/02_architecture/Autopilot_Pipeline_Design.md`（舊視窗、詢問類別閘；合入、推送與帳本棘輪屬開發管線，只住該設計、不入本 PRD）、驗收 `docs/03_testing/contracts/TCS-Autopilot-20261125.md`（REQ-AP-QV-01～06、REQ-AP-AC-01～04、REQ-AP-OW-01、REQ-AP-ASK-01；E2E-AP-QV-01～06、E2E-AP-AC-01～04、E2E-AP-OW-01、E2E-AP-ASK-01）；結案格見 §16.6 2026-11-25 兩列 |
 
 > **v2.1 的變更**：附錄 B 的事實核對清單已**實際核實完成**（方法見附錄 B 開頭）。核實結果顯示 Claude Code v2.1.x **已內建**本 PRD 原本打算自建的多項能力（原生 worktree 隔離、任務 DAG、排程喚醒、零 Token 用量遙測、併發上限、官方配速門檻）。因此新增 [§15 執行方法論](#15-執行方法論與注意事項v21-新增)，並將建議架構從「大型自建 Daemon」縮減為「薄治理層 + 採用原生能力」。**§15 是實際動工時應遵循的章節**（含動工前置檢查、採用 vs 自建決策矩陣、P0–P5 分階段步驟、12 條紅線注意事項、參數校準方法與交付目錄結構）。
 
@@ -361,6 +362,8 @@ ADR-XPLAT-005/007 既有定義）」的 kind 集合作為指紋。伺服器新�
 可能更保守，取決於新方案的實際容量），**不是**協助偵測或切換帳號以規避
 額度限制的機制。
 
+> 🔴 【v2.1.28 註記】本節「換帳號後最多 180 秒…下一次量測即自我修正」在 halt 標記有效期間曾不成立（halt 分支不補量；立案證據見修訂表 v2.1.28 ③）。自 v2.1.28 起由 R-4.1.6-6（halt 不壓補量）與 §4.1.7（標記綁帳號、換帳號作廢）保證；帳號指紋的用途由攤提樣本分區擴及標記與判決。
+
 #### 4.1.5 遙測全失效時的收斂姿態（v2.1.8 修憲；標的＝§8-6）
 
 **原條文（§8-6／§4.1.2）**：全部失效 → `DRAINING` + 告警，絕不猜測用量繼續派工；
@@ -458,6 +461,42 @@ PrdDrainPercentMapsToTheBandsTest::test_the_three_state_answer_never_folds_unmea
 | F4 | 降級告警的 cap 數字隨 `decide()` 變動，且不得出現與實際 cap 相反的姿態字面 | 單元測試：注入哨兵 `degraded_cap` ⇒ 斷言訊息含該值；另斷言「不節流」「照常放行」這類**放行姿態字面**在 cap 有限時不出現（判準取姿態詞彙表，不取整句文案） |
 | F5 | 【v2.1.9 新增】`TELEMETRY_UNMEASURED_CAP` ↔ `Policy.degraded_cap` 的對映是**機械登記**的，且出廠值滿足 `1 ≤ degraded_cap ≤ cap_prepare` | 後設鎖：在 `PrdDrainPercentMapsToTheBandsTest._PAIRS` 同形新增一列，分母直接讀本 PRD 檔 ⇒ 兩邊漂開必紅。**紅綠自證**：把實作面出廠值改成 `cap_converge`（實查 4）必須讓上界斷言轉紅。🔴 另需一格**反向**斷言：不得同時存在第二個治同一個數字的 env 鍵（判準＝`ENV_SPEC` 內 `attr == "degraded_cap"` 的項恰好一個） |
 
+#### 4.1.6 單一權威額度判決（QuotaVerdict）【v2.1.28 新增】
+
+> 立案與證據見修訂表 v2.1.28 列；設計 `docs/02_architecture/QuotaVerdict_AccountSwitch_Design.md`（模組落點依 `docs/02_architecture/Root_Layout_and_Module_Placement.md` §2，見該設計〈模組落點〉節）、驗收 `docs/03_testing/contracts/TCS-Autopilot-20261125.md`（REQ-AP-QV-01～06）。
+
+**R-4.1.6-1（唯一判決）** 停工、park、續跑、等重置、可派數這五類決定，只能由單一純函式從**同一筆**額度讀數（含帳號指紋、量測時刻）算出，輸出唯一動作 `CONTINUE｜NODISPATCH｜WAIT_RESET｜PARK｜HALT_WEEKLY`。原始讀數帶（§4.2.3 的 prepare／halt）與額度牆計畫（§4.2.3【v2.1.24】）在函式內合成；同一輸出不得出現兩個動作。
+
+**R-4.1.6-2（判決行）** 判決以單行 `QUOTA_VERDICT=<動作> acct=<帳號指紋> win=<短窗 reset> wk=<週 reset> cap=<可派數> measured_at=<時刻> expires_at=<時刻> vid=<識別>` 呈現。`--pace`、watch、park、SessionStart 簡報、Stop 的停工推回、哨兵巡邏、PreToolUse 擋派，一律以此行為準。
+
+**R-4.1.6-3（有效期）** `expires_at＝min(measured_at＋快取 TTL, 短窗 reset)`。消費端讀到過期判決必須重算，不得據以行動；任何呈現判決的輸出都要帶 `expires_at`。
+
+**R-4.1.6-4（等重置優先於 park）** 短窗達準備門檻、但距短窗 reset 不超過保溫間隔時，動作為 `WAIT_RESET`（以既有保溫載具等到 reset 加時鐘容差），不得為 `PARK`。
+
+**R-4.1.6-5（park 前置）** park 只在當下重算的判決為 `PARK` 或 `HALT_WEEKLY` 時登記。以自由文字推翻判決的參數不得存在；「下一棒放不放得下」以數值估計輸入判決函式，由程式判斷。
+
+**R-4.1.6-6（halt 不壓補量）** 本機 halt 標記有效期間，仍依 §15.5 紅線 1 四條件（唯讀 GET、單一站點、TTL 節流、失效降級）補量；標記只是判決的輸入，不是停止量測的理由。（WHY：usage 端點不是推論、不吃額度；不補量會讓 §4.1.4 的換帳號自我修正失效。）
+
+**R-4.1.6-7（主控不得自拼判決）** 主控與子代理對額度、park、續跑、可派數的陳述，必須引用本回合內未過期的判決行；原始讀數工具僅供診斷，輸出首行標明「診斷用」。違反時由 Stop 宣稱守衛出聲（只出聲，不阻斷）。
+
+**R-4.1.6-8（失效方向）** 讀不到判決（取數失敗、帳號量不到）時動作為 `NODISPATCH` 並出聲，不得退回任何消費端的私有判讀（§15.5 紅線 6）。
+
+#### 4.1.7 換帳號時作廢標記並立即補量【v2.1.28 新增】
+
+> 立案與證據見修訂表 v2.1.28 列；驗收 REQ-AP-AC-01～04。〈非目標〉同 §4.1.4：本節只被動適配使用者已完成的合法換帳號，不偵測、不建議、不觸發換帳號以規避額度。
+
+**R-4.1.7-1（標記綁帳號）** halt 標記、趕工戳記、額度事件閂鎖、保溫帳與配速床的持久狀態，寫入時一律帶帳號指紋（§4.1.4 的 `account_key`）；量不到時寫空值並出聲。
+
+**R-4.1.7-2（零 API 觸發器）** 下列任一成立即視為「帳號可能已變」，在紅線 1 條件內補量一次：憑證檔大小或修改時刻改變；逐字稿出現 `/login` 指令記錄；任一次正常補量的帳號指紋與上次不同。（macOS 憑證在 Keychain、沒有檔案時刻，只靠後兩者，照實劃界；harness 對 `/login` 沒有專屬 hook 事件——官方文件現查，見修訂表 v2.1.28 列——故不以 hook 事件為觸發器。）
+
+**R-4.1.7-3（權威判定）** 帳號是否改變只以伺服器回應標頭的帳號指紋判定；觸發器本身不構成判定。
+
+**R-4.1.7-4（作廢）** 帳號指紋與標記記載不同 ⇒ 該標記作廢（改名保留為史料、不刪），落 `account_switch` 痕跡並出聲一次；park 標記沿用 §4.5.11【v2.1.26】「換帳號視為額度提前恢復」路徑。
+
+**R-4.1.7-5（舊格式標記）** 不帶帳號的既有標記視為待驗：補量後，若標記綁定軸的讀數低於其門檻即作廢，否則保留。
+
+**R-4.1.7-6（呈現）** 判決行（R-4.1.6-2）與 `sessionctl status` 一律顯示帳號指紋；換帳號後第一個判決行附「已作廢 n 個舊帳號標記」。
+
 ### 4.2 配速控制器（Pacing Controller）— 修正後的數學模型
 
 #### 4.2.1 燃燒率估計（加入 EWMA 與統一下限）
@@ -526,6 +565,8 @@ C_target   = clamp(C_raw, C_min, C_cap(state))              # ← v1 缺少狀�
 > ③降級建議行兩階語意由使用者設定自負。
 
 > 🔴 【v2.1.24 新增｜§16.5 (i) 掌舵者 2026-11-20】**額度牆預留閘**（與上方 v2.1.21 已退役的致動器表無關；只讀短窗軸**原始**讀數，不吃攤提、配速床與趕工戳記；週軸不適用，週額度照舊用到 100%）：以 R＝100−短窗讀數、D＝到短窗 reset 的分鐘數、k(D)＝撐到 reset 需付費保溫的次數（每段閒置 ≤ 50 分）計預留 V＝(k＋收尾回合)×每次保溫額度＋偵測延遲×燒速，擋派線 L＝V＋一支代理估計（未校準值於輸出逐鍵標示）。R ≤ L ⇒ 擋新派工（Agent／Task／Workflow；額度照樣可用到接近滿）；R ≤ V ⇒ 收尾：停在飛子代理（成品留工作樹）→ 封存交接包 → park（備援）→ 掛保溫（主載具，§4.5.11）；保溫付得起 k 次就跨 reset（reset 後第一次叫醒即在熱快取上續工），付不起就只在 reset 後醒一次，不得不掛。觸發點＝PreToolUse 擋派、Stop 推回（有在飛子代理時也評估）、watch 額度事件的機械計畫。讀數有年齡：年齡超過偵測延遲的上界即先以零 token 的方式補量，補不到就以「年齡×燒速」保守外推（只往收緊方向）並在輸出標示陳舊；屬已過 reset 的舊視窗的讀數視同量不到；早於前次判定時刻的讀數不得用來判「視窗已翻新」（2026-11-21 真機：讀數停在 86% 而實際已 95%）。每次保溫額度以本 session 實測的讀數差與未校準值取大（只抬不降），校準前置不變。全文見設計 `docs/02_architecture/QuotaWall_CacheContinuity_Design.md` §3～§6。
+
+> 🔴 【v2.1.28 註記】預留閘與準備門檻的帶別，自 v2.1.28 起不再各自觸發動作，一律經 §4.1.6 單一判決合成；距 reset 不超過保溫間隔時以 WAIT_RESET 取代 park（R-4.1.6-4）。
 
 #### 4.2.4 平穩性機制（v1 完全缺漏，是實務上最會出事的部分）
 
@@ -1747,6 +1788,8 @@ distinct = ['arm_reset', 'disarm', 'escalate', 'patrol', 'probe']   count = 5
 > log 的 ERROR 行明示需外部重啟、checkpoint 帶真實續跑時刻；自動承接者列為後續候選。牆鐘倒退一律忽略、以單調鐘續睡（多一次 halt 的有界代價）。
 > `VERIFIED_CLI_VERSIONS` 補 2.1.295（三條零 token 實測事實；`--max-turns` 不在 help，不得寫成存在）。
 
+> 🔴 【v2.1.28 註記】INV-H3 收斂版「halt 標記未過期時 --pace／--check 不打 API」（DEF-200-275 證據檔 D23）自 v2.1.28 起由 R-4.1.6-6 取代：halt 期間依紅線 1 四條件補量，標記只作判決輸入。原收斂理由（halt 期間不該再花任何一次 API）所指的 API 為零推論成本的 usage 端點，不構成額度支出。
+
 #### 4.5.11 續航情境矩陣與載具分層【v2.1.24 新增】
 
 > 立案與證據見修訂表 v2.1.24 列（②22:42 事件）；設計 `docs/02_architecture/QuotaWall_CacheContinuity_Design.md` §2、§5、§7～§10，驗收 `docs/03_testing/contracts/TCS-QuotaWall-20261120.md`。本節補的是「續航按機制切、不按情境切」的缺口：「視窗開著＋主動停工＋跨 reset」這一格原由外部排程負責，而外部排程要續跑一個仍開著的視窗只能先殺掉它。
@@ -1760,6 +1803,22 @@ distinct = ['arm_reset', 'disarm', 'escalate', 'patrol', 'probe']   count = 5
 - **驗收**：真機 E2E 必含——活著的同 session 視窗（以執行中改名為 `claude.exe.old.<ts>.<pid>` 的行程重現自動更新）在備援到點時不被終止；等待行程被凍結或機器睡眠跨過預定時刻後仍叫醒；視窗被關後備援接手；備援失敗鏈與出聲（失敗以命令列帶入的替身 `claude` 的失敗模式注入、正控用其成功模式，且同一替身貫穿每一次開窗嘗試〔續跑、新 session、fork、失敗後的另一路、哨兵接手〕，§11.9 的產品面拒絕不得當作失敗鏈輸入）；原視窗在備援交棒後晚醒判「已交棒」；22:42 事件的縮時重放（主載具正常、主載具被殺兩變體）修前紅、修後綠。全程不需人按鍵、不燒額度到撞牆、**不真開互動視窗**（會開窗的執行檔一律以替身承接，§11.9 R-VER-2）；互動視窗才驗得到的部分（數小時單跳、長壽視窗、互動 fork 開窗）登記為未結事項、由上線後觀察指標承接，不得以替身或無頭半宣稱已驗。上線前置：每次保溫額度、燒速、一支代理估計三項須以本機真實資料校準有值並經人審寫入設定。
 
 > 🔴 【v2.1.26 註記】本節補兩格：**在飛代理 × 換 session**——主載具＝排空後換（待換標記加 `watch` 的 `switch_due` 判決），備援＝TaskStop 加重派資訊寫入交接包第 12 欄，出聲＝包第 12／13 欄與 Stop／watch／SessionStart 三處；**park 等待期間額度提前恢復（含換帳號）**——哨兵每 15 分以唯讀額度端點（§15.5 紅線 1 豁免四條件）重讀，讀數較 park 當時下降且低於準備門檻即走既有到點路徑，換帳號視為快取已冷、依 §4.5.4 F4 選路。本節既有 R-4.5.11-1～6 字面不變；設計 `docs/02_architecture/Control_Handover_Design.md` §7～§9，驗收 `docs/03_testing/contracts/TCS-Control-20261122.md`。
+
+> 🔴 【v2.1.28 註記】續航情境矩陣各格中「依額度判斷」者，一律讀作「依 §4.1.6 判決行」；舊視窗關閉不交人（R-4.5.12-2）。
+
+#### 4.5.12 無人值守的人工依賴點零化【v2.1.28 新增】
+
+> 立案與證據見修訂表 v2.1.28 列；設計 `docs/02_architecture/Autopilot_Pipeline_Design.md`；驗收 REQ-AP-OW-01、REQ-AP-ASK-01。
+
+**R-4.5.12-1（不得把可代決的動作交人）** 本 PRD 機制（遙測、配速、park、續跑、換 session、舊視窗關閉）產生的任何訊息，不得要求人執行可由程式或主控代決的動作；做不到時寫入狀態與痕跡，由程式持續重試或改道，不得結束於「請手動」。
+
+**R-4.5.12-2（舊視窗關閉）** 已交棒且新 session 已接手的舊視窗：以舊視窗自身回合結束事件觸發關閉檢查，並以指數退避重試（上限 12 小時）；條件不成立時不強制終止（R-4.5.11-3），也不交人。
+
+**R-4.5.12-3（詢問類別）** 主控向人提問限下列類別：K=1 決定、業務決策、機密處置、需人眼目視且無法以載具替代者、harness 信任類對話框。續跑、額度、park、換 session、舊視窗、逃生口不在其列，由 PreToolUse（matcher `AskUserQuestion`）阻斷並指路代決。
+
+**R-4.5.12-4（提問期間的事件）** 提問期間到達的額度或監督事件，於回覆後一律以 R-4.1.6-3 的有效期重算後處理。
+
+**R-4.5.12-5（不以 harness 逾時代替類別閘）** harness 的 `askUserQuestionTimeout` 只能設在 user 層、逾時即依模型判斷自動續行、背景 session 不計時（官方文件現查，2026-11-25）；它不是本節的機制，不得以「已設逾時」取代 R-4.5.12-3 的類別閘。留下來的合法提問（K=1 等）照舊無逾時等人，因其本質就是等人。
 
 ### 4.6 跨平台防休眠（修正 v1 的技術細節）
 
@@ -2629,6 +2688,7 @@ Q3. 是否真的需要一個常駐 Daemon？
 11. **記錄 CLI 版本並訂閱其變更。** 本文的核實基準是 2.1.232；內部識別字與旗標會變。升級後先跑 `DRY_RUN` 再放行。
 12. **憑證不要進日誌、不要進 `state.json`、不要進遙測標籤。**
 13. **【v2.1.25 新增】驗證載具不得對真環境留下會自己動的東西。** 排程、視窗、交接包、痕跡、全域設定都算；環境變數圍籬過不了排程器、`finally` 過不了行程死亡——產品面要能自己認出並拒絕沙盒目標，載具要先登記再動作、下次執行自動撤（§11.9 R-VER-1～6；立案＝修訂表 v2.1.25）。
+14. **【v2.1.28 新增】額度判斷只有一個答案。** 停工、park、續跑、可派數只依單一判決行（§4.1.6）；判決帶帳號與有效期，過期必重算，換帳號必作廢舊標記（§4.1.7）；不得以自由文字推翻判決，主控不得自行拼湊讀數下結論（立案＝修訂表 v2.1.28）。
 
 ### 15.6 常見失敗模式與預防
 
@@ -2833,6 +2893,8 @@ v2.1 自 v2.1.17 起**凍結**。修憲只由下列三種觸發之一開啟：
 | 2026-11-22 | 背景代理的主控掌控（掌舵者原文：「有背景Subagent執行, 沒有主Agent去掌控Subagent! 這是嚴重問題」；對應 §1.2 原則 1、§4.4.3、§4.5.7、§4.5.11，承接 2026-11-18 列的冷叫醒閘） | 〔OI〕 | 依據＝設計 `docs/02_architecture/Control_Handover_Design.md`（CI-1／CI-2、控制態單一謂詞 `control.sealed_effective`、A4 修法、監督單例、名冊範圍與可見性）、TCS `docs/03_testing/contracts/TCS-Control-20261122.md`（REQ 48／AT 92／E2E 24／MU 49）；實作座標（待落地）＝`tools/lib/sessionctl/{control,controlfacts,watchlock,rosterscope,agentbrief,briefline}.py` 與 `seal.py`、`converge.py`、`watch.py`、`supervise.py`、`roster.py`、`tools/lib/transcript_activity.py`、`tools/lib/session_brief.py`、`tools/statusline_context_feed.py`。結案格依 R217 v2.1.23 附錄 A-5／A-11 不用 ⏸：規格階段、程式未實作，待實作與待驗收項由 OIR 承接，主控凍結本規格時以 `python tools/openitems.py open` 登記（實作 W1～W5、W7、W8＋E2E 23＋DES §13 理論洞 TH-1～TH-7）後把 OI id 回填本格；回填前視同未結。轉 ✅ 條件＝TCS §7 交卷判準 1～6 全部成立（含 E2E-CTL-23 互動半目視〔OI-20261120-010〕同款尾巴結案）。再開症狀＝任一 `finalized_wake_block` 痕跡發生在封存戳之後主控做過非監督工作之後（M-C1 > 0，附 sid＋痕跡座標）；或任一 session 在飛代理 ∧ 主控沒在動 ∧ 無有效監督憑證 > 30 分（M-W1 修正版，附 sid）；或 `status` 預設輸出仍列出沙盒 slug 的代理 |
 | 2026-11-22 | 自動換 session 演算法與新 session 接續（掌舵者原文：「自動化機制會適時的自動切換新Sesseion嗎?若不會,請設計自動切換新Sesseion演算法, 並且做好新Session的接續機制, 不要遺漏必要資訊! ==> 請Architect / SA / SD / QA 四方專家進行規劃，分析，設計，實作」；對應 §4.3 交棒路線、§4.5.4、§4.5.11、§11.3；含主控依暴露證據追加的 park 等待期間額度提前恢復——非掌舵者原文，可 T1 推翻） | 〔OI〕 | 依據＝設計 `docs/02_architecture/Control_Handover_Design.md`（換手決策表 `switchplan.decide`、`pending_switch` 排空後換、防抖、park 提前恢復 `park.recovered` 與哨兵探針、交接包第 12／13 欄與 SA 十項逐項標記）、TCS `docs/03_testing/contracts/TCS-Control-20261122.md`；實作座標（待落地）＝`tools/lib/sessionctl/{switchplan,parkprobe,parkearly,promptchain,ackhook}.py`（含 handoff `--ack` 後撤原 session 的 park 標記） 與 `handoff.py`、`handoff_build.py`、`park.py`、`park_cli.py`、`tools/session_resume_planner.py`（`_sentinel_tick` 分支）、`tools/lib/wastecensus/sections_ctl.py`。結案格同上列（〔OI〕，OI id 回填前視同未結）。**未新增任何換窗上下文門檻**：硬線、F4、R2、QW 額度階段全部沿用；軟線／便宜線／hook 代主控 spawn／被切代理自動重派一律不做（DES §12）。轉 ✅ 條件＝TCS §7 交卷判準 1～6 全部成立。再開症狀＝近 14 天 M-S2 手貼接續比率 > 5%（基線 9／37）；或任一 armed park 在額度已恢復後仍等到預定時刻才接手（附 sid＋`quota_burn` 座標）；或硬線觸發的待換在代理排空後主控仍未換手且閒置 ≥ 30 分（DES TH-1 升級條件，附 sid） |
 | 2026-11-23 | 額度牆 RCA 增補（掌舵者原文：「以上的情況, 是否需要進行改善, 請進行分析改進!」；對應 §4.2.3【v2.1.24】額度牆預留閘、§4.5.11 ping 實測、§4.5.7 閂鎖／watch、`--pace` 呈現與 realverify 額度前置） | 〔OI〕 | 依據＝設計 QuotaWall DES 附錄 H（W11a 擋派接線併 Q4、W11b 標題補短窗最高帶、W11c 算式與樣本污染、W11d 閂鎖拆兩序列、W11e realverify 額度閘；順序約束：W11c②③不晚於 W11a、半成品不得留在運作路徑）、TCS-QuotaWall §8（REQ 70～81、AT 83～96、E2E 31～36、MU 52～65）；暴露證據＝逐字稿 `8feb3081…jsonl` seq 494／711／739／768／857／869／879／880／915、`quota_burn.jsonl` 10:00:02、12:16 `ping_costs=[6.0]`、12:20 半成品硬擋（tag `8feb3081-q4w6-halfwork-20261123`）。實作座標（待落地）＝`tools/lib/sessionctl/{qw_calc,qw_plan,kw_wake,kw_ledger,qw_schema,watch_wake,keepwarm,watch}.py`、`tools/lib/quota_messages.py`、`tools/session_resume_planner.py`、`tools/lib/realverify/{runner,driver}.py`、`.claude/hooks/sessionctl_guard.py`（W11a 併 Q4）。結案格同上列（〔OI〕，OI id 回填前視同未結）。**未新增任何換窗／額度門檻**；prepare／halt 門檻、`_binding_key`、配速床、攤提一律不動（DES H.5）。轉 ✅ 條件＝TCS §8 全部 AT／MU 成立、E2E-QW-31～36 入帳 PASS（依上線序的 ENV-NOT-YET 於上線序到位後補跑）、QA 獨立審查 PASS。再開症狀＝任一撞牆逐字稿顯示牆前 `--pace` 標題未露出短窗最高帶；或保溫帳出現 `clean=false` 樣本被採用；或同一 reset 窗內計畫序列升級而 watch 無事件（附 sid＋seq） |
+| 2026-11-25 | 單一權威額度判決與換帳號作廢（掌舵者原文：「短窗其實已重置（現在 five_hour 8%、stage=free），先前的 park 不需要了。撤銷 park 與保溫，直接繼續：==> 這裡個判斷也是有誤, 請靠程序與程式解決誤判問題」「也記得更新AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md」；對應 §4.1.4、§4.1.6、§4.1.7、§4.2.3【v2.1.24】、§4.5.10 INV-H3、§15.5 紅線 14） | 〔OI〕 | 依據＝設計 `docs/02_architecture/QuotaVerdict_AccountSwitch_Design.md`、TCS `docs/03_testing/contracts/TCS-Autopilot-20261125.md`（REQ-AP-QV-01～06、REQ-AP-AC-01～04；E2E-AP-QV-01～06、E2E-AP-AC-01～04）；實作座標（待落地）＝`tools/lib/quotaverdict/`（新套件）、`tools/lib/quota_messages.py`、`tools/lib/quota_gate.py`、`tools/lib/quota_halt_marker.py`、`tools/lib/quota_rush.py`、`tools/lib/sessionctl/{watch,watch_wake,park,park_reset,park_cli,keepwarm}.py`、`tools/session_resume_planner.py`、`tools/lib/session_brief.py`、`.claude/hooks/{context_budget_guard,check_claim_provenance}.py`。結案格依 R217 v2.1.23 附錄 A-5／A-11 不用 ⏸：規格階段，待實作與驗收項由 OIR 承接，主控凍結本規格時以 `python tools/openitems.py open` 登記（實作 2＋E2E 10）後把 OI id 回填本格；回填前視同未結。轉 ✅ 條件＝TCS 對應 AT／MU 成立、E2E 全數入帳 PASS、QA 獨立審查 PASS。再開症狀＝任一輸出同時出現兩個額度動作（附 sid＋行號）；或 park 在當下判決非 PARK／HALT_WEEKLY 時被登記；或換帳號後一個 TTL 內 `--pace` 仍印舊帳號 halted；或主控額度陳述引用過期判決後行動（Stop 宣稱守衛痕跡） |
+| 2026-11-25 | 無人值守的人工依賴點零化（掌舵者原文：「以後這種不用詢問, 我要達到是真正的自動駕駛開發, 若無法達到這個目標, 請派出Architect / SA / SD / QA 四方專家進行規劃，分析，設計，實作，與獨立審查」；對應 §4.5.11、§4.5.12） | 〔OI〕 | 依據＝設計 `docs/02_architecture/Autopilot_Pipeline_Design.md`（本 PRD 只收舊視窗與詢問類別兩項；合入、推送、帳本棘輪屬開發管線，住該設計）、TCS 同上（REQ-AP-OW-01、REQ-AP-ASK-01；E2E-AP-OW-01、E2E-AP-ASK-01）；實作座標（待落地）＝`tools/lib/sessionctl/oldwin.py`、`tools/lib/sessionctl/oldwin_sched.py`、`.claude/hooks/sessionctl_guard.py`、`.claude/hooks/check_pending_handoff.py`、AskUserQuestion 類別閘（併入 `.claude/hooks/sessionctl_guard.py` 的 PreToolUse 分支、判準住 `tools/lib/sessionctl/askgate.py`，SD-0 定案）。結案格同上列。轉 ✅ 條件＝同上列。再開症狀＝任一本 PRD 機制的訊息含「請手動」或要求人執行可代決動作（附 sid＋行號）；或近 14 天 AskUserQuestion 有屬於續跑／額度／park／換 session／舊視窗／逃生口類別者（附 sid＋行號） |
 
 守衛面相關者另受 `docs/06_quality/FiveQuestion_Audit_Protocol/README.md`〈窗口規則與收斂判定〉S1～S6 約束（只引用、不複寫）；動到守衛面前先附暴露證據（根 CLAUDE.md〈守衛面准入〉）。
 
