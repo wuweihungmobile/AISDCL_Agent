@@ -57,6 +57,8 @@ CLI_CLOSURE: tuple[str, ...] = (
     "tools/lib/quota_pace_floor.py",  # quota_policy 頂層 import（配速床；ADR-XPLAT-004 §2.15）
     "tools/lib/quota_burndown.py",
     "tools/lib/quota_short_window.py",  # quota_messages 頂層 import（短窗讀數；R218 W11b）
+    "tools/lib/quota_halt_marker.py",  # quota_messages 頂層 import（halt 族純搬移；QVD §9）
+    "tools/lib/quota_ruling.py",  # quota_messages 頂層 import（billing_from_posture；QVD §3.3）
     "tools/lib/endurance_env.py",
     "tools/lib/sandbox_scope.py",  # endurance_env 執行期、sched_isolation 頂層 import
     "tools/lib/sched_isolation.py",  # schedarm／patrolrun 頂層 import（R218-B S3）

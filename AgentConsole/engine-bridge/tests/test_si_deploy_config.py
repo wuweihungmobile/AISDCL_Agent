@@ -658,6 +658,7 @@ FULL_PATHS = ["tools/selfimproving.py", "tools/_stdio_utf8.py", "tools/lib/platf
               "tools/lib/quota_policy.py", "tools/lib/quota_policy_env.py",
               "tools/lib/quota_pace.py", "tools/lib/quota_pace_floor.py",
               "tools/lib/quota_burndown.py", "tools/lib/quota_short_window.py",
+              "tools/lib/quota_halt_marker.py", "tools/lib/quota_ruling.py",
               "tools/lib/endurance_env.py", "tools/lib/sandbox_scope.py",
               "tools/lib/sched_isolation.py", "tools/lib/unattended_authz.py"]
 

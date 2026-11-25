@@ -500,6 +500,7 @@ on:
       - "tools/lib/quota_gate.py"
       - "tools/lib/quota_halt_marker.py"
       - "tools/lib/quota_messages.py"
+      - "tools/lib/quota_ruling.py"
       - "tools/lib/quota_short_window.py"  # R218 W11b：quota_messages 頂層 import
       - "tools/lib/quota_pace_floor.py"
       - "tools/lib/quota_policy.py"
@@ -1014,6 +1015,7 @@ on:
       - "tools/lib/quota_gate.py"
       - "tools/lib/quota_halt_marker.py"
       - "tools/lib/quota_messages.py"
+      - "tools/lib/quota_ruling.py"
       - "tools/lib/quota_short_window.py"  # R218 W11b：quota_messages 頂層 import
       - "tools/lib/quota_pace_floor.py"
       - "tools/lib/quota_policy.py"
