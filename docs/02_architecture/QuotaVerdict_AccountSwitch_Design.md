@@ -2,7 +2,7 @@
 
 - 版本：v1.0（SD-0，2026-11-25；規格階段，實作未開始）
 - 上游：`docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` 修訂表 v2.1.28、§4.1.6（R-4.1.6-1～8）、§4.1.7（R-4.1.7-1～6）、§15.5 紅線 14、§4.1.4／§4.2.3【v2.1.24】／§4.5.10／§4.5.11 的【v2.1.28 註記】、§16.6 2026-11-25 第一列。
-- 驗收：`docs/03_testing/contracts/TCS-Autopilot-20261125.md`（REQ-AP-QV-01～06、REQ-AP-AC-01～04）。
+- 驗收：`docs/03_testing/contracts/TCS-Autopilot-20261125.md`（REQ-AP-QV-01～08、REQ-AP-AC-01～04）。
 - 兄弟設計：`docs/02_architecture/Autopilot_Pipeline_Design.md`（合入、推送、棘輪、CI、舊視窗、詢問類別閘、測試圍籬；〈外部限制〉全文住那裡，本檔 §2 只摘與額度有關者）。
 - 先例與被消費的設計：`docs/02_architecture/QuotaWall_CacheContinuity_Design.md`（額度牆計畫 `qw_plan`、閂鎖、保溫）、`docs/02_architecture/Control_Handover_Design.md`（park 等待期間額度提前恢復、`parkprobe.account_changed`）。
 

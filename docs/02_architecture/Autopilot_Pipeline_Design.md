@@ -4,7 +4,7 @@
 - 立案：掌舵者 2026-11-25 原文「以後這種不用詢問, 我要達到是真正的自動駕駛開發, 若無法達到這個目標, 請派出Architect / SA / SD / QA 四方專家進行規劃，分析，設計，實作，與獨立審查,請確認以上功能都已經解決完備！」；授權最佳化、不顧成本的方案由主控代決。
 - 上游：AP-A Architect＋SA 報告（sid `406454ea-91fc-4481-9c11-b28ed7d9e95f` scratchpad `ap_arch_report.md`，CLOSE 窗口轉存證據檔）。PRD 只收本檔 §7（詢問類別閘）與 §8（舊視窗）兩項＝`docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` §4.5.12（R-4.5.12-1～5）與 §16.6 2026-11-25 第二列；其餘（合入、推送、帳本棘輪、CI 等待、測試圍籬）屬開發管線，只住本檔。
 - 兄弟設計：`docs/02_architecture/QuotaVerdict_AccountSwitch_Design.md`（額度判決與換帳號；本檔的推送閘與派工決策只讀它的 `QUOTA_VERDICT=` 行）。
-- 驗收：`docs/03_testing/contracts/TCS-Autopilot-20261125.md`（REQ-AP-MG-01～02、REQ-AP-G1-01～03、REQ-AP-ASK-01、REQ-AP-CI-01、REQ-AP-OW-01、REQ-AP-FN-01、REQ-AP-WT-01）。
+- 驗收：`docs/03_testing/contracts/TCS-Autopilot-20261125.md`（REQ-AP-MG-01～02、REQ-AP-G1-01～03、REQ-AP-ASK-01～02、REQ-AP-CI-01、REQ-AP-OW-01、REQ-AP-FN-01、REQ-AP-WT-01）。
 
 ---
 
