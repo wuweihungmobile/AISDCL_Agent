@@ -54,7 +54,7 @@ ADR-006 爭點 4 的三項事實逐條處置：
 
 獨立 clone 只帶已提交內容，主樹的 ignored 機器本地狀態不在裡面。SD-2 當回合唯讀普查主樹（`git ls-files --others --ignored --exclude-standard --directory`）的現存項：`.env`（四層 env 鏈第三層）、`.dev_env_state.json`（`tools/dev_start.py` L54 寫、`tools/lib/dev_platform_provenance.py` 與 `tools/git-hooks/prepare-commit-msg` 讀）、`AISDLC_SDD/AISDLC_SDD_v0.01/arch-fitness.json`、`AISDLC_SDD/AISDLC_SDD_v0.01/build/reports/**`、`.hypothesis/`、`.act-runs/`、`.vscode/`、`.claude/worktrees/`、`.venv/`。缺了它們，clone 內的全套可能出現主樹推送不會有的紅（假紅：merge 永遠 `red`、自動駕駛卡死），或因 `.env` 缺席讀到出廠值而假綠。兩道處置：
 
-1. **白名單帶入**（`autopilot/carrier.py` 單一常數 `CARRIER_LOCAL_STATE`，每筆附 WHY；**預設不帶**，只有「全套會讀它當判定輸入、缺席會改變判定」者才入表）。初始成員與處置：
+1. **白名單帶入**（tools/lib/autopilot/carrier.py（實作階段新建）單一常數 `CARRIER_LOCAL_STATE`，每筆附 WHY；**預設不帶**，只有「全套會讀它當判定輸入、缺席會改變判定」者才入表）。初始成員與處置：
 
    | 項 | 處置 | WHY |
    |---|---|---|
