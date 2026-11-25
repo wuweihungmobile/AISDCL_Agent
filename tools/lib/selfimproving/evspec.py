@@ -102,6 +102,14 @@ def _note(v) -> bool:
     return isinstance(v, str) and 1 <= len(v) <= 120 and "\n" not in v and "\r" not in v
 
 
+def band_note_ok(v) -> bool:
+    """`--band` 附註值（QVD §3.5 C18：記判決行）：非空、不得為 `free`，也不得是無降級的
+    `CONTINUE` 判決（准許續跑就不是額度跳過）。"""
+    if not _s(v) or v.strip().lower() == "free":
+        return False
+    return not ("QUOTA_VERDICT=CONTINUE" in v and "deg=unmeasured" not in v)
+
+
 def _item(v) -> bool:
     return (isinstance(v, list) and len(v) == 2 and v[0] in ITEM_KINDS and isinstance(v[1], str))
 
@@ -141,7 +149,7 @@ _SPEC: dict[str, dict] = {
                       "fetched_at": valid_t},
     "research.skip": {"run": _re(RUN_RE), "reason": lambda v: v in ("quota-band", "offline",
                                                                     "helmsman"),
-                      "note": _note, "band": lambda v: _s(v) and v.lower() != "free",
+                      "note": _note, "band": band_note_ok,
                       "sid": valid_uuid, "line": lambda v: _int(v, 1)},
     "attr": {"id": _re(ATT_RE), "type": lambda v: v in ("root", "link"),
              "obs": _list_of(_re(OBS_ID_RE)), "items": _list_of(_item),
@@ -364,7 +372,7 @@ _SPEC["fourq.review"] = {
 }
 _SPEC["fourq.skip"] = {
     "run": _re(RUN_RE), "reason": lambda v: v in ("quota-band", "helmsman"), "note": _note,
-    "band": lambda v: _s(v) and v.lower() != "free", "sid": valid_uuid,
+    "band": band_note_ok, "sid": valid_uuid,
     "line": lambda v: _int(v, 1),
 }
 _ALWAYS_OPTIONAL["fourq.skip"] = {"band", "sid", "line"}

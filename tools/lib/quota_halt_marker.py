@@ -38,6 +38,17 @@ def read_halt_marker(sid: str) -> dict | None:
     except (OSError, ValueError):
         return None
 
+def halt_marker_probe_path(sid: str) -> Path:
+    """halt 標記路徑，但**不**觸發 `endurance_env.trace_dir()` 的 `mkdir` 副作用（D23：
+    `--check` 是「不寫檔」的既有契約——`PlannerCliTest.test_check_prints_usage_and_
+    writes_nothing` 釘住）。解析規則與 `endurance_env._durable_dir_status()` 同源但只讀不建。
+    QVD §9：自 `session_resume_planner._halt_marker_probe_path` 純搬移（騰 guardrail_cli 餘裕）。"""
+    import os  # noqa: PLC0415
+
+    override = os.environ.get(endurance_env.TRACE_DIR_ENV, "").strip()
+    root = Path(override) if override else Path.home().joinpath(*endurance_env.TRACE_HOME_PARTS)
+    return root / f"halt_{sid}.json"
+
 
 def _aware(raw):
     import quota_messages  # noqa: PLC0415 — lazy：quota_messages 反向 re-export 本檔

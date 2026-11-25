@@ -27,6 +27,18 @@ from lib.selfimproving import events as si_events
 from lib.selfimproving import evwrite, patrol, runner, sched, schedwrite
 
 O = datetime(2026, 11, 2, 8, 0, 0, tzinfo=UTC)  # noqa: E741  # 預設 origin（TCS §2 簡寫 O）
+
+
+def ruling_of(band: str) -> dict:
+    """舊帶名替身 → `sessionctl quota --json` 形狀（QVD §3.5 C18：SI 改讀單一權威判決）。
+    free／notice／converge＝`CONTINUE`（後二者降載）；unmeasured＝`CONTINUE deg=unmeasured`
+    （跳過）；其餘（prepare／halt／stop…）＝停工類判決 `PARK`（跳過）。"""
+    if band in ("free", "notice", "converge"):
+        return {"action": "CONTINUE", "band": band, "line": f"QUOTA_VERDICT=CONTINUE band={band}"}
+    if band == "unmeasured":
+        return {"action": "CONTINUE", "deg": "unmeasured", "band": band,
+                "line": "QUOTA_VERDICT=CONTINUE acct=none deg=unmeasured"}
+    return {"action": "PARK", "band": band, "line": f"QUOTA_VERDICT=PARK band={band}"}
 D1 = timedelta(days=1)
 HB = 15
 H = timedelta(hours=1)
@@ -269,7 +281,7 @@ class Rig:
                 raise err
             return self._run(R, list(argv))
         return patrol.Deps(
-            quota=lambda now: types.SimpleNamespace(band=self.band),
+            quota=lambda now: ruling_of(self.band),
             driver_quiet=lambda: self.quiet, which=lambda name: self.which,
             preflight=lambda: self.preflight, verbs=verbs, spawn_detached=self.spawner,
             pid_alive=lambda pid, started, *_a: pid in self.live, kill_tree=self.killed.append)

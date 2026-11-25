@@ -56,13 +56,15 @@ def _no_carrier(env) -> bool:
 
 
 def compose(state, decision, now: datetime, *, sid: str = "", transcript=None, env=None,
-            model=None, next_est: float | None = None, plan=None) -> Snapshot:
-    """同一份 `state`／`decision` 組判決（hook 端 C1 與 `gather` 共用；不再取數）。"""
+            model=None, next_est: float | None = None, plan=None,
+            plan_seams: dict | None = None) -> Snapshot:
+    """同一份 `state`／`decision` 組判決（hook 端 C1 與 `gather` 共用；不再取數）。
+    `plan_seams`＝`qw_plan.plan` 的其餘縫（`ledger`／`live_fn`；測試用）。"""
     env = os.environ if env is None else env
     policy = quota_policy.load_policy(env)[0]
     if plan is None:
         plan = qw_plan.plan(sid or "", transcript, env, now, read_quota=lambda _n: state,
-                            refresh=lambda _n: state)
+                            refresh=lambda _n: state, **(plan_seams or {}))
     markers = [m for m in (qg.read_halt_marker(sid),) if m] if sid else []
     r = QR.ruling(state, decision, model=model, policy=policy, now=now, markers=markers,
                   plan=plan, next_est=next_est, wait_min=QR.wait_reset_min(env),
@@ -88,7 +90,7 @@ def gather(sid: str = "", transcript=None, *, env=None, now: datetime | None = N
 
 
 def current(sid: str, transcript, env, now: datetime, *, read_quota=None, plan=None,
-            model=None) -> Snapshot:
+            model=None, plan_seams: dict | None = None) -> Snapshot:
     """消費端的當下判決：縫 `read_quota(now)` 換讀數（同一條派工閘管線、唯讀一步組 cap）；
     缺＝`gather`（真取數，逾 TTL 補量一次）。"""
     if read_quota is None:
@@ -98,7 +100,7 @@ def current(sid: str, transcript, env, now: datetime, *, read_quota=None, plan=N
     state = read_quota(now)
     dec = qg.dispatch_decision(state, now, run_env, model, peek=True)
     return compose(state, dec, now, sid=sid, transcript=transcript, env=run_env, model=model,
-                   plan=plan)
+                   plan=plan, plan_seams=plan_seams)
 
 
 def rule_from_decision(state, decision, now: datetime, payload: dict, model=None):
@@ -107,6 +109,43 @@ def rule_from_decision(state, decision, now: datetime, payload: dict, model=None
     transcript = Path(raw) if isinstance(raw, str) and raw.strip() else None
     sid = transcript.stem if transcript is not None else str(payload.get("session_id") or "")
     return compose(state, decision, now, sid=sid, transcript=transcript, model=model).ruling
+
+
+#: 哨兵維持撞線等待的判決動作（QVD §3.5 C11；無人窗口的 WAIT_RESET 交哨兵，§3.6）。
+SENTINEL_WAIT_ACTIONS = ("HALT_WEEKLY", "PARK", "WAIT_RESET")
+
+
+def sentinel_halt(sid: str, transcript, now: datetime) -> dict | None:
+    """哨兵巡邏的 halt 輸入（C11）：讀**判決**——`HALT_WEEKLY｜PARK｜WAIT_RESET` 且 reset 已知
+    ⇒ 回 halt 標記形狀（同帳號或舊格式標記原樣帶 `at`，reset 一律取判決的 win／wk）；其餘 ⇒
+    None（不等）。帳號不符的標記不當輸入（交 §7 作廢流程）。"""
+    r = gather(sid, transcript, now=now).ruling
+    reset = r.wk if r.action == "HALT_WEEKLY" else r.win
+    if r.action not in SENTINEL_WAIT_ACTIONS or not reset:
+        return None
+    marker = qg.read_halt_marker(sid) or {}
+    if marker.get("account") and r.acct and marker["account"] != r.acct:
+        marker = {}
+    return {**marker, "reset_at": reset, "at": marker.get("at") or now.isoformat(),
+            "ruling": r.action, "vid": r.vid}
+
+
+def sentinel_halt_verdict(halt, idle_seconds, now: datetime, superseded_by=None):
+    """`sentinel_decide` 的 halt 分支（C11）：判讀住判決家，planner 只接線。"""
+    return qg.halt_verdict(halt, idle_seconds, now, superseded_by)
+
+
+def check_halted_line(sid: str, now: datetime) -> str | None:
+    """`--check` 的 halted 行（C3）：只在判決 `HALT_WEEKLY` 且同帳號標記時出現；標記檔不存在不取數
+    （`--check` 不寫檔的既有契約，`quota_halt_marker.halt_marker_probe_path` 只讀不建）。"""
+    import quota_halt_marker  # noqa: PLC0415
+
+    if not quota_halt_marker.halt_marker_probe_path(sid).is_file():
+        return None
+    marker = qg.read_halt_marker(sid)
+    r = gather(sid, now=now).ruling
+    same = marker and (not marker.get("account") or marker.get("account") == r.acct)
+    return qg.halted_band_line(marker, now) if same and r.action == "HALT_WEEKLY" else None
 
 
 def fresh_or_recompute(text: str, now: datetime, sid: str = "", transcript=None, **kw):

@@ -18,7 +18,7 @@ from lib import sdd_latest
 from . import card as si_card
 from . import check as si_check
 from . import events as si_events
-from . import evwrite, propfiles
+from . import evspec, evwrite, propfiles
 from . import fold as si_fold
 from . import git as si_git
 from . import params as si_params
@@ -255,8 +255,8 @@ def research_skip(repo: Path, ns, as_json: bool) -> Out:
     given = {k for k in ("band", "sid", "line") if getattr(ns, k) is not None}
     if given != extra:
         raise UsageError(f"--reason {ns.reason} 的附帶旗標須恰為 {sorted(extra) or '無'}")
-    if ns.band is not None and ns.band.strip().lower() in ("", "free"):
-        raise UsageError("--band 不得為 free")
+    if ns.band is not None and not evspec.band_note_ok(ns.band):  # QVD C18：附註值＝判決行
+        raise UsageError("--band 不得為 free（或准許續跑的 CONTINUE 判決）")
     if ns.sid is not None and not si_events.valid_uuid(ns.sid):
         raise UsageError("--sid 須為 UUID")
     if ns.line is not None and ns.line < 1:

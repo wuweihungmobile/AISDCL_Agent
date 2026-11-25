@@ -56,24 +56,9 @@ def pp_source(plan: qw_plan.Plan) -> str:
 
 
 def pretool(payload: dict, env=None, *, now: datetime | None = None, **seams) -> tuple[int, str]:
-    """§6.1／W11a PreToolUse 擋派：`(rc, msg)`。判決值全來自 `quotawall.pretool_verdict`；本函式只
-    把 plan 算一次傳進去，並在被擋／notify 訊息尾端補 `ping_pp` 值與來源（REQ-QW-70；H.3）。
-    fail-open：任何例外 ⇒ `(0, "")`。"""
-    env = os.environ if env is None else env
-    try:
-        tool = payload.get("tool_name") if isinstance(payload, dict) else None
-        if (tool not in qw_verdict.DISPATCH_TOOLS or payload.get("agent_id")
-                or env.get(qw_calc.OFF_ENV)):
-            return 0, ""
-        now = _now(now)
-        plan = _plan(payload, env, now, seams)
-        rc, msg = quotawall.pretool_verdict(payload, env, now, plan_=plan)
-        if msg and plan.ping_pp is not None:
-            msg += f"\nping_pp={plan.ping_pp:.3f}（來源 {pp_source(plan)}）"
-        return rc, msg
-    except Exception:  # noqa: BLE001
-        return 0, ""
-
+    """§6.1 PreToolUse 擋派**退役**（QVD §3.5 C2）：致動器只留派工閘（C1，依判決擋展開型派工）；
+    保留簽名供既有 hook 接線呼叫，恆回 `(0, "")`。"""
+    return 0, ""
 
 def mute(payload: dict, env=None, *, now: datetime | None = None, **seams) -> str:
     """§6.4 `stop_mute`：`"wall"`｜`"quota"`｜`""`。牆中落痕跡 `quotawall_stop_muted`。"""
@@ -99,13 +84,12 @@ def _carrier(carrier_fn=None) -> bool:
     return bool((carrier_fn or park._has_carrier)())  # noqa: SLF001
 
 
-def _plan(payload: dict, env, now: datetime, seams: dict) -> qw_plan.Plan:
-    """`AUTOSDD_QUOTAWALL_OFF` ⇒ 一律 `none`（只關推回；牆中偵測與靜音不經這裡）。"""
+def _snap(payload: dict, env, now: datetime, seams: dict):
+    """當下判決快照（QVD C2：判準只看判決）；`AUTOSDD_QUOTAWALL_OFF` ⇒ `None`（只關推回；牆中
+    偵測與靜音不經這裡）。"""
     if env.get(qw_calc.OFF_ENV):
-        return qw_plan.Plan(qw_plan.NONE, "quotawall_off")
-    return qw_plan.plan(roster._payload_sid(payload), payload.get("transcript_path"), env, now,
-                        **plan_seams(seams))
-
+        return None
+    return qw_verdict.snapshot(payload, env, now, seams)
 
 def inflight(payload: dict, env=None, *, now: datetime | None = None, **seams) -> str:
     """§6.2 在飛側：`close` ⇒ 先 TaskStop 全部在飛代理再結束回合（訊息不含任何 finalize 字樣）。"""
@@ -118,24 +102,26 @@ def inflight(payload: dict, env=None, *, now: datetime | None = None, **seams) -
         return ""
 
 
-def _park_facts(now: datetime, read_quota):
-    """`none` 階段 park 判準的讀數面：`(reset epoch, 最高讀數, 讀數時刻)`；無達標軸 ⇒ None。"""
-    state = (read_quota or park._pace_state)(now)  # noqa: SLF001
-    hits = park.prepare_hits(state, park._policy(), now)  # noqa: SLF001
-    reset = park.reset_of(hits) if hits else None
+def _park_facts(snap):
+    """判決 `PARK｜HALT_WEEKLY` 的 S-18 閂鎖讀數面：`(reset epoch, 最高短窗讀數, 讀數時刻)`；
+    判決不是停工或 reset 不明 ⇒ None（讀數取自同一份判決快照，不另取數）。"""
+    r = getattr(snap, "ruling", None)
+    if r is None or r.action not in ("PARK", "HALT_WEEKLY"):
+        return None
+    reset = qw_schema.parse_epoch(r.win if r.action == "PARK" else r.wk)
     if reset is None:
         return None
-    return (reset.timestamp(), max(a.pct for a in hits),
-            qw_schema.parse_epoch(getattr(state, "measured_at", None)))
+    hits = park.measured_short(snap.state, datetime.fromtimestamp(reset - 1).astimezone())
+    return (reset, max((a.pct for a in hits), default=100.0),
+            qw_schema.parse_epoch(getattr(snap.state, "measured_at", None)))
 
-
-def _legacy(payload: dict, env, now: datetime, sid: str, seams: dict) -> str:
-    """`none` 階段：既有 `park.stop_verdict`（判準本體不改），主載具在跑時套 S-18 閂鎖。"""
+def _legacy(payload: dict, env, now: datetime, sid: str, seams: dict, snap) -> str:
+    """非 close：`park.stop_verdict`（判決 PARK｜HALT_WEEKLY），主載具在跑時套 S-18 閂鎖。"""
     why = park.stop_verdict(payload, env, now=now, read_quota=seams.get("read_quota"),
                             carrier_fn=seams.get("carrier_fn"))
     if not why or not qw_latch.primary_live(payload, sid, now):
         return why
-    facts = _park_facts(now, seams.get("read_quota"))
+    facts = _park_facts(snap)
     if facts is None:
         return why
     reset, pct, at = facts
@@ -154,17 +140,18 @@ def idle(payload: dict, env=None, *, now: datetime | None = None,
         if not _quota_on(env):
             return "", False
         now, sid = _now(now), roster._payload_sid(payload)
-        plan = _plan(payload, env, now, seams)
-        if plan.stage == qw_plan.CLOSE:
+        snap = _snap(payload, env, now, seams)
+        if snap is None or snap.plan.stage == qw_plan.WALL:
+            return "", False  # 牆中靜音；QUOTAWALL_OFF
+        if snap.ruling.action not in ("PARK", "HALT_WEEKLY"):
+            return "", False  # S-16：額度照樣用到接近滿；WAIT_RESET 由保溫閘推 keepwarm
+        if snap.plan.stage == qw_plan.CLOSE:
             if not _carrier(seams.get("carrier_fn")):
                 return "", False
-            return quotawall.stop_verdict(payload, env, now, inflight=False, plan_=plan), True
-        if plan.stage in (qw_plan.FREE, qw_plan.NODISPATCH, qw_plan.WALL):
-            return "", False  # S-16：額度照樣用到接近滿；牆中靜音
-        return _legacy(payload, env, now, sid, seams), False
+            return quotawall.stop_verdict(payload, env, now, inflight=False, snap=snap), True
+        return _legacy(payload, env, now, sid, seams, snap), False
     except Exception:  # noqa: BLE001
         return "", False
-
 
 def armed_h_marker(sid: str, now: datetime) -> dict | None:
     """本 sid 有效的 H 路 park 標記（armed、未過期、交接包仍 live）；`--done` 標記不算
@@ -217,17 +204,17 @@ def stop_notice(payload: dict, env=None, *, now: datetime | None = None, **seams
         if payload.get("stop_hook_active") or not _quota_on(env):
             return ""
         now, sid = _now(now), roster._payload_sid(payload)
-        plan = _plan(payload, env, now, seams)
-        if plan.stage == qw_plan.CLOSE:
-            return quotawall.absent_notice(payload, env, now, plan_=plan)
-        if plan.stage != qw_plan.NONE or not qw_latch.primary_live(payload, sid, now):
+        snap = _snap(payload, env, now, seams)
+        if snap is None or snap.ruling.action not in ("PARK", "HALT_WEEKLY"):
+            return ""
+        if snap.plan.stage == qw_plan.CLOSE:
+            return quotawall.absent_notice(payload, env, now, snap=snap)
+        if not qw_latch.primary_live(payload, sid, now):
             return ""
         marker = park.read_marker(sid)
-        if park.credential_ok(marker, now)[0] or _park_facts(
-                now, seams.get("read_quota")) is None:
+        if park.credential_ok(marker, now)[0] or _park_facts(snap) is None:
             return ""
-        switch.trace(EV_BACKUP_ABSENT, sid=sid, stage=plan.stage)
+        switch.trace(EV_BACKUP_ABSENT, sid=sid, stage=snap.plan.stage, vid=snap.ruling.vid)
         return "備援缺席：主載具在跑；未登記 park 備援，主載具失效時沒有第二道網。"
     except Exception:  # noqa: BLE001
         return ""
-

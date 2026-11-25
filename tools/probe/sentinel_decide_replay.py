@@ -48,7 +48,8 @@ def _j(value: object) -> str:
 def _halt_marker(sid: str, now: datetime) -> dict | None:
     """唯讀取 halt 標記；寫於 `--now` 之後（as-of 當時還不存在）一律當沒有，免得重放被現值汙染。"""
     try:
-        marker = json.loads(planner._halt_marker_probe_path(sid).read_text(encoding="utf-8"))
+        probe = __import__("quota_halt_marker").halt_marker_probe_path  # QVD §9：搬出 planner
+        marker = json.loads(probe(sid).read_text(encoding="utf-8"))
         return None if datetime.fromisoformat(str(marker["at"])) > now else marker
     except (OSError, ValueError, KeyError, TypeError):
         return None

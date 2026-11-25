@@ -156,18 +156,14 @@ def halted_band_line(halt_marker: dict | None, now: datetime) -> str | None:
             "（本 sid 的 halt 標記尚未過期；這一行只讀標記檔、不打 API，逐軸讀數看 `--pace`）")
 
 
-def halted_pace_text(halted: str, state: quota_policy.QuotaState, ruling, policy) -> str:
+def halted_pace_text(halted: str, state: quota_policy.QuotaState, ruling, policy=None) -> str:
     """`--pace` 判決行之後的 halted 行（QVD C3）：只在判決 `HALT_WEEKLY` 且同帳號標記時被呼叫；
-    不再自行 `decide`（單一判讀家）。換模型提示依讀數：達停止門檻的軸全是模型分軌軸才印「有用」。"""
+    不再自行判讀（單一判讀家）。換模型提示依判決：命中的週軸全是模型分軌軸（`ruling.scoped`）才「有用」。"""
     if not state.usable():
         return halted + "\n  （補量已照 TTL 試過一次仍沒有新鮮讀數：本次沒有逐軸讀數）\n"
-    hit = [a for a in state.axes if a.kind not in quota_policy.FALLBACK_KINDS
-           and type(a.pct) in (int, float) and a.pct >= policy.halt_pct]
-    if hit and all(a.kind in quota_policy.MODEL_SCOPED_KINDS for a in hit):
-        names = "／".join(sorted({a.scope_model or a.kind for a in hit}))
-        return f"{halted}\n  換模型有用：停止的只有模型分軌軸（{names}；判決 mdl={ruling.mdl}）\n"
+    if getattr(ruling, "scoped", False):
+        return f"{halted}\n  換模型有用：停止的只有模型分軌軸（判決 mdl={ruling.mdl}）\n"
     return f"{halted}\n  換模型沒有用：停止的軸是全模型共用 ⇒ 只能等 reset 或提額\n"
-
 
 # QVD §9：halt 判讀族（`halt_verdict`／`halt_marker_or_rejection` 與三個容忍窗常數）純搬移到
 # `quota_halt_marker`（騰 guardrail_lib 餘裕）；此處 re-export，既有消費端零改動。

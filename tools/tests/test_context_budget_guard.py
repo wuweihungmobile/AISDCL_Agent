@@ -63,7 +63,6 @@ import endurance_env  # noqa: E402  # R96／B-4：持久痕跡居所的 SSOT（�
 import harness_feed  # noqa: E402  # R158：`check_lines()` 的空窗出聲測試 round-label-ok
 import quota_criteria  # noqa: E402  # R86：判準本體的家（本檔只做斷言）
 import quota_gate as qg  # noqa: E402
-from lib.sessionctl import ruling_io as RIO  # noqa: E402  # QVD §9：pace_report 搬出 hub
 import quota_messages as qm  # noqa: E402  # R88／LOC-01：人話面與載具參照的家
 import quota_meter  # noqa: E402  # R82／HELM-02：`NO_WINDOW` 相等鎖的另一端
 import quota_policy  # noqa: E402  # R82：門檻／階梯的唯一的家，本檔不再持有任何數字
@@ -71,6 +70,8 @@ import schedule_backend as sb  # noqa: E402  # R83：取證指引的家（見 ha
 import sdd_latest  # noqa: E402  # DEF-200-275 第七輪 D28：現查 AISDLC_SDD LATEST，不寫死版號
 import sentinel_lifecycle  # noqa: E402  # R82／HELM-02：哨兵生命週期判準
 from _ps_engine import production_engine  # noqa: E402  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
+
+from lib.sessionctl import ruling_io as RIO  # noqa: E402  # QVD §9：pace_report 搬出 hub
 
 
 def setUpModule() -> None:  # noqa: N802 — unittest 的固定名稱
@@ -7971,51 +7972,49 @@ class ControllerIdlePrepareWatchTest(unittest.TestCase):
         self.assertIsNone(escalation._main_transcript_idle_seconds(self.transcript, time.time()))
 
     def test_b2_not_yet_idle_never_touches_the_quota_cache(self) -> None:
-        """B2 紅綠自證的前半：閒置門檻沒到就不讀額度、不通知——分支開關本身。"""
+        """B2 紅綠自證的前半：閒置門檻沒到就不取判決、不通知——分支開關本身（QVD C15）。"""
         base = datetime(2026, 8, 9, 10, 0, 0, tzinfo=UTC)
         self._write([{"type": "assistant", "timestamp": base.isoformat().replace("+00:00", "Z"),
                       "message": {"model": "claude-opus-5"}}])
         now = base + timedelta(seconds=10)
-        with unittest.mock.patch.object(qg, "read_quota") as read_quota:
-            audit = escalation._idle_prepare_watch(self.transcript, now, idle_threshold=900)
-        read_quota.assert_not_called()
+        rule = unittest.mock.Mock()
+        audit = escalation._idle_prepare_watch(self.transcript, now, idle_threshold=900, rule=rule)
+        rule.assert_not_called()
         self.assertNotIn("prepare_notify_rc", audit)
 
+    def _ruling(self, action: str):
+        return __import__("types").SimpleNamespace(action=action, reason=f"判決 {action}",
+                                     line=lambda: f"QUOTA_VERDICT={action} acct=none")
+
     def test_b2_idle_and_prepare_band_notifies_without_writing_a_plan_skeleton(self) -> None:
-        """B2 紅綠自證的後半：閒置＋prepare 帶 ⇒ 通知；且**不**寫任務書骨架
-        （同 R-4.5.6-3 單檔雙寫者禁令的精神——這個通道與撞線重啟走不同的任務書語意）。
-        """
+        """B2 紅綠自證的後半：閒置＋判決 WAIT_RESET／PARK（短窗進準備帶）⇒ 通知；且**不**寫任務書
+        骨架（同 R-4.5.6-3 單檔雙寫者禁令的精神）。QVD C15：改讀注入的單一判決。"""
         base = datetime(2026, 8, 9, 10, 0, 0, tzinfo=UTC)
         self._write([{"type": "assistant", "timestamp": base.isoformat().replace("+00:00", "Z"),
                       "message": {"model": "claude-opus-5"}}])
         now = (base + timedelta(seconds=1000)).replace(tzinfo=UTC)
-        state = quota_policy.QuotaState(
-            (quota_policy.Axis("session", 90.0, None),), now.isoformat(), "test")
-        with unittest.mock.patch.object(qg, "read_quota", return_value=state), \
-             unittest.mock.patch.object(qg, "policy_env", return_value={}), \
-             unittest.mock.patch.object(escalation, "notify", side_effect=self._notify):
-            audit = escalation._idle_prepare_watch(self.transcript, now, idle_threshold=900)
-        self.assertEqual(audit["quota_band"], quota_policy.BAND_PREPARE)
-        self.assertEqual(len(self.notified), 1, "水位進 prepare 帶卻沒敲桌面通知")
+        for action in ("WAIT_RESET", "PARK"):
+            with unittest.mock.patch.object(escalation, "notify", side_effect=self._notify):
+                audit = escalation._idle_prepare_watch(
+                    self.transcript, now, idle_threshold=900,
+                    rule=lambda _n, a=action: self._ruling(a))
+            self.assertEqual(audit["quota_action"], action)
+        self.assertEqual(len(self.notified), 2, "判決進準備帶卻沒敲桌面通知")
         self.assertFalse(list(self.tmp.glob(f"{guard.PLAN_PREFIX}*.md")),
                          "R-4.5.7-2 明文不得寫任務書骨架，這裡卻寫出一份")
 
     def test_b2_halt_band_does_not_fire_the_prepare_notice(self) -> None:
-        """分支開關的另一半：已經到 halt 就不是『即將』，不該再走這條預防性通道
-        （halt 由 §4.5.6 的重啟任務書骨架接手，兩個語意不得互相覆寫）。
-        """
+        """分支開關的另一半：HALT_WEEKLY／CONTINUE／NODISPATCH 都不是『即將見底』的預防性通道
+        （halt 由 §4.5.6 的重啟任務書骨架接手，兩個語意不得互相覆寫）。"""
         base = datetime(2026, 8, 9, 10, 0, 0, tzinfo=UTC)
         self._write([{"type": "assistant", "timestamp": base.isoformat().replace("+00:00", "Z"),
                       "message": {"model": "claude-opus-5"}}])
         now = (base + timedelta(seconds=1000)).replace(tzinfo=UTC)
-        state = quota_policy.QuotaState(
-            (quota_policy.Axis("session", 99.0, None),), now.isoformat(), "test")
-        with unittest.mock.patch.object(qg, "read_quota", return_value=state), \
-             unittest.mock.patch.object(qg, "policy_env", return_value={}), \
-             unittest.mock.patch.object(escalation, "notify", side_effect=self._notify):
-            escalation._idle_prepare_watch(self.transcript, now, idle_threshold=900)
-        self.assertEqual(self.notified, [], "已經 halt 卻仍發了『即將見底』的預防性提醒")
-
+        for action in ("HALT_WEEKLY", "CONTINUE", "NODISPATCH"):
+            with unittest.mock.patch.object(escalation, "notify", side_effect=self._notify):
+                escalation._idle_prepare_watch(self.transcript, now, idle_threshold=900,
+                                               rule=lambda _n, a=action: self._ruling(a))
+        self.assertEqual(self.notified, [], "非準備帶判決卻仍發了『即將見底』的預防性提醒")
 
 def _fresh_transcript(tmp: Path, name: str, age: float = 5.0) -> Path:
     """一支剛剛才動過的逐字稿（最後一筆 assistant 事件＝現在往前 `age` 秒，預設 5 秒）。

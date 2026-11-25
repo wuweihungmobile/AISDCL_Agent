@@ -206,51 +206,41 @@ class TestSkipJudging(P4TestCase):
         self.assertIn("astimezone()", inspect.getsource(sched.local_hm))
 
     def test_AT_436_2_3_quota_band_verdict(self):
-        def band(name):
-            return sched.quota_verdict(types.SimpleNamespace(band=name))
+        """QVD §3.5 C18（v2.1.28 取代帶判讀）：跳過＝判決 ACTION≠CONTINUE 或 deg=unmeasured；
+        降載＝band∈{notice, converge}；形狀不對＝跳過（fail-closed）。"""
         for name, degrade in (("free", False), ("notice", True), ("converge", True)):
-            self.assertEqual(band(name), {"skip": False, "degrade": degrade}, name)
+            self.assertEqual(sched.quota_verdict(fx4.ruling_of(name)),
+                             {"skip": False, "degrade": degrade}, name)
         for name in ("prepare", "halt", "unmeasured"):
-            self.assertTrue(band(name)["skip"], name)
+            self.assertTrue(sched.quota_verdict(fx4.ruling_of(name))["skip"], name)
+        for bad in (None, {}, {"action": "FREE"}, types.SimpleNamespace(band="free")):
+            self.assertTrue(sched.quota_verdict(bad)["skip"], bad)
 
         def boom(_now):
             raise OSError("no quota")
         self.assertTrue(sched.quota_check(O, read=boom)["skip"])
-        self.assertEqual(sched.quota_check(O, read=lambda _n: types.SimpleNamespace(band="free")),
+        self.assertEqual(sched.quota_check(O, read=lambda _n: fx4.ruling_of("free")),
                          {"skip": False, "degrade": False})
 
-    def test_AT_436_2_3b_unattended_stale_cache_is_remeasured_once(self):
-        """D-IMP-11：無人時快取必過期；無軸才補量一次，補量失敗仍 fail-closed，有軸不補量。"""
-        empty, full = types.SimpleNamespace(axes=[]), types.SimpleNamespace(axes=[object()])
-        reads, calls = iter([empty, full]), []
-        got = sched.measured_state(O, read=lambda _n: next(reads),
-                                   refresh=lambda: calls.append(1) or True)
-        self.assertIs(got, full)
-        self.assertEqual(calls, [1])
-        calls.clear()
-        got = sched.measured_state(O, read=lambda _n: empty,
-                                   refresh=lambda: calls.append(1) or False)
-        self.assertIs(got, empty)
-        self.assertEqual(calls, [1])
-        self.assertTrue(sched.quota_verdict(types.SimpleNamespace(band="unmeasured"))["skip"])
-        calls.clear()
-        sched.measured_state(O, read=lambda _n: full, refresh=lambda: calls.append(1) or True)
-        self.assertEqual(calls, [])
-
-    def test_AT_436_2_3c_quota_check_real_path_goes_through_measured_state(self):
-        from lib import quota_policy
+    def test_AT_436_2_3b_ruling_json_via_cli_subprocess(self):
+        """QVD C18：判決經子行程 `sessionctl quota --json` 取（SI 不 import sessionctl）；子行程
+        rc≠0、輸出不可解析 ⇒ None（呼叫端跳過）。"""
         seen = []
+        line = json.dumps({"action": "CONTINUE", "band": "free", "line": "QUOTA_VERDICT=CONTINUE"})
+        got = runner.ruling_json(O, run=lambda argv: seen.append(argv) or (0, "noise\n" + line))
+        self.assertEqual(got["action"], "CONTINUE")
+        self.assertTrue(seen[0][-3].endswith("sessionctl.py"), seen[0])
+        self.assertEqual(seen[0][-2:], ["quota", "--json"])
+        self.assertIsNone(runner.ruling_json(O, run=lambda _a: (1, line)))
+        self.assertIsNone(runner.ruling_json(O, run=lambda _a: (0, "{not json")))
 
-        def fake_state(now):
-            seen.append(now)
-            return types.SimpleNamespace()
-
-        with mock.patch.object(sched, "measured_state", side_effect=fake_state), \
-                mock.patch.object(quota_policy, "decide",
-                                  return_value=types.SimpleNamespace(band="free")):
-            self.assertEqual(sched.quota_check(O), {"skip": False, "degrade": False})
+    def test_AT_436_2_3c_quota_check_without_injected_read_is_fail_closed(self):
+        """sched 是 ro 類（不跑子行程）：沒注入取數＝跳過；注入的判決照判（取數住 exec 類 runner）。"""
+        self.assertEqual(sched.quota_check(O), {"skip": True, "degrade": False})
+        seen = []
+        self.assertEqual(sched.quota_check(O, read=lambda n: seen.append(n) or fx4.ruling_of("free")),
+                         {"skip": False, "degrade": False})
         self.assertEqual(seen, [O])
-
     def test_AT_436_2_4_other_driver_by_conversation_record_not_mtime(self):
         R = fx4.p4_base()
         now = O + 10 * H

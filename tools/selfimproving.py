@@ -521,6 +521,10 @@ def _fourq(repo: Path, args: argparse.Namespace) -> int:
     elif args.corpus:
         out = fourq.corpus(repo, args.json)
     else:
+        if fourq.QUOTA_READ is None:  # QVD C18：組合根注入判決取數（exec 類 runner；fourq 屬 rw）
+            from lib.selfimproving import runner
+
+            fourq.QUOTA_READ = runner.ruling_json
         out = (fourq.skip if args.skip else fourq.review)(repo, args, args.json)
     _emit(out.text)
     return out.rc

@@ -5,8 +5,8 @@ WHY：2026-11-15 事故——短窗額度 98%、43 分鐘後 reset，主控把�
 「到點由新 session 帶交接包接手」的排程憑證；本檔是它的純判準層。
 Stop 路徑只讀檔、不 spawn、不打排程器。
 🔴 fail-open／fail-closed 分界：任何例外 ⇒ Stop 放行（P0）；標記壞掉 ⇒ 無憑證（推回至多一次）。
-🔴 (g) 的唯一入口是 `prepare_hits`：只讀 `Axis.pct`（伺服器原值），不碰 `quota_policy.decide` 的
-band（攤提與配速床會把 23% 墊成 prepare，那不是「真的快撞線」）。
+🔴 (g)：QVD §3.5 C7（v2.1.28）起停工推回只依單一權威判決（`quota_ruling`；動作只看伺服器原值，
+配速床／攤提只改 cap、不改動作），本檔不再自比門檻。
 本輪只有 H 路（到點換手）；同 session 背景等待者（W 路）無暴露證據，不做（AMEND_MASTER M1）。
 """
 from __future__ import annotations
@@ -123,18 +123,9 @@ def _real_pct(value) -> bool:
     return type(value) in (int, float) and math.isfinite(value)
 
 
-def prepare_hits(state, policy, now: datetime) -> list | None:
-    """🔴 (g) 的唯一入口。`None`＝量不到（`state.axes == ()`）；`[]`＝量到了但沒有短窗軸達標。
-    命中＝短窗軸 ∧ 有限 int／float（排除 bool）∧ `axis.pct >= policy.prepare_pct` ∧ reset 在未來。
-    只讀 `Axis.pct`；**嚴禁**呼叫 `decide`／`axes_of` 或讀 band（吃攤提與配速床墊高後的水位）。"""
-    if not state.axes:
-        return None
-    return [a for a in measured_short(state, now) if a.pct >= policy.prepare_pct]
-
-
 def measured_short(state, now: datetime) -> list:
-    """短窗軸 ∧ 有限讀數 ∧ reset 在未來（不看門檻）。`park --why` 未達門檻時的 reset 來源：
-    「下一棒放不下」是相對下一棒大小的判斷，不是固定門檻；Stop 推回仍只走 `prepare_hits`。"""
+    """短窗軸 ∧ 有限讀數 ∧ reset 在未來（不看門檻；只供 park 標記的 axis 欄與 S-18 閂鎖讀數面）。
+    QVD C4／C6／C7：准許與否只由單一判決決定，`prepare_hits`（自比門檻）已刪。"""
     return [a for a in short_axes(state.axes)
             if _real_pct(a.pct) and _aware_future(a.resets_at, now) is not None]
 
@@ -145,19 +136,6 @@ def recovered(marker: dict, state, ruling, now: datetime) -> bool:
     from . import parkprobe  # noqa: PLC0415
 
     return parkprobe.evaluate(marker, state, ruling, now)["recovered"]
-
-
-def reset_of(hits: list) -> datetime | None:
-    """命中軸 `resets_at` 的**最大值**（所有達標軸都翻頁才醒）；解不出的軸不參與；全無 ⇒ None。"""
-    stamps = []
-    for axis in hits:
-        try:
-            when = datetime.fromisoformat(str(axis.resets_at).strip().replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if when.tzinfo is not None:
-            stamps.append(when)
-    return max(stamps) if stamps else None
 
 
 # ───────────────────────────────────────────────────────────────────────── 標記

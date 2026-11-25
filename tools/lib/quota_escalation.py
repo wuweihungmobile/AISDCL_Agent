@@ -80,9 +80,7 @@ import context_budget_guard as guard  # noqa: E402  # 逐字稿判讀的唯一�
 # `quota_availability.py`／`quota_stability.py` 既有依賴面，本檔不重抄第二份路徑解析
 # 或互斥邏輯（六支依 ruff isort 字母序排列，順手併成一個區塊）。
 import endurance_env  # noqa: E402
-import quota_gate  # noqa: E402
 import quota_ledger  # noqa: E402
-import quota_policy  # noqa: E402
 import sched_isolation  # noqa: E402  # RealVerify 副作用隔離（DES S3）：通知呼叫者的首判
 import schedule_backend  # noqa: E402
 import sentinel_lifecycle  # noqa: E402
@@ -326,18 +324,17 @@ def _epoch(raw: object) -> float | None:
         return None
 
 
-def _idle_prepare_watch(transcript: Path, now: datetime, idle_threshold: float) -> dict:
-    """R-4.5.7-1／-2／-3：主控閒置中 ＋ 水位進 prepare 帶 ⇒ 桌面通知，不寫任務書骨架。"""
+def _idle_prepare_watch(transcript: Path, now: datetime, idle_threshold: float, rule=None) -> dict:
+    """R-4.5.7-1／-2／-3：主控閒置中 ＋ 判決 WAIT_RESET｜PARK（短窗進準備帶）⇒ 桌面通知，不寫骨架。
+    QVD C15：改讀單一判決（`rule(now)->Ruling` 由呼叫端 planner 注入；扁平檔不 import 套件）。"""
     idle = _main_transcript_idle_seconds(transcript, now.timestamp())
-    if idle is None or idle < idle_threshold:
+    if idle is None or idle < idle_threshold or rule is None:
         return {"controller_idle_seconds": idle}
-    policy, _ = quota_policy.load_policy(quota_gate.policy_env())
-    decision = quota_policy.decide(quota_gate.read_quota(now), now, policy)
-    if decision.band != quota_policy.BAND_PREPARE:
-        return {"controller_idle_seconds": idle, "quota_band": decision.band}
-    rc = notify("AutoSDD 額度即將見底", quota_policy.describe(decision))
-    return {"controller_idle_seconds": idle, "quota_band": decision.band, "prepare_notify_rc": rc}
-
+    r = rule(now)
+    if r.action not in ("WAIT_RESET", "PARK"):
+        return {"controller_idle_seconds": idle, "quota_action": r.action}
+    rc = notify("AutoSDD 額度即將見底", f"{r.reason}（{r.line().splitlines()[0]}）")
+    return {"controller_idle_seconds": idle, "quota_action": r.action, "prepare_notify_rc": rc}
 
 # ══════════════════════════════════════════════════════════════════════════
 # PRD §4.5.8（v2.1.7）：哨兵武裝狀態漂移自癒
@@ -517,7 +514,7 @@ def _orphan_watch(transcript: Path, event: object, now: datetime, idle_threshold
 
 
 def patrol_housekeeping(transcript: Path, event: object, now: datetime, state: dict,
-                        idle_threshold: float, tick: str, log: Path) -> dict:
+                        idle_threshold: float, tick: str, log: Path, rule=None) -> dict:
     """每次巡邏的五件事：扇出死亡快照（既有）＋主控閒置預防提醒（§4.5.7）＋無主模式
     偵測（PRD_Amendment_R112 §3-1 A-4）＋武裝狀態漂移自癒（§4.5.8）＋通知補投佇列
     重投（§3-4）。合成一個字典，直接 `**` 進 `sentinel_decided` 痕跡。
@@ -526,7 +523,7 @@ def patrol_housekeeping(transcript: Path, event: object, now: datetime, state: d
         return {"sideeffect_refused": True}  # DES S3：失效沙盒 ⇒ 不出 toast、不入佇列
     audit = dict(snapshot_fanout(transcript, event))
     if event is None:
-        audit.update(_idle_prepare_watch(transcript, now, idle_threshold))
+        audit.update(_idle_prepare_watch(transcript, now, idle_threshold, rule))
     audit.update(_orphan_watch(transcript, event, now, idle_threshold, state, log))
     audit.update(_heal_armed_drift(state, now, idle_threshold, tick, log))
     audit.update(redeliver_queued(now.timestamp(), log))

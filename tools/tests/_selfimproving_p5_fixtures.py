@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import types
 from pathlib import Path
 from unittest import mock
 
@@ -63,7 +62,9 @@ def p5_base(prm=None) -> Path:
 
 
 def free_band(band: str = "free"):
-    return mock.patch.object(fourq, "QUOTA_READ", lambda now: types.SimpleNamespace(band=band))
+    from _selfimproving_p4_fixtures import ruling_of  # noqa: PLC0415 — QVD C18：判決形狀
+
+    return mock.patch.object(fourq, "QUOTA_READ", lambda now: ruling_of(band))
 
 
 def clone(R: Path) -> Path:

@@ -14,12 +14,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "lib"))
 import quota_burndown as B  # noqa: E402
 import quota_criteria as QC  # noqa: E402
 import quota_gate as QG  # noqa: E402
-from lib.sessionctl import ruling_io as RIO  # noqa: E402  # QVD §9：pace_report 搬出 hub
 import quota_messages as QM  # noqa: E402
 import quota_meter as M  # noqa: E402
 import quota_pace as W  # noqa: E402
 import quota_policy as Q  # noqa: E402
 import sentinel_lifecycle as SL  # noqa: E402
+
+from lib.sessionctl import ruling_io as RIO  # noqa: E402  # QVD §9：pace_report 搬出 hub
 
 _FENCES: list[dict] = []
 

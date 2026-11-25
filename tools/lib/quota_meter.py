@@ -917,9 +917,14 @@ def main(argv: list[str]) -> int:
         print(f"❌ 量不到額度水位（reason={reason}）。"
               "本工具刻意不回 0——量不到 ≠ 量到零。", file=sys.stderr)
         return 1
+    # QVD §3.5 C16／R-4.1.6-7：原始讀數只供診斷；`--json` 時提示走 stderr（stdout 保持合法 JSON）。
+    print(DIAG_NOTE, file=sys.stderr if args.as_json else sys.stdout)
     print(json.dumps(reading, ensure_ascii=False, indent=2) if args.as_json
           else _report(reading))
     return 0
+
+
+DIAG_NOTE = "診斷用（原始讀數），判斷請看 `python tools/sessionctl.py quota`（單一權威判決）"
 
 
 if __name__ == "__main__":

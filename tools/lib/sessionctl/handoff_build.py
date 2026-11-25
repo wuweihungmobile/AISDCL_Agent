@@ -118,18 +118,20 @@ def _schedule_rows(runner, platform_name: str) -> str:
     return "\n".join(rows) or "（沒有 AutoSDD_／AutoClaude 排程）"
 
 
-def _quota_text(now: datetime, quota_fn) -> str:
+def _quota_text(now: datetime, quota_fn, sid: str = "") -> str:
+    """交接包額度欄（QVD §3.5 C14）：首行＝判決行（`--ack` 時一律重算，§4 第 3 點），其後逐軸讀數
+    為診斷。縫 `quota_fn(now)->QuotaState`；缺＝單一權威判決取數（`ruling_io`）。"""
     try:
-        if quota_fn is None:
-            import quota_gate  # noqa: PLC0415 — lazy：只有真的要讀額度快取時才載入
-            quota_fn = quota_gate.read_quota
-        state = quota_fn(now)
+        from . import ruling_io  # noqa: PLC0415 — lazy：只有真的要讀額度時才載入
+
+        snap = ruling_io.current(sid, None, None, now, read_quota=quota_fn)
+        state = snap.state
         axes = "\n".join(f"- {a.kind}：{a.pct:g}%（reset {a.resets_at or '量不到'}）"
                          for a in state.axes) or "（無軸）"
-        return f"量測時刻 {state.measured_at}（來源 {state.source}）\n{axes}"
+        return (f"{snap.ruling.line()}\n（診斷）量測時刻 {state.measured_at}（來源 {state.source}）"
+                f"\n{axes}")
     except Exception as exc:  # noqa: BLE001 — 取不到寫「量不到」，不拋
         return _unknown(f"{type(exc).__name__}: {exc}")
-
 
 def _pad_files(sid: str, temp_root: Path | None) -> tuple[list[Path] | None, str]:
     """該 sid 的 scratchpad 檔案（排序）；`(None, 原因)`＝找不到／讀不動。"""
@@ -196,7 +198,7 @@ def build_mechanical(session_id: str, transcript: Path | None, *, repo: Path, no
         ("\n\n".join(_quote(t) for t in humans) or _unknown("逐字稿無真人提示或讀不到"))
         + (f"\n\n全文見 {package.stem}.prompts.md" if package is not None else ""),
         "\n\n".join(_quote(t) for t in tail) or _unknown("逐字稿無 assistant 文字或讀不到"),
-        roster_text, _schedule_rows(runner, plat), _quota_text(now, quota_fn),
+        roster_text, _schedule_rows(runner, plat), _quota_text(now, quota_fn, session_id),
         _scratchpad_text(session_id, temp_root),
         str(transcript) if transcript else _unknown("逐字稿路徑未知"),
         agentbrief.column12(agents, session_id, transcript, why=why_roster, oi_fn=oi_fn),

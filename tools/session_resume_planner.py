@@ -667,7 +667,7 @@ def sentinel_decide(event: dict | None, handled_through: object, idle_seconds: f
             # 在 mac 上會明說「有 / 沒有 StartCalendarInterval」與「重載是否仍待完成」。
             return {"action": "arm_reset", "at": at, "reset_at": reset_at, "reset_source": "transcript-verbatim", "reason": f"偵測到未處理的撞線；觀測 reset={reset_at} 尚未到 ⇒ " "要求排程器改在那個時刻醒（本次零 token；載具實際做到什麼" "看同一筆痕跡的 credential 欄）"}  # noqa: E501
         return {"action": "probe", "at": None, "reason": f"偵測到未處理的撞線；觀測 reset={reset_at} 已過 ⇒ " "花一次探測確認額度回來了沒"}  # noqa: E501
-    if (v := quota_gate.halt_verdict(halt, idle_seconds, now, superseded_by) or transcript_activity.grace_verdict(grace, idle_seconds, now)) is not None:  # noqa: E501
+    if (v := ruling_io.sentinel_halt_verdict(halt, idle_seconds, now, superseded_by) or transcript_activity.grace_verdict(grace, idle_seconds, now)) is not None:  # noqa: E501 — QVD C11：halt 判讀住判決家
         return v
     if idle_seconds is not None and idle_seconds < SENTINEL_IDLE_SECONDS:
         return {"action": "patrol", "at": now + timedelta(seconds=SENTINEL_INTERVAL_SECONDS), "reason": f"無未處理撞線；逐字稿 {idle_seconds:.0f}s 前仍有更新 ⇒ " "session 還活著，續巡（本次零 token）"}  # noqa: E501
@@ -1483,9 +1483,9 @@ def _sentinel_tick(args) -> int:
     # （`tools/session_resume_planner.py` 本檔 loc 預算餘裕為 0，見 `check_loc_budget.py`
     # 的 `guardrail_cli` tier——新邏輯放不進本檔，只能在既有呼叫點換一個更胖的被呼叫端）。
     event = guard.unhandled_limit_event(transcript) if transcript.is_file() else None
-    fan = escalation.patrol_housekeeping(transcript, event, now, state, SENTINEL_INTERVAL_SECONDS, SENTINEL_TICK, log)  # noqa: E501
+    fan = escalation.patrol_housekeeping(transcript, event, now, state, SENTINEL_INTERVAL_SECONDS, SENTINEL_TICK, log, rule=lambda at: ruling_io.gather(now=at).ruling)  # noqa: E501 — QVD C15：判決注入
     idle, grace = transcript_activity.conversation_view(transcript, now); driver = transcript_activity.live_driver(transcript, now, event) if event else None  # noqa: E501,E702 — DEF-200-560／562；DEF-200-564：撞線事件之後另一駕駛（一個巡邏間隔內仍在動）
-    halt = quota_gate.read_halt_marker(sid := state.get("session_id") or "")
+    halt = ruling_io.sentinel_halt(sid := state.get("session_id") or "", transcript, now)  # noqa: E501 — QVD C11：讀判決（HALT_WEEKLY／PARK／無人 WAIT_RESET 維持等待）
     decision = sentinel_decide(event, "", idle, now, halt=halt, superseded_by=sentinel_lifecycle.superseding_session(transcript.parent if transcript.is_file() else project_transcript_dir(_REPO_ROOT), sid, halt), grace=grace, driver=driver, stale=switch.stale_for(transcript, sid, now, project_transcript_dir(_REPO_ROOT)), park=sessionctl_park.read_marker(sid))  # noqa: E501
     append_log(log, "sentinel_decided", action=decision["action"], reason=decision["reason"], grace_note_at=(grace or {}).get("timestamp", ""), conversation_idle_seconds=idle, driver_after=driver, anchor={"timestamp": event["timestamp"], "source": "limit_event"} if event else None, plan_in_temp=plan.parent.resolve() == Path(tempfile.gettempdir()).resolve(), **fan)  # noqa: E501 — DEF-200-566：修前武裝的哨兵任務書仍在系統暫存 ⇒ 痕跡出聲（不自動搬）
     print(f"哨兵判定 {decision['action']}：{decision['reason']}")
@@ -1516,18 +1516,6 @@ def _sentinel_tick(args) -> int:
     append_log(log, "sentinel_rearmed", action=decision["action"], fire_at=decision["at"].isoformat(), credential=moment)  # noqa: E501
     _alert_on_rearm_failure(state, plan, rc, "哨兵重掛失敗")
     return rc
-
-
-def _halt_marker_probe_path(sid: str) -> Path:
-    """halt 標記路徑，但**不**觸發 `endurance_env.trace_dir()` 的 `mkdir` 副作用（D23：
-    `--check` 是「不寫檔」的既有契約——`PlannerCliTest.test_check_prints_usage_and_
-    writes_nothing` 釘住；若直接呼叫 `quota_gate.read_halt_marker()` 探測，會在從沒人
-    寫過標記的機器上把 HOME 底下憑空長出 `.autosdd/traces` 目錄）。解析規則與
-    `endurance_env._durable_dir_status()` 同源但只讀不建：目錄真的存在才可能有標記，
-    不存在就是「沒有」，不需要為了確認這件事而先造出它來。"""
-    override = os.environ.get(endurance_env.TRACE_DIR_ENV, "").strip()
-    root = Path(override) if override else Path.home().joinpath(*endurance_env.TRACE_HOME_PARTS)
-    return root / f"halt_{sid}.json"
 
 
 def main(argv: list[str]) -> int:
@@ -1607,7 +1595,7 @@ def main(argv: list[str]) -> int:
         # （純讀標記，不打 API）；先過 `_halt_marker_probe_path()` 的唯讀存在性檢查，
         # 標記真的在才呼叫會建目錄的 `read_halt_marker()`（見該函式 WHY）。單行 if
         # 沿用本檔 guardrail_cli tier 餘裕為 0 的既有慣例。
-        if _halt_marker_probe_path(data["session_id"]).is_file() and (halted := quota_gate.halted_band_line(quota_gate.read_halt_marker(data["session_id"]), datetime.now().astimezone())): print(halted)  # noqa: E501,E701
+        if (halted := ruling_io.check_halted_line(data["session_id"], datetime.now().astimezone())): print(halted)  # noqa: E501,E701 — QVD C3：halted 行只在 HALT_WEEKLY 且同帳號標記
         print(session_brief.sdd_fsm_line())  # Q1 外驗證據：SDD FSM 現況（原值，不判阻斷）
         if (liveness := sentinel_lifecycle.liveness_line(data["session_id"])):  # 修3：同 --pace
             print(liveness, file=sys.stderr)

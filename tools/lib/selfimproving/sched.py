@@ -229,43 +229,37 @@ def in_blackout(now: datetime, params: dict) -> bool:
     return blackout_hit(local_hm(now), params["sched_blackout_local"])
 
 
-def quota_verdict(state) -> dict:
-    """額度帶判讀：準備、停止、量不到（及任何不認得的帶）跳過（fail-closed）；注意與收斂照跑但降載。"""
-    band = getattr(state, "band", None)
-    return {"skip": band not in ("free", "notice", "converge"),
-            "degrade": band in ("notice", "converge")}
+#: 單一權威判決的動作值域（QVD §3.2；SI 不 import `quota_ruling`／`sessionctl`，以資料對照）。
+RULING_ACTIONS = ("CONTINUE", "NODISPATCH", "WAIT_RESET", "PARK", "HALT_WEEKLY")
 
 
-def measured_state(now: datetime, read=None, refresh=None):
-    """額度快取的「讀，量不到就補量一次再讀」唯一入口（TCS-P4 D-IMP-11）。無人操作時快取必過期
-    （只有互動視窗 statusLine 刷新、TTL 180 秒），只讀會讓無人運轉永遠判 `unmeasured`；補量＝
-    `quota_gate.refresh_quota_blocking()`（HTTP 一次、零 token、fail-soft）。已有軸不補量；補量
-    失敗或仍無軸＝回無軸狀態，由 `decide` 照舊判 `unmeasured`（fail-closed）。`read`／`refresh`
-    為注入縫。"""
-    if read is None or refresh is None:
-        from lib import quota_gate  # 延遲：只有真讀額度才載入
+def quota_verdict(ruling) -> dict:
+    """QVD §3.5 C18：`ruling`＝`sessionctl quota --json` 的物件。跳過＝`ACTION ≠ CONTINUE` **或**
+    `deg=unmeasured`（SI 一向的 fail-closed）；降載＝`band ∈ {notice, converge}`（與現行降載
+    集合同義）；形狀不對／不認得的動作＝跳過。"""
+    if not isinstance(ruling, dict) or ruling.get("action") not in RULING_ACTIONS:
+        return {"skip": True, "degrade": False}
+    skip = ruling["action"] != "CONTINUE" or ruling.get("deg") == "unmeasured"
+    return {"skip": skip, "degrade": not skip and ruling.get("band") in ("notice", "converge")}
 
-        read = quota_gate.read_quota if read is None else read
-        refresh = quota_gate.refresh_quota_blocking if refresh is None else refresh
-    state = read(now)
-    if not state.axes and refresh():
-        state = read(now)
-    return state
+
+def ruling_note(ruling) -> str:
+    """`research.skip`／`fourq.skip` 的 `--band` 附註值＝判決行（取不到＝`unmeasured`）。"""
+    if isinstance(ruling, dict) and isinstance(ruling.get("line"), str) and ruling["line"]:
+        return ruling["line"]
+    return "unmeasured"
 
 
 def quota_check(now: datetime, read=None) -> dict:
-    """`quota_gate.read_quota(now)` 的帶判讀（`read` 為注入縫，回帶 `.band` 的物件）；讀取或判讀
-    的任何例外＝fail-closed（跳過）。預設以 `quota_policy.DEFAULT_POLICY` 取帶。"""
+    """判決的跳過／降載判讀。`read(now)` 回 `sessionctl quota --json` 形狀的 dict（取數走子行程，
+    住 exec 類 `runner.ruling_json`，由呼叫端注入；本檔是 ro 類不跑子行程）；沒注入或任何例外＝
+    fail-closed（跳過）。"""
+    if read is None:
+        return {"skip": True, "degrade": False}
     try:
-        if read is not None:
-            return quota_verdict(read(now))
-        from lib import quota_policy  # 延遲：只有真讀額度才載入
-
-        state = measured_state(now)
-        return quota_verdict(quota_policy.decide(state, now, quota_policy.DEFAULT_POLICY))
+        return quota_verdict(read(now))
     except Exception:  # noqa: BLE001  # 量不到＝跳過（fail-closed），不當機
         return {"skip": True, "degrade": False}
-
 
 def other_driver(repo: Path, now: datetime, params: dict) -> bool:
     """逐字稿目錄最近 `sched_driver_quiet_minutes` 內有**對話記錄**（記錄時間戳，不是 mtime）；

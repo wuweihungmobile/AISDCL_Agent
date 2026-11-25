@@ -51,7 +51,6 @@ from pathlib import Path
 
 import endurance_env  # FIX3：無人續跑結局的持久記錄居所（stdlib-only，模組層 import 不成環）
 import git_paths
-import quota_gate
 import quota_policy
 import resume_cost  # improving_113 W2：喚醒成本落帳（純函式模組；本檔是唯一接線點）
 import resume_route  # DEF-200-516 7-A：handback 標題比對規則的唯一家（`heading_hit`）
@@ -75,7 +74,8 @@ STATE_RELAY_EXHAUSTED = "RELAY_EXHAUSTED"
 STATE_OTHER_DRIVER_STOP = "OTHER_DRIVER_STOP"
 
 #: band 判準②：`--pace` 現查 band 必須落在這兩帶才續燒（unmeasured／收緊皆不合格）。
-_BAND_OK = frozenset({quota_policy.BAND_FREE, quota_policy.BAND_NOTICE})
+#: QVD C12：續燒＝判決 CONTINUE；free／notice 兩個帶字面只留給既有重放探針與測試替身（同義）。
+_BAND_OK = frozenset({"CONTINUE", quota_policy.BAND_FREE, quota_policy.BAND_NOTICE})
 
 #: handback 交接檔（§3(b)）「還有未完項」的判準面：該節非空即視為未完項，模型須
 #: 顯式清空才算完工。與 `resume_route.HANDBACK_MARKERS` 同一份文件，不同一個判準
@@ -147,15 +147,11 @@ def no_progress_limit() -> int:
 
 
 def current_band(now: datetime) -> str:
-    """判準②現查：與 `--pace` 同一份純讀取面（零 spawn 子行程）。
-
-    刻意不呼叫 `quota_gate.pace_report()`——那支還做燃燒率記錄／穩定化／寫檔契約三件
-    副作用，本檔只要 band。手法同 `quota_escalation._idle_prepare_watch()` 既有呼叫：
-    `read_quota()` 只讀快取檔（零網路／零 subprocess），`decide()` 是純函式。
-    """
-    policy, _problems = quota_policy.load_policy(quota_gate.policy_env())
-    return quota_policy.decide(quota_gate.read_quota(now), now, policy).band
-
+    """判準②現查（QVD §3.5 C12）：改讀**單一權威判決**——`ACTION == CONTINUE` 且非
+    `deg=unmeasured` ⇒ `"CONTINUE"`（續燒）；其餘回判決動作字面（`band_ok` 為假＝不續燒；
+    量不到沿用 relay 既有 fail-closed）。扁平檔不 import sessionctl：判決經呼叫端 planner 取。"""
+    r = _planner().ruling_io.gather(now=now).ruling
+    return "CONTINUE" if r.action == "CONTINUE" and not r.degraded else r.action
 
 def band_ok(band: str) -> bool:
     return band in _BAND_OK

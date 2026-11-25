@@ -9,6 +9,7 @@ sha256、位元組數與遮蔽後的末段（≤300 位元組），原始輸出�
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import signal
@@ -392,3 +393,24 @@ def run_probe(argv: list[str], *, cwd: Path, sandbox_root: Path, timeout: float)
     raw = (out or b"") + (err or b"")
     return ProbeResult(None if timed_out else proc.returncode, timed_out,
                        "sha256:" + hashlib.sha256(raw).hexdigest(), len(raw), _tail(raw))
+
+
+def ruling_json(now: datetime | None = None, *, run=None) -> dict | None:
+    """QVD §3.5 C18：經子行程 `python tools/sessionctl.py quota --json` 取單一權威判決（SI 套件不得
+    import sessionctl，SSOT §2；判決取數需要 sessionctl）。子行程失敗、逾時或輸出不可解析 ⇒
+    `None`（呼叫端跳過＝fail-closed）。`run(argv)->(rc, stdout)` 為注入縫；`now` 僅為簽名一致。"""
+    argv = [sys.executable, str(Path(__file__).resolve().parents[2] / "sessionctl.py"), "quota",
+            "--json"]
+    try:
+        if run is None:
+            res = run_argv(argv, env=dict(os.environ), timeout=RULING_TIMEOUT_SECONDS)
+            rc, out = res.rc, res.out
+        else:
+            rc, out = run(argv)
+        rows = [x for x in str(out).splitlines() if x.strip().startswith("{")]
+        return json.loads(rows[-1]) if rc == 0 and rows else None
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+RULING_TIMEOUT_SECONDS = 60

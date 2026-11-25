@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import events as si_events
+from . import evspec as si_evspec
 from . import evwrite, fourqparse, propfiles, sched, unattended
 from . import fold as si_fold
 from . import writeverbs as wv
@@ -26,7 +27,7 @@ from .fourqparse import (  # noqa: F401  # 再匯出：測試與呼叫端以 fou
     status_value,
 )
 
-QUOTA_READ = None  # 測試注入縫：`read(now)` 回帶 `.band` 的物件（缺省＝真讀額度）
+QUOTA_READ = None  # 測試注入縫：`read(now)` 回 `sessionctl quota --json` 形狀 dict（缺＝子行程）
 _KEYS = ("event_max_bytes", "row_max_bytes", "fourq_items_max", "fourq_degrade_items_max")
 Out = wv.Out
 UsageError = wv.UsageError
@@ -127,8 +128,8 @@ def skip(repo: Path, ns, as_json: bool) -> Out:
     given = {k for k in ("band", "sid", "line") if getattr(ns, k) is not None}
     if extra is None or given != extra:
         raise UsageError("--reason 須為 quota-band（附 --band）或 helmsman（附 --sid 與 --line）")
-    if ns.band is not None and ns.band.strip().lower() in ("", "free"):
-        raise UsageError("--band 不得為 free")
+    if ns.band is not None and not si_evspec.band_note_ok(ns.band):  # QVD C18
+        raise UsageError("--band 不得為 free（或准許續跑的 CONTINUE 判決）")
     if ns.sid is not None and not si_events.valid_uuid(ns.sid):
         raise UsageError("--sid 須為 UUID")
     if ns.line is not None and ns.line < 1:

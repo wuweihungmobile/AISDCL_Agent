@@ -34,7 +34,6 @@ import importlib.util as _ilu  # noqa: E402
 import context_budget_guard as guard  # noqa: E402
 import platform_utils  # noqa: E402
 import quota_gate as qg  # noqa: E402
-from lib.sessionctl import ruling_io as RIO  # noqa: E402  # QVD §9：pace_report 搬出 hub
 import quota_messages  # noqa: E402
 import quota_policy  # noqa: E402
 import schedule_backend as sb  # noqa: E402
@@ -44,6 +43,7 @@ import test_context_budget_guard as _cbg  # noqa: E402  # 出廠政策 pin 的�
 import transcript_activity as ta  # noqa: E402  # DEF-200-560：對話記錄判準
 
 import session_resume_planner as planner  # noqa: E402
+from lib.sessionctl import ruling_io as RIO  # noqa: E402  # QVD §9：pace_report 搬出 hub
 
 
 def _load_claim_guard():
@@ -545,7 +545,7 @@ class HaltMarkerProbePathDoesNotCreateDirectoriesTest(unittest.TestCase):
             os.environ, {"AUTOSDD_TRACE_DIR": str(self.trace_root)}))
 
     def test_probing_a_never_written_marker_creates_no_directory(self) -> None:
-        path = planner._halt_marker_probe_path("sid-never-written-d23")
+        path = __import__("quota_halt_marker").halt_marker_probe_path("sid-never-written-d23")
         self.assertFalse(path.is_file())
         self.assertFalse(self.trace_root.exists(),
                          "唯讀探測不得建目錄——`--check` 的『不寫檔』契約靠這個成立")
@@ -553,7 +553,7 @@ class HaltMarkerProbePathDoesNotCreateDirectoriesTest(unittest.TestCase):
     def test_probing_an_existing_marker_finds_it(self) -> None:
         sid = "sid-does-exist-d23"
         qg.write_halt_marker(sid, {"sid": sid, "reset_at": "2099-01-01T00:00:00+00:00"})
-        path = planner._halt_marker_probe_path(sid)
+        path = __import__("quota_halt_marker").halt_marker_probe_path(sid)
         self.assertTrue(path.is_file())
         self.assertEqual(qg.read_halt_marker(sid), {"sid": sid,
                          "reset_at": "2099-01-01T00:00:00+00:00"})

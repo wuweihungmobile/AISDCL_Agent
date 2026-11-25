@@ -48,6 +48,8 @@ class Ruling:
     reason: str
     billing: str = "unknown"
     voided: int = 0
+    #: `HALT_WEEKLY` 且命中的週軸全是模型分軌軸（換派別家族有用；`--pace` 換模型提示的依據）
+    scoped: bool = False
 
     def line(self) -> str:
         return line(self)
@@ -169,12 +171,14 @@ def ruling(state, decision, *, model, policy, now: datetime, markers=(), plan=No
     wk_hits = [a for a in axes["weekly"]
                if a.pct >= policy.halt_pct and _model_weekly(a, model)]
     s_hits = [a for a in axes["short"] if a.pct >= policy.prepare_pct]
-    win, wk, why = win_any, None, ""
+    win, wk, why, scoped = win_any, None, "", False
     if any(a.pct >= 100 for a in axes["spend"]):
         action, why = HALT_WEEKLY, "月度支出上限：沒有 reset 可等"
     elif wk_hits or m_week:
         resets = [_aware(a.resets_at) for a in wk_hits] + m_week
         action, wk = HALT_WEEKLY, max(resets)
+        scoped = bool(wk_hits) and not m_week and all(
+            a.kind in quota_policy.MODEL_SCOPED_KINDS for a in wk_hits)
         why = "週額度已達停止門檻（或同帳號週軸 halt 標記未過期）：等週重置"
     elif s_hits or m_short or stage in ("close", "wall"):
         win = (max(_aware(a.resets_at) for a in s_hits) if s_hits
@@ -216,7 +220,7 @@ def ruling(state, decision, *, model, policy, now: datetime, markers=(), plan=No
     vid = hashlib.sha256("|".join(fields).encode("utf-8")).hexdigest()[:8]
     return Ruling(action, acct, _iso(win, now), _iso(wk, now), int(cap), _iso(m_at, now),
                   _iso(expires, now), vid, fam, degraded,
-                  str(getattr(decision, "band", "") or ""), why, billing, voided)
+                  str(getattr(decision, "band", "") or ""), why, billing, voided, scoped)
 
 
 def _short_reason(action: str, src: str, win, now: datetime, wait_min: float) -> str:

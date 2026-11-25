@@ -55,7 +55,6 @@ import quota_availability as QA  # noqa: E402  # R102：可得性軸遲滯狀態
 import quota_boot_check as QBC  # noqa: E402  # R102／R16：啟動自檢（H6／H7）  round-label-ok
 import quota_criteria as QC  # noqa: E402
 import quota_gate as QG  # noqa: E402  # R95 修4：halt 動作接線面（waker 注入驗證）
-from lib.sessionctl import ruling_io as RIO  # noqa: E402  # QVD §9：pace_report 搬出 hub
 import quota_ledger as QL  # noqa: E402  # R102：`with_lock()` 互斥原語（F24 修復）  round-label-ok
 import quota_messages as QM  # noqa: E402  # R95 修4：halt 多軸 reset 裁決的家
 import quota_meter as M  # noqa: E402
@@ -63,6 +62,8 @@ import quota_pace as W  # noqa: E402
 import quota_policy as Q  # noqa: E402
 import quota_stability as QS  # noqa: E402  # R102：併發上限死區/變化率/最小停留時間  round-label-ok
 import sentinel_lifecycle as SL  # noqa: E402  # DEF-200-446：模組級圍籬原語
+
+from lib.sessionctl import ruling_io as RIO  # noqa: E402  # QVD §9：pace_report 搬出 hub
 
 _MODULE_SRC = (_REPO / "tools" / "lib" / "quota_policy.py").read_text(encoding="utf-8")
 

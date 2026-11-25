@@ -60,27 +60,24 @@ def block_text(p: qw_plan.Plan) -> str:
             f"真的需要再派：在 prompt 開頭寫 `續派理由：<至少 {ESCAPE_MIN_CHARS} 字的原因>`。")
 
 
-def pretool_verdict(payload: dict, env, now: datetime, *, plan_: qw_plan.Plan | None = None,
-                    **seams) -> tuple[int, str]:
-    """§6.1：`(rc, msg)`。主控的 Agent／Task／Workflow（`agent_id` 有值＝子代理，放行）在
-    `nodispatch`／`close` ⇒ rc 2（auto）；notify ⇒ rc 0＋訊息（呼叫端印 stderr）；off／無人窗口／
-    `QUOTAWALL_OFF` ⇒ (0, "")。`續派理由：<≥8 字>` 放行並記 `quotawall_override`。"""
-    try:
-        env = os.environ if env is None else env
-        if (not isinstance(payload, dict) or payload.get("tool_name") not in DISPATCH_TOOLS
-                or payload.get("agent_id") or _off(env)):
-            return 0, ""
-        sid = roster._payload_sid(payload)
-        p = plan_ or qw_plan.plan(sid, payload.get("transcript_path"), env, now, **seams)
-        if p.stage not in (qw_plan.NODISPATCH, qw_plan.CLOSE):
-            return 0, ""
-        if _escape(payload.get("tool_input")):
-            switch.trace("quotawall_override", sid=sid, stage=p.stage)
-            return 0, ""
-        switch.trace("quotawall_block", sid=sid, stage=p.stage, r=p.r, v=p.v, limit=p.limit)
-        return (2 if switch.switch_mode(env) == "auto" else 0), block_text(p)
-    except Exception:  # noqa: BLE001 — fail-open
-        return 0, ""
+def snapshot(payload: dict, env, now: datetime, seams: dict | None = None):
+    """當下判決快照（QVD §3.5 C2：本檔的提示與靜音一律以判決為準，不另讀計畫自判）。縫：
+    `read_quota`（讀數）、`ledger`／`live_fn`（計畫其餘縫）；`refresh` 由同一份讀數代替。"""
+    from . import ruling_io  # noqa: PLC0415 — lazy：ruling_io 依賴 qw_plan／keepwarm
+
+    seams = seams or {}
+    raw = payload.get("transcript_path") if isinstance(payload, dict) else None
+    tx = Path(raw) if isinstance(raw, str) and raw.strip() else None
+    extra = {k: seams[k] for k in ("ledger", "live_fn") if seams.get(k) is not None}
+    return ruling_io.current(roster._payload_sid(payload), tx, env, now,
+                             read_quota=seams.get("read_quota"), plan_seams=extra)
+
+
+def pretool_verdict(payload: dict, env, now: datetime, **_seams) -> tuple[int, str]:
+    """§6.1 擋派分支**退役**（QVD §3.5 C2）：判決第 3、4 列已涵蓋 stage close／wall／nodispatch，
+    致動器只留派工閘（C1 `quota_gate(rule=…)`）一處，免得兩支 hook 各擋各的、訊息各說各的。
+    保留簽名供既有接線呼叫；恆回 `(0, "")`。"""
+    return 0, ""
 
 
 def _has_park(sid: str, now: datetime) -> bool:
@@ -90,9 +87,10 @@ def _has_park(sid: str, now: datetime) -> bool:
     return park.credential_ok(marker, now)[0] and qw_plan._pkg_live(marker)
 
 
-def stop_verdict(payload: dict, env, now: datetime, *, inflight: bool,
-                 plan_: qw_plan.Plan | None = None, **seams) -> str:
-    """§6.2：回 `decision:block` 的 reason；不推 ⇒ `""`。只在 `close` 階段推：
+def stop_verdict(payload: dict, env, now: datetime, *, inflight: bool, snap=None,
+                 **seams) -> str:
+    """§6.2：回 `decision:block` 的 reason；不推 ⇒ `""`。只在判決 `PARK` 且額度牆 `close` 時推
+    （`WAIT_RESET` 由保溫閘推 keepwarm，不推收尾）；訊息附判決行：
     · 在飛側（`inflight`）：要求 TaskStop 全部在飛代理後結束回合（**不得**要求先封存，D-D）；
     · 閒置側：列出尚缺的步驟（build→主控層→finalize→park→keepwarm）；都有 ⇒ 不推；
     · 主載具在跑、只缺 park（S-18）：同一 (sid, 短窗視窗) 只推一次（閂鎖），其後交
@@ -102,11 +100,13 @@ def stop_verdict(payload: dict, env, now: datetime, *, inflight: bool,
         if (not isinstance(payload, dict) or payload.get("stop_hook_active") or _off(env)):
             return ""
         sid = roster._payload_sid(payload)
-        p = plan_ or qw_plan.plan(sid, payload.get("transcript_path"), env, now, **seams)
-        if p.stage != qw_plan.CLOSE:
+        snap = snap or snapshot(payload, env, now, seams)
+        p, r = snap.plan, snap.ruling
+        if r.action != "PARK" or p.stage != qw_plan.CLOSE:
             return ""
+        head = f"額度牆（Stop）：{_facts(p)}\n{r.line()}\n"
         if inflight:
-            return (f"額度牆（Stop）：{_facts(p)}\n先 TaskStop 全部在飛代理（成品留在工作樹），"
+            return (head + "先 TaskStop 全部在飛代理（成品留在工作樹），"
                     "然後結束回合；下一次 Stop 會帶你走收尾。（只推這一次。）")
         park_ok, primary_ok = _has_park(sid, now), qw_latch.primary_live(payload, sid, now)
         if park_ok and primary_ok:
@@ -117,26 +117,25 @@ def stop_verdict(payload: dict, env, now: datetime, *, inflight: bool,
         todo = ([] if park_ok else list(_STEPS)) + ([] if primary_ok else [_KEEPWARM])
         if primary_ok:
             qw_latch.latch_mark(sid, p.reset, 100 - p.r, now.timestamp())
-        return (f"額度牆（Stop）：{_facts(p)}\n收尾還缺：" + " → ".join(todo)
+        return (head + "收尾還缺：" + " → ".join(todo)
                 + "\n（交接包須先寫完主控層；park 只是備援，主載具是 keepwarm。只推這一次。）")
     except Exception:  # noqa: BLE001 — fail-open
         return ""
 
 
-def absent_notice(payload: dict, env, now: datetime, *, plan_: qw_plan.Plan | None = None,
-                  **seams) -> str:
-    """S-18 閂鎖後的 `systemMessage`（不 block）：主載具在跑、但沒登記 park 備援。"""
+def absent_notice(payload: dict, env, now: datetime, *, snap=None, **seams) -> str:
+    """S-18 閂鎖後的 `systemMessage`（不 block）：判決 `PARK`、主載具在跑、但沒登記 park 備援。"""
     try:
         env = os.environ if env is None else env
         sid = roster._payload_sid(payload)
-        p = plan_ or qw_plan.plan(sid, payload.get("transcript_path"), env, now, **seams)
-        if (p.stage != qw_plan.CLOSE or _off(env) or _has_park(sid, now)
-                or not qw_latch.primary_live(payload, sid, now)):
+        snap = snap or snapshot(payload, env, now, seams)
+        if (snap.ruling.action != "PARK" or snap.plan.stage != qw_plan.CLOSE or _off(env)
+                or _has_park(sid, now) or not qw_latch.primary_live(payload, sid, now)):
             return ""
         row = holder.read(sid)
         wake = qw_schema.holder_wake(row)
         when = qw_schema.iso(wake.wake_at) if wake and wake.wake_at else "?"
-        switch.trace("quotawall_backup_absent", sid=sid, wake=when)
+        switch.trace("quotawall_backup_absent", sid=sid, wake=when, vid=snap.ruling.vid)
         return (f"備援缺席：主載具在跑（預定 {when} 醒來）；未登記 park 備援，"
                 "主載具失效時沒有第二道網。")
     except Exception:  # noqa: BLE001
@@ -144,8 +143,8 @@ def absent_notice(payload: dict, env, now: datetime, *, plan_: qw_plan.Plan | No
 
 
 def stop_mute(payload: dict, env, now: datetime, **seams) -> str:
-    """§6.4：`"wall"`（牆中：整體靜音，任何模式皆然——那是正確性）｜`"quota"`（nodispatch／close：
-    照 §6.2；`QUOTAWALL_OFF` 時不設）｜`""`。"""
+    """§6.4：`"wall"`（牆中：整體靜音，任何模式皆然——那是正確性）｜`"quota"`（判決
+    NODISPATCH／WAIT_RESET／PARK：照 §6.2；`QUOTAWALL_OFF` 時不設；QVD C2 以判決為準）｜`""`。"""
     try:
         env = os.environ if env is None else env
         transcript = payload.get("transcript_path") if isinstance(payload, dict) else None
@@ -153,8 +152,7 @@ def stop_mute(payload: dict, env, now: datetime, **seams) -> str:
             return "wall"
         if _off(env):
             return ""
-        sid = roster._payload_sid(payload)
-        p = qw_plan.plan(sid, Path(transcript) if transcript else None, env, now, **seams)
-        return "quota" if p.stage in (qw_plan.NODISPATCH, qw_plan.CLOSE) else ""
+        action = snapshot(payload, env, now, seams).ruling.action
+        return "quota" if action in ("NODISPATCH", "WAIT_RESET", "PARK") else ""
     except Exception:  # noqa: BLE001
         return ""

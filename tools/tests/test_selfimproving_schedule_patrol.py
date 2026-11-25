@@ -190,22 +190,21 @@ class TestHeartbeatShape(P4TestCase):
 class TestDueAndSkips(P4TestCase):
     """受測模組 tools/lib/selfimproving/patrol.py：到期判定、七種跳過的接線與每格至多一個運轉。"""
 
-    def test_AT_436_2_E_0_patrol_real_quota_path_goes_through_measured_state(self):
-        """D-IMP-11：巡邏器不注入 deps.quota 時走 sched.measured_state（補量），
-        不再只讀過期快取。"""
-        from lib import quota_policy
+    def test_AT_436_2_E_0_patrol_real_quota_path_goes_through_ruling_json(self):
+        """QVD C18：巡邏器不注入 deps.quota 時經 `runner.ruling_json`（子行程取判決），附註值＝判決行。"""
         ctx = types.SimpleNamespace(now=O, deps=types.SimpleNamespace(quota=None))
         seen = []
 
-        def fake_state(now):
+        def fake(now):
             seen.append(now)
-            return types.SimpleNamespace()
+            return fx4.ruling_of("free")
 
-        with mock.patch.object(sched, "measured_state", side_effect=fake_state), \
-                mock.patch.object(quota_policy, "decide",
-                                  return_value=types.SimpleNamespace(band="free")):
+        with mock.patch.object(patrol.runner, "ruling_json", side_effect=fake):
             band, verdict = patrol._quota(ctx)
-        self.assertEqual((band, verdict, seen), ("free", {"skip": False, "degrade": False}, [O]))
+        self.assertEqual((band, verdict, seen),
+                         ("QUOTA_VERDICT=CONTINUE band=free", {"skip": False, "degrade": False},
+                          [O]))
+
 
     def test_AT_436_2_E_1_blackout_does_not_become_a_permanent_skip(self):
         R = self.enabled_repo(prm={"sched_blackout_local": ["21:00-00:30"]})
@@ -751,6 +750,52 @@ class TestPatrolDoesNotDecide(P4TestCase):
         pend = self.status(R)["pending_props"]
         self.assertIn(ids["card"], [p["id"] for p in pend])
         self.assertEqual(next(p for p in pend if p["id"] == ids["card"])["state"], "proposed")
+
+
+class QuotaVerdictConsumptionTest(P4TestCase):
+    """REQ-AP-QV-09（AC-QV-09a～c）：SI 巡逻、研究免掃、四問降載改讀單一權威判決。"""
+
+    def test_skip_by_action_and_deg(self):
+        """AC-QV-09a：CONTINUE ⇒ 不跳過；四個停工類動作 ⇒ 跳過；CONTINUE deg=unmeasured ⇒ 跳過；
+        子行程 rc≠0 或 JSON 不可解析 ⇒ 跳過。"""
+        self.assertFalse(sched.quota_verdict({"action": "CONTINUE", "band": "free"})["skip"])
+        for act in ("WAIT_RESET", "PARK", "NODISPATCH", "HALT_WEEKLY"):
+            self.assertTrue(sched.quota_verdict({"action": act, "band": "prepare"})["skip"], act)
+        self.assertTrue(sched.quota_verdict({"action": "CONTINUE", "deg": "unmeasured",
+                                             "band": "unmeasured"})["skip"])
+        for run in (lambda _a: (2, "{}"), lambda _a: (0, "not json")):
+            self.assertTrue(sched.quota_check(
+                O, read=lambda n, r=run: patrol.runner.ruling_json(n, run=r))["skip"])
+
+    def test_degrade_and_skip_note(self):
+        """AC-QV-09b：降載＝band∈{notice, converge}；research.skip 的 band 附註值＝判決行。"""
+        self.assertTrue(sched.quota_verdict({"action": "CONTINUE", "band": "notice"})["degrade"])
+        self.assertTrue(sched.quota_verdict({"action": "CONTINUE", "band": "converge"})["degrade"])
+        self.assertFalse(sched.quota_verdict({"action": "CONTINUE", "band": "free"})["degrade"])
+        line = "QUOTA_VERDICT=WAIT_RESET acct=eaf5241f6fe2 win=x"
+        self.assertEqual(sched.ruling_note({"action": "WAIT_RESET", "line": line}), line)
+        from lib.selfimproving import evspec  # noqa: PLC0415
+
+        self.assertTrue(evspec.band_note_ok(line))
+        self.assertFalse(evspec.band_note_ok("QUOTA_VERDICT=CONTINUE acct=x"))
+        self.assertTrue(evspec.band_note_ok("QUOTA_VERDICT=CONTINUE acct=x deg=unmeasured"))
+        self.assertFalse(evspec.band_note_ok("free"))
+
+    def test_no_cross_package_import(self):
+        """AC-QV-09c：`tools/lib/selfimproving/` 不 import `sessionctl` 也不 import `quota_gate`（AST）。"""
+        import ast  # noqa: PLC0415
+
+        root = Path(sched.__file__).resolve().parent
+        bad = []
+        for path in sorted(root.glob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                names = ([a.name for a in node.names] if isinstance(node, ast.Import) else
+                         [f"{node.module or ''}.{a.name}" for a in node.names]
+                         if isinstance(node, ast.ImportFrom) else [])
+                bad += [f"{path.name}:{n}" for n in names
+                        if "sessionctl" in n or n.split(".")[-1] == "quota_gate"
+                        or (n.endswith("quota_gate") or ".quota_gate." in n)]
+        self.assertEqual(bad, [])
 
 
 if __name__ == "__main__":
