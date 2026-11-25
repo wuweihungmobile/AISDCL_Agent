@@ -343,6 +343,8 @@ WP-QV 與 WP-AC 動同一組 quota 檔 ⇒ **串行**。SI 套件測試（`tools
 | halt 不壓補量 | `tools/lib/quota_messages.py` | E1、E3（L210） |
 | 標記綁帳號與作廢 | `tools/lib/quota_halt_marker.py`、`quota_rush.py`、`sessionctl/keepwarm.py`、`.claude/hooks/context_budget_guard.py` | E3（halt 標記原檔無帳號欄、L173、L210）、E7（`quota_burn` 空洞） |
 | WAIT_RESET 叫醒載具 | `sessionctl/qw_plan.py`、`kw_run.py` | E2（03:46 stage=free、87%、D=14：判決若為 WAIT_RESET 而無載具＝第六類停） |
+| 換手計畫與 park 提前恢復改讀判決（C13、C21；v1.2） | `sessionctl/switchplan.py`、`switchfacts.py`、`parkearly.py`、`parkprobe.py` | E2（`watch9.log` 03:46：同一份 87%／D=14 讀數，`watch_wake` 經 `switchplan.merge` 合成的處置指向「封存→park」，與判決應為 `WAIT_RESET` 矛盾）；QA 複審 N-01 實讀座標（`switchplan.py` L99～L120、`parkprobe.py` L60～L75） |
+| `WAIT_RESET` 的 Stop 掛載推回（v1.2） | `sessionctl/keepwarm.py` `stop_verdict()` | E2（判決 `WAIT_RESET` 而主控收尾後無任何載具＝第六類停原形）；QA 複審 N-05 實讀 `keepwarm.py` L172～L176 的 `small_ctx`／n* 不推回分支 |
 | Stop 宣稱守衛 QV 族 | `.claude/hooks/check_claim_provenance.py` | E6（L2553、L2564） |
 | `context_budget_guard` 抽出 `model_window_table` | `.claude/hooks/context_budget_guard.py`、新 `tools/lib/model_window_table.py` | 純搬移（LOC 牆前置），附屬於上一列 AC 觸發器的證據；新檔納入守衛面清單（CLOSE 改根 CLAUDE.md〈守衛面准入〉） |
 
