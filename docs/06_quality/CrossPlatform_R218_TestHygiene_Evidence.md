@@ -35,3 +35,11 @@
 - **WHY 不是放寬**：測試的 OpenItem 帳本都在暫存根，從不寫真帳本的 drive 事件；真 driver 重排必寫。唯一能讓假 job 脫罪的方式是它自己寫進真 repo 帳本，那已不是測試洩漏。
 - **回歸鎖**：`tools/tests/test_context_budget_guard.py::LeakFenceTest` 新增三案。紅綠自證：暫時把併入行改成 `live += [] and …`，真 driver 重排案轉紅（`1 != 0`），還原後 13 案全綠。
 
+## E 項：DEF-200-650 statusline smoke 間歇紅（FLK1）
+
+- **症狀**：2026-11-25 兩次真實發生（D649 代理首跑根層全套；主控 push 的 pre-push）：`RealProcessSmokeTest.test_statusline_prints_no_watch_then_watch_ok_from_a_real_heartbeat` 得 `ctx 11% 5/1.0m | Opus`，`ctl:` 整段缺席；單檔跑恆綠。
+- **重現**：測試側載具在真子行程包住 `controlfacts.control_state`／`segment` 印耗時與例外（不改產品碼），照該測試夾具建居所、每次清快取，與並行根層全套同時跑 120 次：1 次命中，`SEG_MS=161.8 SEG=''`、沒有 `STATE_MS` 行（取數在時限內沒做完），無任何例外。閒置時取數 4～10 ms、冷啟動首次 18 ms；48 支燒機行程下冷啟動 121 ms。
+- **成因**：`controlfacts.segment` 的 150 ms 牆鐘時限（DES §6.5，產品預算，逾時回空且不寫快取，`SegmentCacheTest` 已以注入縫確定性驗過）。smoke 卻在真子行程裡依賴這個預算一定夠用，並行全套的排程飢餓讓它偶爾不夠。不是產品缺陷：status line 在慢機器上不顯示區段正是設計。
+- **修法**：smoke 改經 `run_statusline`（`python -c` 開機碼以 runpy 跑真腳本 `__main__`，只把區段時限換成 60 秒，其餘 stdin→main→ctl_segment→真檔全照跑）。產品碼、預算、斷言都沒動。
+- **回歸鎖**：`test_flk1_smoke_carrier_survives_a_machine_slower_than_the_product_budget`：取數注入 450 ms 延遲，保留產品時限的同一載具必得 `ctx 11% 5/1.0m | Opus`（載具觸發得到病），換 smoke 時限則印 `ctl: 1 agent NO WATCH`。紅綠自證：把 `run_statusline` 預設時限改回產品值，該案以與真實紅逐字相同的訊息轉紅，還原後全綠。
+

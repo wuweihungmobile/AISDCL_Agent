@@ -412,15 +412,50 @@ class BrieflineTest(_Fence):
         self.assertEqual(briefline.join(["", " a", "", " b"]), " a b")
 
 
+#: FLK1：statusline 真子行程的載具。`controlfacts.segment` 的 150 ms 牆鐘時限（DES §6.5）是產品
+#: 預算，並行全套下冷取數偶爾超過它（實測 161.8 ms ⇒ 區段整段 `""`，非例外）；那條路徑由
+#: `SegmentCacheTest` 以注入縫確定性地驗。smoke 要驗的是接線（stdin→main→ctl_segment→真檔），
+#: 所以這裡只把時限換成 `SMOKE_SEG_TIMEOUT`，其餘照跑真腳本；`delay` 只給回歸鎖用來模擬慢機器。
+_STATUSLINE_BOOT = """\
+import functools, runpy, sys, time
+tools, script, budget, delay = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])
+sys.path.insert(0, tools)
+from lib.sessionctl import controlfacts as cf
+if delay:
+    _state = cf.control_state
+    def _slow(*a, **k):
+        time.sleep(delay)
+        return _state(*a, **k)
+    cf.control_state = _slow
+if budget != "product":
+    cf.segment = functools.partial(cf.segment, timeout=float(budget))
+sys.argv = [script]
+runpy.run_path(script, run_name="__main__")
+"""
+SMOKE_SEG_TIMEOUT = 60.0  # 秒；遠小於子行程 timeout=120，慢到這裡就是真的壞了
+
+
 class RealProcessSmokeTest(_Fence):
     """tools/sessionctl.py status 與 tools/statusline_context_feed.py 真子行程（tmp 居所）。"""
 
+    def run_statusline(self, payload: dict, *, budget: str = str(SMOKE_SEG_TIMEOUT),
+                       delay: float = 0.0) -> subprocess.CompletedProcess:
+        """真跑 `tools/statusline_context_feed.py`（runpy `__main__`），只把區段時限換成 `budget`
+        （`"product"`＝保留產品的 150 ms）；見 `_STATUSLINE_BOOT`。"""
+        script = str((_TOOLS / "statusline_context_feed.py").resolve())
+        return self.run_argv(["-c", _STATUSLINE_BOOT, str(_TOOLS.resolve()), script, budget,
+                              str(delay)], stdin=json.dumps(payload))
+
     def run_py(self, script: str, *args: str, stdin: str | None = None,
                extra_env: dict | None = None) -> subprocess.CompletedProcess:
+        return self.run_argv([str(_TOOLS / script), *args], stdin=stdin, extra_env=extra_env)
+
+    def run_argv(self, argv: list[str], *, stdin: str | None = None,
+                 extra_env: dict | None = None) -> subprocess.CompletedProcess:
         env = {**os.environ, **self.env_over, "PYTHONUTF8": "1", **(extra_env or {})}
         env.pop("CLAUDE_CODE_SESSION_ID", None)
         env.update(extra_env or {})
-        return subprocess.run([sys.executable, str(_TOOLS / script), *args], input=stdin,
+        return subprocess.run([sys.executable, *argv], input=stdin,
                               capture_output=True, text=True, encoding="utf-8", env=env,
                               timeout=120, check=False)
 
@@ -460,23 +495,40 @@ class RealProcessSmokeTest(_Fence):
         payload = {"session_id": SID, "transcript_path": str(tr), "model": {"display_name": "Opus"},
                    "context_window": {"used_percentage": 11, "context_window_size": 1000000,
                                       "current_usage": {"input_tokens": 5}}}
-        out = self.run_py("statusline_context_feed.py", stdin=json.dumps(payload))
+        out = self.run_statusline(payload)
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("ctl: 1 agent NO WATCH", out.stdout)
+        self.assertIn("ctl: 1 agent NO WATCH", out.stdout, out.stderr)
         self.assertTrue(out.stdout.startswith("ctx 11%"), out.stdout)
         # 另一個 session：有真心跳（pid 活著、新鮮）⇒ watch ok
         tr2 = self.main_transcript(self.repo, OTHER)
         self.agent(self.repo, OTHER, "live2", minutes_ago=1, finished=False)
         self.heartbeat(OTHER)
         payload.update(session_id=OTHER, transcript_path=str(tr2))
-        out2 = self.run_py("statusline_context_feed.py", stdin=json.dumps(payload))
-        self.assertIn("ctl: 1 agent watch ok", out2.stdout)
+        out2 = self.run_statusline(payload)
+        self.assertIn("ctl: 1 agent watch ok", out2.stdout, out2.stderr)
+
+    def test_flk1_smoke_carrier_survives_a_machine_slower_than_the_product_budget(self) -> None:
+        """FLK1 回歸鎖：取數比產品 150 ms 慢（`delay` 模擬並行全套的排程飢餓）時，保留產品時限的
+        同一載具必然丟掉區段（＝兩次真實紅的症狀：`ctl:` 整段缺席），換成 smoke 時限則照常印出。
+        拿掉 `run_statusline` 的時限替換，上面那支 smoke 在慢機器上就回到這裡的前半段。"""
+        tr = self.main_transcript(self.repo, SID)
+        self.agent(self.repo, SID, "live1", minutes_ago=1, finished=False)
+        payload = {"session_id": SID, "transcript_path": str(tr), "model": {"display_name": "Opus"},
+                   "context_window": {"used_percentage": 11, "context_window_size": 1000000,
+                                      "current_usage": {"input_tokens": 5}}}
+        slow = 3 * controlfacts.SEG_TIMEOUT
+        lost = self.run_statusline(payload, budget="product", delay=slow)
+        self.assertEqual(lost.returncode, 0, lost.stderr)
+        # 載具觸發得到病：區段整段缺席，與兩次真實紅同形
+        self.assertEqual(lost.stdout.strip(), "ctx 11% 5/1.0m | Opus", lost.stderr)
+        kept = self.run_statusline(payload, delay=slow)
+        self.assertIn("ctl: 1 agent NO WATCH", kept.stdout, kept.stderr)
 
     def test_statusline_without_any_state_is_unchanged(self) -> None:
         payload = {"session_id": "fresh-session", "model": {"display_name": "Opus"},
                    "context_window": {"used_percentage": 11, "context_window_size": 1000000,
                                       "current_usage": {"input_tokens": 5}}}
-        out = self.run_py("statusline_context_feed.py", stdin=json.dumps(payload))
+        out = self.run_statusline(payload)
         self.assertEqual(out.stdout.strip(), feed.ui_line(payload))
         self.assertNotIn("ctl:", out.stdout)
 

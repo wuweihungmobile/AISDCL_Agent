@@ -420,6 +420,7 @@
 | DEF-200-647 | 2026-11-25 | 2026-11-24 nightly local_ci_gate=1、主樹站點普查 `{'live': 1205} != {'live': 37}`（本欄刻意零輪號） | **全 repo 檔案系統掃描器把 `.claude/worktrees/` 代理副本當本體掃**：代理在飛期間主樹全套與 nightly 必假紅 | P2 | `worktree_paths.rglob_live` 唯一排除入口，五站點改走＋結構鎖（明細見 `CrossPlatform_R218_TestHygiene_Evidence.md`〈DEF-200-647〉） | fixed：HYG1；`test_worktree_paths::TestRglobLiveSkipsAgentWorktreeCopies`；真副本在位全套修前 6 紅→修後綠 |
 | DEF-200-648 | 2026-11-25 | macOS CI run 45427135743 attempt 2 `test_openitems_gate` rmtree 撞 maintenance.lock（本欄刻意零輪號） | **沙盒 git 背景自動維護與 teardown rmtree 競速**：tools/tests 約 55 處 git 子行程同型，單點 `-c` 擋不住新站點 | P2 | runner 層 `git_sandbox_fence.fence` 設 `GIT_TEMPLATE_DIR`，新建 repo 出生即關 `maintenance.auto`／`gc.auto`（不用 GIT_CONFIG_*：SI 推送守門拒收；明細見同證據檔〈DEF-200-648〉） | fixed：HYG1；`test_run_root_unittests::GitSandboxFenceTest`；單檔直跑不受圍籬（已劃界） |
 | DEF-200-649 | 2026-11-25 | 2026-11-24 23:21 pre-push：真排程 `AutoSDD_OpenItem_OI-20261120-003` 自我重排為 `_202611250522` 被 leak_fence 判洩漏（本欄刻意零輪號） | **leak_fence 對「真 driver 同時段合法重排的排程」誤判**：OpenItem label 無 session id，進不了 `_live_armed` 豁免 | P3 | `leak_fence` 併入 `_driver_rearmed`：圍籬期間 OI 帳本 `ev=drive`＋`by=driver:*`＋同 label 者只出聲不判死；無帳本證據、讀不到帳本仍判死（詳見證據檔〈D 項〉） | fixed：D649；`sentinel_lifecycle.py`；鎖＝`test_context_budget_guard.py::LeakFenceTest` |
+| DEF-200-650 | 2026-11-25 | 全套與 pre-push 兩次缺 `ctl:` 段（本欄刻意零輪號） | **smoke 綁 150 ms 牆鐘預算** | P3 | 載具換時限（證據檔〈E 項〉） | fixed：FLK1；`test_sessionctl_visibility.py` |
 
 > **R41「四方複審裁決總結」敘事段落已搬遷至 [`AutoSDD_Defect_Log_archive_17.md`](AutoSDD_Defect_Log_archive_17.md)（R43 帳本 housekeeping，逐字保全）。**
 

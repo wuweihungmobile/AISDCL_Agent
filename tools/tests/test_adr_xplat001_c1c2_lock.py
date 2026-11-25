@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9712,
+    "test_adr_xplat001_c1c2_lock.py": 9724,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -776,7 +776,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sessionctl_supervise.py": 316,
     "test_sessionctl_switch.py": 592,
     "test_sessionctl_switchplan.py": 724,
-    "test_sessionctl_visibility.py": 485,
+    "test_sessionctl_visibility.py": 537,
     "test_sessionctl_watch.py": 819,
     "test_sessionctl_watchlock.py": 250,
     "test_single_venv_identity.py": 162,
@@ -3371,6 +3371,12 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "重排只出聲、無帳本證據／他 label／非 driver／事件早於圍籬／帳本讀不到仍判死、帳本路徑字面鎖）"
      "加本檔自身 +13。逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/06_quality/CrossPlatform_R218_TestHygiene_Evidence.md。"),
+    ("R214", 189691, 189755, +64,  # round-label-ok r218flk1
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE "
+     "的R214 名冊列承接] 同標籤第七十列（FLK1：DEF-200-650 statusline smoke 斷言綁產品 150 ms "
+     "牆鐘預算而在並行全套間歇紅）：test_sessionctl_visibility.py +52（run_statusline 載具只換區段"
+     "時限、慢機器回歸鎖一案）加本檔自身 +12。逐檔清單見 CrossPlatform_R145_Scan_Findings.md "
+     "尾端 R214 標記行；證據＝docs/06_quality/CrossPlatform_R218_TestHygiene_Evidence.md。"),
 )
 
 
@@ -3472,7 +3478,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (61179, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (61243, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3561,6 +3567,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "第六十七列（r218w5fix）+56＝60858。"
         "第六十八列（r218hyg1）+242＝61100。"
         "第六十九列（r218d649）+79＝61179。"
+        "第七十列（r218flk1）+64＝61243。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -4205,6 +4212,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "D649：leak_fence 真 driver 重排豁免回歸鎖："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok r218flk1
+     "FLK1：statusline smoke 慢機器回歸鎖："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -4380,10 +4391,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 416
+_REPIN_LOG_FROZEN_PREFIX_LEN = 417
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "b5f0de457d915d08261a8bbb52c29e5ddc77c35fd73cd77f928941426dce4272")
+    "7d82357e696b71537d658cd3c30ba94451e93fbbd972071a4a0f1e3864075cdd")
 
 
 def repin_log_history_digest(
@@ -4641,6 +4652,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "f9de0b342063", "6492c64c509f", "DEF-200-645"),  # round-label-ok r218w5fixledger
     ("R214", "6492c64c509f", "c6cbbb8084d2", "DEF-200-648"),  # round-label-ok r218hyg1ledger
     ("R214", "c6cbbb8084d2", "b5f0de457d91", "DEF-200-649"),  # round-label-ok r218d649ledger
+    ("R214", "b5f0de457d91", "7d82357e696b", "DEF-200-650"),  # round-label-ok r218flk1ledger
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
