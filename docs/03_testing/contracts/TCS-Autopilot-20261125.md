@@ -73,7 +73,7 @@
 | AC-QV-01d | 具名時刻斷言（F-17；取自真實 `quota_burn.jsonl` 2026-11-24～25 的固定夾具，測試時複製到 tmp）：2026-11-25 03:46:19 列（five_hour 87%、reset 04:00、`stage=free`）⇒ `WAIT_RESET win=…04:00`；04:00:32 列（0%）⇒ `CONTINUE`；2026-11-24 20:50 列（`account=34cd3507237f`）與 03:43 列（`account=eaf5241f6fe2`）的 `acct` 欄各自等於該列帳號 | `QV::VerdictTest::test_named_moments_from_burn_ledger` |
 | AC-QV-01e | 模型分軌（F-06）：Fable 專屬週軸 100%、全模型週軸 60% ⇒ `model=sonnet` 判 `CONTINUE`、`model=fable` 判 `HALT_WEEKLY` | `QV::VerdictTest::test_model_scoped_weekly_axis` |
 | AC-QV-01f | 配速床與趕工戳記只改 cap（F-08）：同一份原始讀數，`decision` 分別以有／無配速床、有／無 rush 產生 ⇒ 四種組合的 ACTION 相同、cap 可不同 | `QV::VerdictTest::test_pace_floor_and_rush_affect_cap_only` |
-| AC-QV-01g | cap 來源（F-01 ②）：`CONTINUE` 時 `cap == min(dispatch_decision(...).cap, plan.cap)`；`quota_gate()` PreToolUse 記 fanout 帳所用的 cap 與同一時刻判決行 `cap=` 相等 | `QV::VerdictTest::test_cap_is_dispatch_pipeline`、`QV::ConsumerTest::test_gate_and_line_share_cap` |
+| AC-QV-01g | cap 來源（F-01 ②；v1.2 依 QA 複審 N-06 改寫）：`CONTINUE` 時 `cap == dispatch_decision(...).cap`（`None` ⇒ `== policy.max_fanout`）；注入一個 `stage=free` 但其他欄位任意的 `plan` 替身（含帶多餘 `cap` 屬性的替身）⇒ 判決 cap 不變；`quota_gate()` PreToolUse 記 fanout 帳所用的 cap 與同一時刻判決行 `cap=` 相等 | `QV::VerdictTest::test_cap_is_dispatch_pipeline`、`QV::ConsumerTest::test_gate_and_line_share_cap` |
 | AC-QV-02a | 判決行欄位齊全、`expires_at＝min(measured_at+180s, 短窗 reset)`、時刻帶 offset、`vid` 對同輸入穩定、附加欄只在尾端 | `QV::RenderTest::test_line_fields_and_expiry` |
 | AC-QV-02b | `--pace`、watch、park、SessionStart 簡報、`qw_cli`、交接包六處第一個額度行皆為 `QUOTA_VERDICT=` | `QV::ConsumerTest::test_consumers_print_verdict_first` |
 | AC-QV-02c | 消費端拿到過期判決 ⇒ 重算並落 `stale_verdict_recomputed`；不以舊 vid 行動（例：watch 輸出檔的舊 vid 為 `PARK`、重算為 `CONTINUE` ⇒ 不 park） | `QV::ConsumerTest::test_stale_verdict_recomputed` |
@@ -216,6 +216,7 @@
 | MU-QV-23 | `ruling_wait_reset` 計入保溫帳 n* | AC-QV-11b |
 | MU-QV-24 | 哨兵只對 `HALT_WEEKLY｜PARK` 維持等待（不含無人窗口的 `WAIT_RESET`） | AC-QV-11c |
 | MU-QV-25 | 宣稱守衛不考慮 AskUserQuestion 結果之前的判決 | AC-QV-06d |
+| MU-QV-26 | 判決 cap 改回 `min(decision.cap, getattr(plan, "cap", …))`，或 `decision.cap is None` 時改取 0／保溫次數 `plan.k`（N-06） | AC-QV-01g |
 | MU-AC-1 | reconcile 不比對 `account`（只看存在） | AC-AC-02a |
 | MU-AC-2 | 舊格式標記一律保留 | AC-AC-02b |
 | MU-AC-3 | 逐字稿觸發器不記 byte offset（每次全讀） | AC-AC-03b |
@@ -328,3 +329,9 @@
 | F-25 | AC-QV-04d；MU-QV-18 |
 | 代決 ① | REQ-AP-QV-09；AC-QV-09a～c；MU-QV-19～20；E2E-AP-QV-09 |
 | 代決 ② | REQ-AP-G1-04；AC-G1-04a～c；MU-G1-6；E2E-AP-G1-04；§5 OI 需求 1 |
+
+## 7. v1.1 → v1.2 處置索引（QA 複審 `qa_spec2_report.md` 發現 N-01～N-10；SD-2）
+
+| 發現 | 本檔落點 |
+|---|---|
+| N-06 `plan.cap` 不存在 | AC-QV-01g 改寫；MU-QV-26 |

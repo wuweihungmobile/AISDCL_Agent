@@ -1,6 +1,6 @@
 # 單一權威額度判決與換帳號作廢設計（QuotaVerdict／AccountSwitch Design）
 
-- 版本：v1.1（SD-1，2026-11-25；依 QA-S 審查 FAIL〔P1×5、P2×11、P3×10〕修訂；規格階段，實作未開始）。v1.0（SD-0）→ v1.1 的逐條處置見 §14。
+- 版本：v1.2（SD-2，2026-11-25；依 QA 複審 FAIL〔新 P2×6、P3×4〕修訂；規格階段，實作未開始）。v1.0（SD-0）→ v1.1 的逐條處置見 §14；v1.1 → v1.2 見 §15。
 - 上游：`docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` 修訂表 v2.1.28 與 v2.1.29（勘誤）、§4.1.6（R-4.1.6-1～8 及其【v2.1.29 勘誤】）、§4.1.7（R-4.1.7-1～6）、§4.1.5 R-4.1.5-1（量不到 ⇒ `cap ≤ cap_prepare`，本設計遵守、不取代）、§15.5 紅線 14、§4.1.4／§4.2.3【v2.1.24】／§4.5.10／§4.5.11 的【v2.1.28 註記】、§16.6 2026-11-25 第一列。
 - 驗收：`docs/03_testing/contracts/TCS-Autopilot-20261125.md`（REQ-AP-QV-01～11、REQ-AP-AC-01～04）。
 - 兄弟設計：`docs/02_architecture/Autopilot_Pipeline_Design.md`（合入、推送、棘輪、CI、舊視窗、詢問類別閘、測試圍籬；〈外部限制〉全文住那裡，本檔 §2 只摘與額度有關者）。
@@ -61,7 +61,7 @@ SD-0 於 2026-11-25 經 `claude-code-guide` 子代理查官方文件（`code.cla
 | `decision` | `quota_gate.dispatch_decision(state, now, env, model, event)`（v1.1 新增；自 `quota_gate()` L1053～L1112 原樣抽出：`load_policy`→`quota_burndown.active`→`quota_policy.decide(…, active_model, burndown)`→`quota_availability.evaluate`→`quota_stability.evaluate`→cap 改寫） | band、cap、binding、`recommended_fanout`；**派工閘與判決共用這一份**（F-01 ②）。配速床（§2.15）與趕工戳記都只經由它影響 `cap` |
 | `model` | 呼叫端：主控家族（`--pace`、Stop、watch）；派工判斷用 Agent／Task 呼叫的目標模型 | 決定哪些模型分軌週軸（`quota_policy.MODEL_SCOPED_KINDS`）進第 2 列，與 DEF-200-436「只擋指名模型」同義（F-06） |
 | `markers` | `quota_halt_marker.read_halt_marker()`、`quota_rush`、`sessionctl/park.py` | **只收 `account` 等於 `state.account_key` 者**；不符者交 §7 作廢流程；舊格式（無 `account`）依 R-4.1.7-5 |
-| `plan` | `sessionctl/qw_plan`（吃同一份 `state`） | stage、R、L、D、reset、cap |
+| `plan` | `sessionctl/qw_plan`（吃同一份 `state`） | `stage`、`r`（R）、`v`（V）、`limit`（L）、`d_min`（D）、`reset`（欄名照 `qw_plan.Plan` L25～L46 現查）。**`Plan` 沒有 cap 欄**（`k` 是保溫次數，不是派工上限）；`plan` 只經 §3.2 第 3～5 列影響**動作**，從不影響 `cap`（v1.2，QA 複審 N-06） |
 | `n_live` | `sessionctl/roster`（在飛代理數） | 給計畫序列與 `next_est` 缺省值 |
 | `next_est` | park `--next-est <pp>`（選填；缺省值見 §5） | 取代 `--why` |
 | `policy` | `quota_policy.load_policy()` | prepare／halt 百分比、`QV_WAIT_RESET_MIN` |
@@ -81,7 +81,7 @@ SD-0 於 2026-11-25 經 `claude-code-guide` 子代理查官方文件（`code.cla
 
 - `D`＝到短窗 reset 的分鐘數（`plan.D`）。
 - `QV_WAIT_RESET_MIN` 出廠＝`AUTOSDD_KEEPWARM_MINUTES`（同一個數，不另設；WHY：保溫間隔是主載具的叫醒粒度，等的上限等於一次保溫間隔時，最壞只多叫醒一次）。新鍵只在 `quota_policy` 的 `ENV_SPEC` 以「別名＝保溫分鐘」登記，數字現查 `--print-env-example`。
-- `cap`：`CONTINUE` 時＝`min(decision.cap, plan.cap)`（`decision.cap is None`＝不設限時取 `plan.cap`）；其他動作恆 0。動作只看原始讀數與標記；配速床、趕工戳記、清倉授權、平穩機制只改 `cap`，**不改動作**（F-08 ②③）。
+- `cap`（v1.2 改寫，N-06）：`CONTINUE` 時＝`decision.cap`，**唯一來源**（PRD R-4.1.6-2【v2.1.29 勘誤】「cap 的唯一來源＝派工閘同一條管線」逐字成立；v1.1 的 `min(decision.cap, plan.cap)` 刪除——`qw_plan.Plan` 無此欄，取兩者最小等於替實作棒開第二個 cap 來源，即 G11 的形狀）。`decision.cap is None`（free 帶不設限）⇒ 判決 `cap＝policy.max_fanout`，與 `pace_contract.payload()` 把 `None` 換成 `max_fanout` 的既有規則同一個數、同一來源（`quota_policy.py` `max_fanout`，`AUTOSDD_QUOTA_MAX_FANOUT`），不另設。其他動作恆 0。QuotaWall 計畫要收緊派工的唯一途徑是讓 `plan.stage` 命中第 3／4 列（改動作），不是改 cap。動作只看原始讀數與標記；配速床、趕工戳記、清倉授權、平穩機制只改 `cap`，**不改動作**（F-08 ②③）。
 - 帳號量不到但有讀數（`account_key is None` 而軸可用）：照讀數判，判決行 `acct=none`；標記依 R-4.1.7-5 舊格式規則處理。v1.0 第 1 列「帳號量不到且有任何軸 ≥ prepare ⇒ NODISPATCH」刪除（與 PRD 用語不一致、且與 R-4.1.5-1 衝突，F-02）。
 - 純函式：不讀檔、不讀環境、不讀牆鐘；全部經參數。
 
@@ -373,3 +373,11 @@ WP-QV 與 WP-AC 動同一組 quota 檔 ⇒ **串行**。SI 套件測試（`tools
 | F-19 不可用狀態的 `expires_at` | §3.3 |
 | F-25 `next_est` 缺省值 | §5 |
 | 主控代決 ①（SI 改讀判決） | §3.5 C18、§8、§10 |
+
+---
+
+## 15. v1.1 → v1.2 處置索引（QA 複審 `qa_spec2_report.md` 發現編號）
+
+| 發現 | 本檔落點 |
+|---|---|
+| N-06 `plan.cap` 不存在、與 PRD「cap 唯一來源」衝突 | §3.1 `plan` 列、§3.2 `cap` 段（只取 `decision.cap`；`None` ⇒ `max_fanout`） |
