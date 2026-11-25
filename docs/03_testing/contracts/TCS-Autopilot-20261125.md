@@ -100,6 +100,9 @@
 | AC-QV-10a | 單一家鎖：判決輸入原語的呼叫站點集合 == `RULING_INPUT_SITES` | `QV::SingleHouseTest::test_sites_equal_allowlist` |
 | AC-QV-10b | 鎖有鑑別力：合成樹多一個私有判讀站點 ⇒ 紅；白名單多一個不存在站點 ⇒ 紅；別名 import 仍可認 | `QV::SingleHouseTest::test_lock_discriminates` |
 | AC-QV-10c | 扁平檔（`tools/lib/*.py`）不 import `lib.sessionctl`（AST） | `QV::SingleHouseTest::test_flat_files_do_not_import_sessionctl` |
+| AC-QV-10d | 包裝入口可見（N-02）：合成樹新增一個函式，以 `park._pace_state(now)` 取數（不直接呼叫任何原語）⇒ 鎖紅並列出該檔＋函式；以 `quota_gate.pace_state`、`settled_quota`、`qw_wall.default_read` 各取一次同樣紅 | `QV::SingleHouseTest::test_wrapper_entry_sites_are_seen` |
+| AC-QV-10e | 門檻比較可見（N-02）：合成樹新增 `if axis.pct >= policy.prepare_pct:`（取數由參數傳入、無任何呼叫原語）⇒ 鎖紅；同一比較寫在 `quota_policy*.py`／`quota_ruling.py` 內 ⇒ 不計 | `QV::SingleHouseTest::test_threshold_compare_sites_are_seen` |
+| AC-QV-10f | 白名單形狀（N-09）：`RULING_INPUT_SITES` 每項帶非空 WHY 與分類（`B1`…`B7`／`ruling`／`diag`）；`diag` 項恰為 QVD §3.5.3 列舉的四處（watch `plan_fn`、`kw_wake`、`switchfacts` 的 `qw_plan.plan`、`qw_cli`）；改接後真樹上鎖綠 | `QV::SingleHouseTest::test_allowlist_entries_have_category_and_why` |
 | AC-QV-11a | 互動 auto：判決 `WAIT_RESET`、`stage=free`、ctx 小於 `AUTOSDD_KEEPWARM_MIN_CTX_TOKENS` ⇒ `wake_target` 回 `(win＋skew, "ruling_wait_reset", …)`，`skip_reason` 不使指令不掛 | `KW::RulingWaitResetTest::test_small_ctx_still_wakes_at_win` |
 | AC-QV-11b | 保溫帳 pings 已達 n* ⇒ `ruling_wait_reset` 仍單跳、不付費 ping | `KW::RulingWaitResetTest::test_cap_does_not_block_single_hop` |
 | AC-QV-11c | 無人窗口 ⇒ 不掛 keepwarm；哨兵判定（C11）對 `WAIT_RESET` 維持撞線等待並以 `win＋skew` 武裝 | `KW::RulingWaitResetTest::test_unattended_hands_to_sentinel` |
@@ -221,6 +224,9 @@
 | MU-QV-24 | 哨兵只對 `HALT_WEEKLY｜PARK` 維持等待（不含無人窗口的 `WAIT_RESET`） | AC-QV-11c |
 | MU-QV-25 | 宣稱守衛不考慮 AskUserQuestion 結果之前的判決 | AC-QV-06d |
 | MU-QV-26 | 判決 cap 改回 `min(decision.cap, getattr(plan, "cap", …))`，或 `decision.cap is None` 時改取 0／保溫次數 `plan.k`（N-06） | AC-QV-01g |
+| MU-QV-31 | 鎖的呼叫樣式拿掉 `pace_state`／`_pace_state`／`settled_quota`／`default_read`（回到 v1.1 只收直接原語） | AC-QV-10d |
+| MU-QV-32 | 拿掉 (ii) 門檻比較站點的收集 | AC-QV-10e |
+| MU-QV-33 | 白名單 `diag` 類放寬成「任何 C 站點」 | AC-QV-10f |
 | MU-QV-27 | `switchplan._wall` 恢復 `short_pct ≥ prepare_pct` 或 `stage∈{close,wall}` 判準（不看判決） | AC-QV-12a、AC-QV-12b |
 | MU-QV-28 | `switchplan` 把 `WAIT_RESET` 對映成 `PARK_UNTIL` | AC-QV-12a |
 | MU-QV-29 | `parkprobe.evaluate` 恢復 `cur < prepare_pct` 為唯一准許條件（不看判決） | AC-QV-13a |
@@ -343,4 +349,8 @@
 | 發現 | 本檔落點 |
 |---|---|
 | N-01 普查漏 parkearly／parkprobe 與 switchplan | REQ-AP-QV-01；AC-QV-12a～b、AC-QV-13a～b；MU-QV-27～30；E2E-AP-QV-04 D 段、E2E-AP-QV-05 斷言補 |
+| N-02 鎖看不見包裝入口與門檻比較 | AC-QV-10d、AC-QV-10e；MU-QV-31、32 |
+| N-07 `draining()` 誤列 B1 | QVD §3.5.2 B6（劃界文字；無 AT：不改接） |
+| N-09 白名單定義 | AC-QV-10f；MU-QV-33 |
+| N-10 `park --done` 上限 | QVD §3.5.2 B7（劃界文字；由 AC-QV-10f 的白名單形狀覆蓋） |
 | N-06 `plan.cap` 不存在 | AC-QV-01g 改寫；MU-QV-26 |
