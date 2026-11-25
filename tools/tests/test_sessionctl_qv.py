@@ -728,6 +728,111 @@ class RulingWaitResetTest(_Fenced):
         self.assertEqual(self._stop([], ruling=cont, ctx=5000), "")
 
 
+class QuotaCliE2ETest(_Fenced):
+    """E2E-AP-QV-01／07（真行程 `python tools/sessionctl.py quota`；sid 406454ea 03:46 錄製讀數以時間平移
+    重放：短窗 87%、reset＝now＋14 分；舊帳號 `34cd3507237f` 的 halt 標記原樣放進沙盒）。子行程繼承本類
+    圍籬（快取／痕跡／TEMP／`CLAUDE_CONFIG_DIR` 皆在 tmp），不讀真快取、不拿真憑證線上補量。"""
+
+    OLD, NEW = "34cd3507237f", "eaf5241f6fe2"
+
+    def _cache(self, axes, *, account=NEW, posture=None):
+        now = datetime.now().astimezone()
+        body = {"schema": quota_gate.quota_schema(), "source": "endpoint",
+                "measured_at": _iso(now), "account_key": account,
+                "axes": [{"kind": k, "pct": p, "resets_at": _iso(now + timedelta(minutes=m))}
+                         for k, p, m in axes]}
+        if posture is not None:
+            body["posture"] = posture
+        path = quota_gate.quota_cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(body), encoding="utf-8")
+
+    def _cli(self, *argv) -> tuple[int, str]:
+        import subprocess  # noqa: PLC0415
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("AUTOSDD_UNATTENDED", "CLAUDE_CODE_SESSION_ID")}
+        done = subprocess.run([sys.executable, str(_REPO_ROOT / "tools" / "sessionctl.py"),
+                               "quota", *argv], capture_output=True, text=True, encoding="utf-8",
+                              env=env, timeout=120, cwd=str(self.tmp))
+        return done.returncode, done.stdout + done.stderr
+
+    def test_e2e_ap_qv_01_time_shifted_replay(self):
+        """E2E-AP-QV-01：平移到「reset＝now＋14 分」⇒ `WAIT_RESET acct=eaf5241f6fe2`；平移到「reset 已過、
+        0%」⇒ `CONTINUE acct=eaf5241f6fe2`；舊帳號 halt 標記不當輸入、兩次皆無 halted 行。"""
+        now = datetime.now().astimezone()
+        quota_gate.write_halt_marker(SID, {"sid": SID, "binding": "five_hour", "at": _iso(now),
+                                           "reset_at": _iso(now + timedelta(minutes=30)),
+                                           "account": self.OLD})
+        self._cache([("five_hour", 87.0, 14), ("session", 87.0, 14), ("seven_day", 15.0, 9000)])
+        rc, out = self._cli("--sid", SID)
+        self.assertEqual(rc, 0, out)
+        fields = QR.parse(out)
+        self.assertEqual((fields["action"], fields["acct"]), (QR.WAIT_RESET, self.NEW), out)
+        self.assertTrue(out.startswith(QR.PREFIX), out)
+        self.assertNotIn("halted", out)
+        self._cache([("five_hour", 0.0, 300), ("session", 0.0, 300), ("seven_day", 16.0, 9000)])
+        rc, out = self._cli("--json", "--sid", SID)
+        self.assertEqual(rc, 0, out)
+        got = json.loads(out.strip().splitlines()[-1])
+        self.assertEqual((got["action"], got["acct"], got["deg"]), (QR.CONTINUE, self.NEW, None))
+        self.assertNotIn("halted", out)
+
+    def test_e2e_ap_qv_07_billing_and_unmeasured(self):
+        """E2E-AP-QV-07：三種錄製快取（缺 posture、無 credits、credits 可用）的 `billing`；快取缺席且
+        憑證量不到（`CLAUDE_CONFIG_DIR` 圍在 tmp）⇒ `CONTINUE deg=unmeasured`、`1 ≤ cap ≤ cap_prepare`、
+        `expires_at > now`（不是 cap 0、也不是不設限）。"""
+        axes = [("five_hour", 30.0, 200), ("seven_day", 10.0, 9000)]
+        for posture, want in ((None, "unknown"), ({"credits_present": False}, "subscription_only"),
+                              ({"credits_present": True, "fallback_available": True},
+                               "credits_fallback")):
+            with self.subTest(billing=want):
+                self._cache(axes, posture=posture)
+                rc, out = self._cli("--json")
+                self.assertEqual(rc, 0, out)
+                self.assertEqual(json.loads(out.strip().splitlines()[-1])["billing"], want)
+        quota_gate.quota_cache_path().unlink()
+        before = datetime.now().astimezone()
+        rc, out = self._cli("--json")
+        self.assertEqual(rc, 0, out)
+        got = json.loads(out.strip().splitlines()[-1])
+        self.assertEqual((got["action"], got["deg"]), (QR.CONTINUE, QR.DEG_UNMEASURED), out)
+        self.assertTrue(1 <= got["cap"] <= POLICY.cap_prepare, got)
+        self.assertGreater(datetime.fromisoformat(got["expires_at"]), before)
+
+
+class SingleHouseLockE2ETest(unittest.TestCase):
+    """E2E-AP-QV-10：沙盒 repo 副本（`tools/lib`、`tools/*.py`、本測試檔）植入一個私有判讀站點，真子行程
+    跑 `SingleHouseTest.test_sites_equal_allowlist` ⇒ rc≠0 且訊息列出該站點；移除後 rc 0。"""
+
+    def test_e2e_ap_qv_10_planted_site_turns_the_real_lock_red(self):
+        import shutil  # noqa: PLC0415
+        import subprocess  # noqa: PLC0415
+        root = Path(tempfile.mkdtemp(prefix="qv_e2e10_"))
+        self.addCleanup(shutil.rmtree, root, True)
+        ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
+        shutil.copytree(_REPO_ROOT / "tools" / "lib", root / "tools" / "lib", ignore=ignore)
+        for path in (_REPO_ROOT / "tools").glob("*.py"):
+            shutil.copy2(path, root / "tools" / path.name)
+        (root / "tools" / "tests").mkdir()
+        shutil.copy2(Path(__file__), root / "tools" / "tests" / Path(__file__).name)
+        planted = root / "tools" / "lib" / "zz_private_peek.py"
+        planted.write_text("import quota_gate\n\n\ndef peek(now):\n"
+                           "    return quota_gate.read_quota(now)\n", encoding="utf-8")
+
+        def run() -> subprocess.CompletedProcess:
+            return subprocess.run(
+                [sys.executable, "-m", "unittest",
+                 f"{Path(__file__).stem}.SingleHouseTest.test_sites_equal_allowlist"],
+                capture_output=True, text=True, encoding="utf-8", timeout=300,
+                cwd=str(root / "tools" / "tests"), env={**os.environ, "PYTHONPATH": ""})
+        red = run()
+        self.assertNotEqual(red.returncode, 0, red.stderr[-800:])
+        self.assertIn("tools/lib/zz_private_peek.py", red.stderr)
+        planted.unlink()
+        green = run()
+        self.assertEqual(green.returncode, 0, green.stderr[-1500:])
+
+
 class LocTest(unittest.TestCase):
     def test_pace_report_moved_out_of_hub(self):
         """AC-QV-08b：`pace_report` 不再存在於 `quota_gate`（hub 成員只縮不長）。"""
