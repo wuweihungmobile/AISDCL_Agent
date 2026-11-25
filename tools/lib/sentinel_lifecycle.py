@@ -550,19 +550,21 @@ def _leak_fence_jobs(backend) -> list[str] | None:
         return None
 
 
-def _live_armed(labels: list[str], since: float, projects_dir: Path | None) -> list[str]:
-    """`labels` 裡屬於「真 session 在 `since` 之後有對話記錄」者（判準唯一的家＝
-    `transcript_activity`；只認哨兵前綴的 label，其餘一律不算）。讀不動 ⇒ 空（量不到不脫罪）。"""
+def _live_armed(labels: list[str], since: float, projects_dir=None, oi_ledger=None) -> list[str]:
+    """`labels` 裡「真 session 在 `since` 後有對話記錄」或「真 driver 在 OI 帳本登記重排」者
+    （DEF-200-649；判準唯一的家＝`transcript_activity`）。讀不動 ⇒ 空（量不到不脫罪）。"""
     import transcript_activity  # noqa: PLC0415 — lazy：圍籬是 CLI／測試側，hook 鏈不載入
 
     sids = {session_of(label): label for label in labels if session_of(label)}
-    return sorted(sids[sid] for sid in transcript_activity.sessions_active_since(
-        list(sids), since, projects_dir))
+    return sorted({sids[sid] for sid in transcript_activity.sessions_active_since(
+        list(sids), since, projects_dir)} | transcript_activity.driver_rearmed_since(
+            labels, since, oi_ledger))
 
 
-def leak_fence(run, projects_dir: Path | None = None):
+def leak_fence(run, projects_dir: Path | None = None, oi_ledger: Path | None = None):
     """底線防護 ＋ **決定性**排程洩漏判死（M-04 A 面）。`projects_dir`＝逐字稿根目錄的注入縫
-    （預設 `claude_home()/projects`；測試不讀真實家目錄）。
+    （預設 `claude_home()/projects`；測試不讀真實家目錄）；`oi_ledger`＝OI 事件帳本的注入縫
+    （預設 repo 真帳本）。
 
     三件事，會讓 rc 變非零的只有第二件：
 
@@ -617,11 +619,11 @@ def leak_fence(run, projects_dir: Path | None = None):
         # 全套的互動 session 自己的哨兵）：另一個**真** session 在全套跑到一半合法武裝＝它的
         # 真實逐字稿在圍籬起點之後有對話記錄（`transcript_activity` 的尺）⇒ 只出聲、不判死；
         # 測試種下的假 job 沒有真實逐字稿，照舊判死。
-        live = _live_armed(leaked, started, projects_dir)
+        live = _live_armed(leaked, started, projects_dir, oi_ledger)
         leaked = [label for label in leaked if label not in live]
         if live:
-            print(f"[leak_fence] ℹ️  新增的 {len(live)} 支哨兵屬於圍籬期間有真實對話記錄的 session"
-                  f"（合法武裝，只出聲、不判死）：{'、'.join(live)}")
+            print(f"[leak_fence] ℹ️  新增的 {len(live)} 支排程屬於圍籬期間有真實對話記錄的 session"
+                  f"或 OI 帳本記載的真 driver 重排（合法武裝，只出聲、不判死）：{'、'.join(live)}")
         fence_rc = int(bool(leaked))
     if leaked:
         print(f"[leak_fence] ❌ 排程洩漏（決定性）：本次執行期間真排程器（載具＝"

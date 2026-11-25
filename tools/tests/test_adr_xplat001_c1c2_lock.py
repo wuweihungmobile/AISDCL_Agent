@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9699,
+    "test_adr_xplat001_c1c2_lock.py": 9712,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -646,7 +646,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 2001,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 274,
-    "test_context_budget_guard.py": 15981,
+    "test_context_budget_guard.py": 16047,
     "test_context_window_parity.py": 325,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 276,
@@ -3364,6 +3364,13 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "另四支掃描器測試各 +1～+3、本檔自身 +14。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/06_quality/CrossPlatform_R218_TestHygiene_Evidence.md。"),
+    ("R214", 189612, 189691, +79,  # round-label-ok r218d649
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE "
+     "的R214 名冊列承接] 同標籤第六十九列（D649：DEF-200-649 leak_fence 把真 driver 同時段重排的 "
+     "OpenItem 排程判成測試洩漏）：test_context_budget_guard.py +66（LeakFenceTest 三案：真 driver "
+     "重排只出聲、無帳本證據／他 label／非 driver／事件早於圍籬／帳本讀不到仍判死、帳本路徑字面鎖）"
+     "加本檔自身 +13。逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
+     "證據＝docs/06_quality/CrossPlatform_R218_TestHygiene_Evidence.md。"),
 )
 
 
@@ -3465,7 +3472,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (61100, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (61179, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3553,6 +3560,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "第六十六列（r218w5）+1040＝60802。"
         "第六十七列（r218w5fix）+56＝60858。"
         "第六十八列（r218hyg1）+242＝61100。"
+        "第六十九列（r218d649）+79＝61179。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -4193,6 +4201,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "HYG1：worktree 副本汙染掃描與沙盒 git 背景維護的回歸鎖："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok r218d649
+     "D649：leak_fence 真 driver 重排豁免回歸鎖："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -4368,10 +4380,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 415
+_REPIN_LOG_FROZEN_PREFIX_LEN = 416
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "c6cbbb8084d215892dfb9c5fe8ed8f90b8681943dad3405ea923b98004d67950")
+    "b5f0de457d915d08261a8bbb52c29e5ddc77c35fd73cd77f928941426dce4272")
 
 
 def repin_log_history_digest(
@@ -4628,6 +4640,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "c2a4ed4811f6", "f9de0b342063", "DEF-200-645"),  # round-label-ok r218w5ledger
     ("R214", "f9de0b342063", "6492c64c509f", "DEF-200-645"),  # round-label-ok r218w5fixledger
     ("R214", "6492c64c509f", "c6cbbb8084d2", "DEF-200-648"),  # round-label-ok r218hyg1ledger
+    ("R214", "c6cbbb8084d2", "b5f0de457d91", "DEF-200-649"),  # round-label-ok r218d649ledger
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

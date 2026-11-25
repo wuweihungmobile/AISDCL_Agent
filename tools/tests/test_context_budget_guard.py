@@ -14853,6 +14853,72 @@ class LeakFenceTest(unittest.TestCase):
         rc2, record2, _e, _o = self._fence_with([fake], projects, "fake-only")
         self.assertEqual((rc2, record2["leaked_jobs"]), (1, [fake]))
 
+    def _oi_ledger(self, label: str | None, by: str = "driver:OI-20261120-003",
+                   offset_seconds: float = 60) -> Path:
+        """造 OI 事件帳本（`tools/lib/sentinel_lifecycle.py::_driver_rearmed` 的判準來源）：
+        一列 `ev=drive`、`task=label`、`ts`＝現在＋offset；`label=None`＝空帳。"""
+        path = _tmpdir(self, "leak-fence-oi-") / "OpenItems_Event_Ledger.jsonl"
+        stamp = (datetime.now(UTC) + timedelta(seconds=offset_seconds)).isoformat()
+        row = {"ev": "drive", "id": "OI-20261120-003", "by": by, "ts": stamp, "task": label}
+        path.write_text("" if label is None else json.dumps(row) + "\nnot json\n", encoding="utf-8")
+        return path
+
+    def _fence_oi(self, labels: list[str], ledger: Path):
+        """同 `_fence_with`，但注入 OI 帳本（逐字稿根指向空目錄，排除 session 豁免路徑）。"""
+        projects = _tmpdir(self, "leak-fence-oi-projects-")
+        tmp = _tmpdir(self, "leak-fence-oi-tmp-")
+        backend = self._fence_backend([])
+        err, out = io.StringIO(), io.StringIO()
+
+        def _fake_run() -> int:
+            backend.jobs.extend(labels)
+            return 0
+
+        with unittest.mock.patch.object(tempfile, "gettempdir", return_value=str(tmp)), \
+                unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(tmp)}), \
+                contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            rc = sentinel_lifecycle.leak_fence(_fake_run, projects_dir=projects, oi_ledger=ledger)
+        record = json.loads((tmp / sentinel_lifecycle.LEAK_FENCE_LOG_NAME)
+                            .read_text(encoding="utf-8").splitlines()[-1])
+        return rc, record, err.getvalue(), out.getvalue()
+
+    def test_a_real_driver_rearm_recorded_in_the_oi_ledger_is_said_not_judged_dead(self) -> None:
+        """🔴 DEF-200-649（2026-11-24 23:21 pre-push 實證，OI 帳本第 221 列）：真 driver 在圍籬期間
+        自我重排 `AutoSDD_OpenItem_<id>_<時刻>`（無 session id），帳本有 `ev=drive`＋`by=driver:*`
+        ＋同 label ⇒ 只出聲、rc 0、痕跡記 `live_session_jobs`。"""
+        label = "AutoSDD_OpenItem_OI-20261120-003_202611250522"
+        rc, record, err, out = self._fence_oi([label], self._oi_ledger(label))
+        self.assertEqual(rc, 0, "真 driver 的合法重排被判洩漏＝推送被假紅擋住")
+        self.assertEqual((record["leaked_jobs"], record["live_session_jobs"], record["fence_rc"]),
+                         ([], [label], 0))
+        self.assertIn("不判死", out)
+        self.assertNotIn("排程洩漏", err)
+
+    def test_a_seeded_oi_shaped_job_without_ledger_evidence_is_still_a_leak(self) -> None:
+        """鑑別力：測試種的同名形 job——帳本無對應事件、事件 label 不同、`by` 非 driver、事件早於
+        圍籬起點——一律照舊判死；帳本讀不到（檔不存在）也不脫罪。"""
+        label = "AutoSDD_OpenItem_OI-20261120-003_202611250522"
+        other = "AutoSDD_OpenItem_OI-20261120-003_999999999999"
+        missing = _tmpdir(self, "leak-fence-oi-missing-") / "nope.jsonl"
+        for tag, ledger in (("empty", self._oi_ledger(None)),
+                            ("other-label", self._oi_ledger(other)),
+                            ("human", self._oi_ledger(label, by="human")),
+                            ("stale", self._oi_ledger(label, offset_seconds=-3600)),
+                            ("unreadable", missing)):
+            with self.subTest(tag):
+                rc, record, err, _out = self._fence_oi([label], ledger)
+                self.assertEqual((rc, record["leaked_jobs"]), (1, [label]))
+                self.assertIn(label, err)
+
+    def test_the_oi_ledger_path_literal_matches_the_openitems_params(self) -> None:
+        """字面相等鎖：`transcript_activity.OI_LEDGER_REL` 與 `openitems/params.py::LEDGER_REL`
+        是同一條路徑（平面匯入不能跨進該套件，改以文字鎖防漂移）。"""
+        import transcript_activity  # noqa: PLC0415
+
+        params = Path(sentinel_lifecycle.__file__).parent / "openitems" / "params.py"
+        self.assertIn(f'LEDGER_REL = "{transcript_activity.OI_LEDGER_REL}"',
+                      params.read_text(encoding="utf-8"))
+
     def test_unmeasurable_enumeration_is_said_out_loud_and_never_reds(self) -> None:
         """控制組（fail-open）：`list_jobs()` 回 `None`＝量不到 ⇒ **不判死**（沒有證據不能
         扣帽子，同 `_arm_sentinel` 對 `None` 的既有紀律），但必須出聲說「量不到」——把它

@@ -27,3 +27,11 @@
 - **判準現況**（`tools/lib/sentinel_lifecycle.py::leak_fence`）：判死＝`run()` 前後 `list_jobs("AutoSDD_")` 的差集，唯一豁免是 `_live_armed`——label 內含 session id 且該 session 在圍籬起點後有真實對話記錄。OpenItem label 沒有 session id（`session_of()` 回 None），結構上進不了豁免。
 - **能否在不放寬下區分**：能。測試種下的假 job 不會在**真** `OpenItems_Event_Ledger.jsonl` 留 `ev=drive` 事件（測試的帳本都在暫存根），而真 driver 重排必留。把「圍籬期間（`ts` ≥ 圍籬起點）、帳本記載由真 driver 登記的 `task` label」併進 `_live_armed` 的豁免（同樣只出聲不判死）即可：測試假 job 仍判死；沒有帳本證據的新增 job 仍判死；讀不到帳本一律不脫罪。
 - **處置**：判準住守衛面（`tools/lib/sentinel_lifecycle.py` 在〈守衛面准入〉清單內），本包不改。暴露證據已齊（真機 pre-push 實際發生＋帳本第 221 列），立案 DEF-200-649 為 open，承接＝另派守衛面專棒（需附本節判準與暴露證據，並照准入規則附 WHY）。
+
+## D 項：DEF-200-649 修復（D649）
+
+- **准入**：暴露證據＝OI 事件帳本第 221 列（`ev=drive`、2026-11-24 23:21:03）＋pre-push 實際被 leak_fence 判紅，符合〈守衛面准入〉「真實發生」。
+- **修法（消除成因）**：`sentinel_lifecycle.py` 新增 `_driver_rearmed(labels, since, ledger)`，併入 `leak_fence` 既有 `live` 豁免（同樣只出聲、不判死、痕跡記 `live_session_jobs`）。命中條件須同時成立：`ev=drive`、`by` 以 `driver:` 開頭、`task` 等於新增 label、`ts` ≥ 圍籬起點。人工 `by=human`、他 label、事件早於圍籬、空帳、檔不存在、壞行一律不脫罪。判準放在既有判準模組，不開第二套；`OI_LEDGER_REL` 與 `openitems/params.py::LEDGER_REL` 以文字鎖相等（該套件是 `from lib import` 脈絡，平面匯入不跨）。
+- **WHY 不是放寬**：測試的 OpenItem 帳本都在暫存根，從不寫真帳本的 drive 事件；真 driver 重排必寫。唯一能讓假 job 脫罪的方式是它自己寫進真 repo 帳本，那已不是測試洩漏。
+- **回歸鎖**：`tools/tests/test_context_budget_guard.py::LeakFenceTest` 新增三案。紅綠自證：暫時把併入行改成 `live += [] and …`，真 driver 重排案轉紅（`1 != 0`），還原後 13 案全綠。
+

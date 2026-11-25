@@ -315,6 +315,32 @@ def sessions_active_since(sids, since_epoch: float, projects_dir: Path | None = 
     return found
 
 
+#: OI 事件帳本；與 `openitems/params.py::LEDGER_REL` 相等（`LeakFenceTest` 文字鎖）。
+OI_LEDGER_REL = "docs/06_quality/OpenItems_Event_Ledger.jsonl"
+
+
+def driver_rearmed_since(labels, since_epoch: float, ledger: Path | None = None) -> set[str]:
+    """DEF-200-649：`labels` 中 `since_epoch` 之後由真 driver 在 OI 事件帳本（`ledger`）登記
+    重排者（`ev=drive`、`by=driver:*`、`task`＝該 label）。OpenItem label 沒有 session id，
+    進不了 `sessions_active_since`；測試種的假 job 不寫真帳本。讀不到／壞行 ⇒ 不算。"""
+    path = ledger or Path(__file__).resolve().parents[2] / OI_LEDGER_REL
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return set()
+    hit: set[str] = set()
+    for line in lines:
+        try:
+            ev = json.loads(line)
+            ok = (ev["ev"] == "drive" and ev["task"] in labels and ev["by"].startswith("driver:")
+                  and datetime.fromisoformat(ev["ts"]).timestamp() >= since_epoch)
+        except (ValueError, KeyError, TypeError, AttributeError):
+            continue
+        if ok:
+            hit.add(ev["task"])
+    return hit
+
+
 def _driver_kind(record: dict) -> str:
     """非合成的對話記錄回其種類（`assistant`／`human`／`auto-continuation`）；其餘回 `""`。
 
