@@ -101,6 +101,8 @@ def classify(state, now: datetime) -> dict:
         reset = _aware(axis.resets_at)
         if axis.kind in quota_policy.FALLBACK_KINDS:
             out["spend"].append(axis)
+        elif reset is None and axis.kind in SHORT_KINDS:
+            out["short"].append(axis)  # 短窗讀數在、reset 量不到 ⇒ 仍進第 3 列（判 NODISPATCH，F-07）
         elif reset is None or reset <= now:
             continue
         elif axis.kind in quota_policy.MODEL_SCOPED_KINDS or axis.kind in WEEKLY_KINDS \
@@ -147,6 +149,11 @@ def _retry_seconds(raw, now: datetime) -> float:
         return 0.0 if when is None else max(0.0, (when - now).total_seconds())
 
 
+def _latest(resets: list) -> datetime | None:
+    """所有達標短窗軸都翻頁才醒：取最晚者；任一軸 reset 量不到 ⇒ 整體量不到（不猜）。"""
+    return None if not resets or any(x is None for x in resets) else max(resets)
+
+
 def _three_way(win: datetime | None, now: datetime, wait_min: float) -> str:
     """第 3／5 列共用：reset 量不到 ⇒ NODISPATCH；D ≤ 等待上限 ⇒ WAIT_RESET；否則 PARK。"""
     if win is None:
@@ -167,7 +174,7 @@ def ruling(state, decision, *, model, policy, now: datetime, markers=(), plan=No
     plan_reset = getattr(plan, "reset", None)
     plan_win = None if plan_reset is None else datetime.fromtimestamp(plan_reset, now.tzinfo)
     shorts = [_aware(a.resets_at) for a in axes["short"]]
-    win_any = max(shorts) if shorts else plan_win
+    win_any = _latest(shorts) if shorts else plan_win
     wk_hits = [a for a in axes["weekly"]
                if a.pct >= policy.halt_pct and _model_weekly(a, model)]
     s_hits = [a for a in axes["short"] if a.pct >= policy.prepare_pct]
@@ -181,7 +188,7 @@ def ruling(state, decision, *, model, policy, now: datetime, markers=(), plan=No
             a.kind in quota_policy.MODEL_SCOPED_KINDS for a in wk_hits)
         why = "週額度已達停止門檻（或同帳號週軸 halt 標記未過期）：等週重置"
     elif s_hits or m_short or stage in ("close", "wall"):
-        win = (max(_aware(a.resets_at) for a in s_hits) if s_hits
+        win = (_latest([_aware(a.resets_at) for a in s_hits]) if s_hits
                else max(m_short) if m_short else plan_win)
         action = _three_way(win, now, wait_min)
         top = max((a.pct for a in s_hits), default=None)

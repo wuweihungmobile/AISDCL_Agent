@@ -22,6 +22,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -93,61 +94,64 @@ class RouteTest(unittest.TestCase):
 
 
 class ReadingTest(unittest.TestCase):
-    """tools/lib/sessionctl/park.py::prepare_hits／short_axes／reset_of：
-    只認伺服器原值（AT-PK-12～20）。"""
+    """park 的額度判準（AT-PK-12～20）。WP-QV（QVD §3.5 C6／C7）：`park.prepare_hits`／`reset_of`
+    已刪除，park 前置與 Stop 推回改讀**單一權威判決**（`quota_ruling.ruling`）；本類別把原 AT 的意圖
+    （只認伺服器原值、攤提墊高不算、週軸不走自動判準、壞讀數不命中、量不到≠量到零）改釘在判決上。"""
+
+    @staticmethod
+    def _rule(state, decision=None, **kw):
+        import quota_ruling as QR  # noqa: PLC0415
+        dec = decision or quota_policy.decide(state, NOW, _policy())
+        return QR.ruling(state, dec, model="fable", policy=_policy(), now=NOW, wait_min=15.0, **kw)
 
     def test_at_pk_12_amortised_band_is_not_a_hit(self) -> None:
-        """park.py：AMORT——五小時軸 23%，`decide` 因攤提把 band 墊成 prepare，但 raw 23%
-        不是快撞線；
-        吃 band 的實作會在此誤命中（先釘前置，夾具失效則整條無意義）。"""
-        now = NOW
-        state = _state(five=23.0, resets=(now + timedelta(minutes=43)).isoformat(),
-                       week_resets=(now + timedelta(minutes=8467)).isoformat())
-        decision = quota_policy.decide(state, now, quota_policy.DEFAULT_POLICY, 4.3, "n=84",
+        """AMORT——五小時軸 23%，`decide` 因攤提把 band 墊成 prepare，但 raw 23% 不是快撞線：判決動作
+        只看原始讀數（QVD §3.2 末），仍 CONTINUE（先釘前置，夾具失效則整條無意義）。"""
+        state = _state(five=23.0, resets=(NOW + timedelta(minutes=43)).isoformat(),
+                       week_resets=(NOW + timedelta(minutes=8467)).isoformat())
+        decision = quota_policy.decide(state, NOW, quota_policy.DEFAULT_POLICY, 4.3, "n=84",
                                        active_model="fable")
         five = next(r for r in decision.per_axis if r.axis.kind == "five_hour")
         self.assertEqual(five.band, "prepare")  # 前置：夾具真的重現「被墊高」
-        self.assertEqual(park.prepare_hits(state, quota_policy.DEFAULT_POLICY, now), [])
+        self.assertEqual(self._rule(state, decision).action, "CONTINUE")
 
     def test_at_pk_13_threshold_edges_match_pct_band(self) -> None:
-        """park.py：84.9／85.0／85.1 與 `pct_band` 逐格同義（不得自己再發明一把尺）。"""
+        """短窗原始讀數 ≥ prepare 才進第 3 列，與 `pct_band` 逐格同義（不得自己再發明一把尺）。"""
         pol = _policy()
-        for pct in [x / 2 for x in range(0, 201)]:
-            hit = bool(park.prepare_hits(_state(five=pct), pol, NOW))
+        for pct in [x / 2 for x in range(0, 191)]:
+            hit = self._rule(_state(five=pct, week=10.0)).action != "CONTINUE"
             band = quota_policy.pct_band(pct, pol) in ("prepare", "halt")
             self.assertEqual(hit, band, pct)
-        self.assertEqual(park.prepare_hits(_state(five=89.9), _policy(90.0), NOW), [])
-        self.assertTrue(park.prepare_hits(_state(five=90.0), _policy(90.0), NOW))
 
     def test_at_pk_14_17_weekly_axes_never_count(self) -> None:
-        """park.py：週軸／模型分軌 99% 但短窗 10% ⇒ []（週額度停工走 --at，不走自動判準）。"""
-        self.assertEqual(park.prepare_hits(_state(five=10.0, week=99.0), _policy(), NOW), [])
+        """週軸未達停止門檻（全模型 80%、分軌 80%）但短窗 10% ⇒ CONTINUE：週軸只在 ≥halt 時走第 2 列
+        （HALT_WEEKLY，週額度停工走 `--at`），不以 prepare 自動判 park。"""
+        self.assertEqual(self._rule(_state(five=10.0, week=80.0)).action, "CONTINUE")
 
     def test_at_pk_15_reset_of_takes_the_latest(self) -> None:
-        """park.py：兩短窗軸 reset 不同 ⇒ 取較晚者（所有達標軸都翻頁才醒）。"""
+        """兩短窗軸 reset 不同 ⇒ 判決 `win` 取較晚者（所有達標軸都翻頁才醒）。"""
         later = (RESET + timedelta(minutes=30)).isoformat()
         state = _state(axes=(quota_policy.Axis("five_hour", 90.0, RESET.isoformat()),
                              quota_policy.Axis("session", 90.0, later)))
-        hits = park.prepare_hits(state, _policy(), NOW)
-        self.assertEqual(len(hits), 2)
-        self.assertEqual(park.reset_of(hits), datetime.fromisoformat(later))
+        r = self._rule(state)
+        self.assertEqual(r.action, "PARK")
+        self.assertEqual(datetime.fromisoformat(r.win), datetime.fromisoformat(later))
 
     def test_at_pk_16_bad_readings_are_not_hits(self) -> None:
-        """park.py：NaN／inf／bool／naive／過去／None 的軸不命中；NaN 不得沿用 pct_band 的
-        fail-closed。"""
+        """NaN／inf／bool／naive／過去／None 的軸不命中第 3 列；NaN 不得沿用 pct_band 的 fail-closed。"""
         past = (NOW - timedelta(minutes=1)).isoformat()
         for pct, resets in ((float("nan"), RESET.isoformat()), (float("inf"), RESET.isoformat()),
                             (True, RESET.isoformat()), (95.0, "2026-11-15T20:00:00"),
                             (95.0, None), (95.0, past)):
             with self.subTest(pct=pct, resets=resets):
                 state = _state(axes=(quota_policy.Axis("five_hour", pct, resets),))
-                hits = park.prepare_hits(state, _policy(), NOW)
-                self.assertEqual(hits, [])
-                self.assertIsNone(park.reset_of(hits))
+                self.assertNotIn(self._rule(state).action, ("PARK", "WAIT_RESET"))
 
     def test_at_pk_18_unmeasured_is_none_not_empty(self) -> None:
-        """park.py：量不到（axes==()）回 None——量不到≠量到零，呼叫端要能分辨。"""
-        self.assertIsNone(park.prepare_hits(_state(axes=()), _policy(), NOW))
+        """量不到（axes==()）≠量到零：判決 CONTINUE 但帶 `deg=unmeasured`（呼叫端要能分辨）。"""
+        r = self._rule(_state(axes=()))
+        self.assertEqual((r.action, r.degraded), ("CONTINUE", True))
+        self.assertFalse(self._rule(_state(five=0.0, week=0.0)).degraded)
 
     def test_at_pk_19_parity_with_quota_gate(self) -> None:
         """park.py：短窗判準常數與 quota_gate 同值（兩家各算各的會漂移）。"""
@@ -193,9 +197,13 @@ class _Fence(unittest.TestCase):
         for d in (self.tdir, self.hdir, self.bdir):
             d.mkdir()
         self.env = {"AUTOSDD_HANDOFF_DIR": str(self.hdir)}
+        # QVD §3.2 第 3 列（WP-QV）：事故夾具（98%、43 分後 reset）在出廠 `QV_WAIT_RESET_MIN`
+        # （＝`AUTOSDD_KEEPWARM_MINUTES` 45）下判 `WAIT_RESET`（保溫等重置、不 park）。本檔測的是
+        # park 路徑本身，故把等待上限壓到下限 15（D=43 > 15 ⇒ 判決 `PARK`）；45 下不 park 的那一格
+        # 另由 `StopVerdictTest.test_qv_wait_reset_is_not_pushed_to_park` 釘住。
         patch = mock.patch.dict(os.environ, {
             "AUTOSDD_TRACE_DIR": str(self.tdir), "AUTOSDD_HANDOFF_DIR": str(self.hdir),
-            "AUTOSDD_HANDBACK_DIR": str(self.bdir)})
+            "AUTOSDD_HANDBACK_DIR": str(self.bdir), "AUTOSDD_KEEPWARM_MINUTES": "15"})
         patch.start()
         self.addCleanup(patch.stop)
 
@@ -262,8 +270,8 @@ class StopVerdictTest(_Fence):
         """park.py：事故回放（98%、43 分後 reset、無標記）⇒ 推回，給 park 與 --done 兩個出口，
         且不叫人回舊視窗。"""
         text = self.verdict()
-        for needle in ("python tools/sessionctl.py park", "park --done --why", "pp",
-                       "沒有任何續航憑證"):
+        for needle in ("python tools/sessionctl.py park", "park --done --why",
+                       "QUOTA_VERDICT=PARK ", "沒有任何續航憑證"):
             self.assertIn(needle, text)
         self.assertNotIn("%", text)
         self.assertNotIn("在這個視窗說一聲", text)
@@ -274,10 +282,20 @@ class StopVerdictTest(_Fence):
         判準。"""
         # QuotaWall Q4：總入口先問 `quotawall.plan`；額度量不到（stage none）才落到既有 park 判準
         # （S-16）。這裡把額度讀數圍成「量不到」，不讀真實額度。
+        # WP-QV（QVD C2／C7）：閒置側先看**判決**；判決 PARK（stage 非 close）才落到 park 判準。
+        snap = SimpleNamespace(plan=SimpleNamespace(stage="free"),
+                               ruling=SimpleNamespace(action="PARK"))
         with (mock.patch("lib.sessionctl.qw_wall.default_read", return_value=None),
+              mock.patch("lib.sessionctl.qw_verdict.snapshot", return_value=snap),
               mock.patch.object(park, "stop_verdict", return_value="PARK-REASON") as fake):
             self.assertEqual(converge.stop_verdict({"session_id": SID}, {}), "PARK-REASON")
             fake.assert_called_once()
+
+    def test_qv_wait_reset_is_not_pushed_to_park(self) -> None:
+        """QVD C7（AC-QV-11e 末句）：出廠等待上限 45 分下，事故讀數（98%、43 分後 reset）判
+        `WAIT_RESET` ⇒ park 閘不推（推主控掛保溫是 `keepwarm.stop_verdict` 的事），也不落推回痕跡。"""
+        self.assertEqual(self.verdict(env={"AUTOSDD_KEEPWARM_MINUTES": "45"}), "")
+        self.assertNotIn("park_stop_block", [t["event"] for t in self.traces()])
 
     def test_at_pk_22_valid_h_marker_passes(self) -> None:
         """park.py：有效 H 標記（憑證非空、未過期）⇒ 放行。"""
@@ -329,7 +347,8 @@ class StopVerdictTest(_Fence):
     def test_at_pk_18b_unmeasured_is_traced(self) -> None:
         """park.py：量不到不推回，但落 `park_verdict_unmeasured`（失效可偵測，不靜默）。"""
         self.assertEqual(self.verdict(read_quota=lambda _n: _state(axes=())), "")
-        self.assertEqual([t["event"] for t in self.traces()], ["park_verdict_unmeasured"])
+        # 判決的計畫輸入（qw_plan）另落 `quotawall_unmeasured`；本格只鎖 park 自己的那一列。
+        self.assertIn("park_verdict_unmeasured", [t["event"] for t in self.traces()])
 
     def test_at_pk_30_non_credentials_are_pushed_back(self) -> None:
         """park.py：fired／cancelled／failed／skipped、sid 不符、過 valid_until、空憑證、壞 JSON ⇒
@@ -664,21 +683,23 @@ class ParkCliTest(_CliFence):
         self.assertEqual(self.order, [])
 
     def test_at_pk_46_weekly_only_needs_explicit_at(self) -> None:
-        """park_cli.py：只有週軸高 ⇒ rc 4 指向 `--at`；`--at` 缺 why／why 太短／過去／超過 8 天 ⇒
-        rc 2；
-        合格的 `--at` 走 H，觸發時刻＝`--at`（週額度停工的唯一明示出口）。"""
-        weekly = lambda _n: _state(five=10.0, week=99.0)  # noqa: E731
-        rc, _out, err = self.run_cli(quota=weekly)
-        self.assertEqual(rc, 4)
-        self.assertIn("--at", err)
+        """park_cli.py（WP-QV 改寫，QVD C6／§5）：週軸未達停止門檻（99% < halt）⇒ 判決 CONTINUE ⇒
+        即使帶 `--at` 也 rc 4（`--at` 須判決 HALT_WEEKLY 或 PARK）；週軸達 halt ⇒ `HALT_WEEKLY` ⇒
+        `--at` 過去／超過 8 天 rc 2、`--at` 帶已退役的 `--why` rc 2；合格的 `--at`（說明改 `--note`）
+        走 H，觸發時刻＝`--at`。"""
+        below = lambda _n: _state(five=10.0, week=99.0)  # noqa: E731
         at = (NOW + timedelta(days=2)).isoformat()
-        for argv in (["--at", at], ["--at", at, "--why", "七個字的原因啊"],
-                     ["--at", (NOW - timedelta(hours=1)).isoformat(), "--why", "足夠長的原因說明"],
-                     ["--at", (NOW + timedelta(days=9)).isoformat(), "--why", "足夠長的原因說明"]):
+        rc, _out, err = self.run_cli("--at", at, quota=below)
+        self.assertEqual(rc, 4)
+        self.assertIn("QUOTA_VERDICT=CONTINUE", err)
+        weekly = lambda _n: _state(five=10.0, week=100.0)  # noqa: E731
+        for argv in (["--at", at, "--why", "足夠長的原因說明"],
+                     ["--at", (NOW - timedelta(hours=1)).isoformat()],
+                     ["--at", (NOW + timedelta(days=9)).isoformat()]):
             with self.subTest(argv=argv):
                 self.assertEqual(self.run_cli(*argv, quota=weekly)[0], 2)
         self.assertEqual(self.order, [])
-        self.assertEqual(self.run_cli("--at", at, "--why", "週額度用完等重置", quota=weekly)[0], 0)
+        self.assertEqual(self.run_cli("--at", at, "--note", "週額度用完等重置", quota=weekly)[0], 0)
         self.assertEqual(datetime.fromisoformat(park.read_marker(SID)["primary_wake_at"]),
                          datetime.fromisoformat(at).replace(second=0, microsecond=0)
                          + timedelta(minutes=1 if datetime.fromisoformat(at).second else 0))
@@ -689,22 +710,23 @@ class ParkCliTest(_CliFence):
         WHY：2026-11-16 真機——主控在 84% 判斷下一棒放不下要停工，卻被固定門檻擋下；
         「放不下」是相對下一棒大小的判斷。短窗 reset 量不到時即使帶 why 也拒絕。"""
         low = lambda _n: _state(five=84.0)  # noqa: E731
-        for argv in ([], ["--why", "七個字的原因啊"]):
-            with self.subTest(argv=argv):
-                rc, _out, err = self.run_cli(*argv, quota=low)
-                self.assertEqual(rc, 4)
-                self.assertIn("--why", err)
+        rc, _out, err = self.run_cli(quota=low)
+        self.assertEqual(rc, 4)
+        self.assertIn("--next-est", err, "CONTINUE 拒絕要指路 --next-est（AT-PK-46b 改寫，QVD §6）")
+        self.assertNotIn("--why", err)
+        rc, _out, err = self.run_cli("--why", "下一棒約二十點放不下", quota=low)
+        self.assertEqual(rc, 2, "--why 已退役（R-4.1.6-5）")
+        self.assertIn("--next-est", err)
         self.assertEqual(self.order, [])
         blind = lambda _n: _state(five=84.0, resets=None)  # noqa: E731
-        rc, _out, err = self.run_cli("--why", "下一棒約二十點放不下", quota=blind)
-        self.assertEqual(rc, 4)
-        self.assertIn("不假設 5 小時", err)
+        rc, _out, err = self.run_cli("--next-est", "99", quota=blind)
+        self.assertEqual(rc, 4, "短窗 reset 量不到：即使下一棒放不下也不登記（不猜時刻）")
+        self.assertIn("QUOTA_VERDICT=", err)
         self.assertEqual(self.order, [])
-        self.assertEqual(self.run_cli("--why", "下一棒約二十點放不下", quota=low)[0], 0)
+        self.assertEqual(self.run_cli("--next-est", "99", quota=low)[0], 0)
         marker = park.read_marker(SID)
         self.assertEqual(datetime.fromisoformat(marker["primary_wake_at"]),
                          datetime(2026, 11, 15, 20, 2, tzinfo=UTC))
-        self.assertEqual((marker["axis"]["pct"], marker["why"]), (84.0, "下一棒約二十點放不下"))
 
     def test_at_pk_47_done_marker(self) -> None:
         """park_cli.py：`--done --why`（8 字）寫 DONE 標記、有效到最早短窗 reset；7 字 rc 2；無人
@@ -761,8 +783,7 @@ class ParkCliTest(_CliFence):
         self.run_cli()
         old = park.read_marker(SID)["jobs"][0]["label"]
         at = (NOW + timedelta(days=1)).isoformat()
-        low = lambda _n: _state(five=10.0)  # noqa: E731
-        self.assertEqual(self.run_cli("--at", at, "--why", "改成明天一早再醒來", quota=low)[0], 0)
+        self.assertEqual(self.run_cli("--at", at, "--note", "改成明天一早再醒來")[0], 0)
         new = park.read_marker(SID)["jobs"][0]["label"]
         self.assertNotEqual(old, new)
         self.assertEqual(self.backend.jobs, {new})

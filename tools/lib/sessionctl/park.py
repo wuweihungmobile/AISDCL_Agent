@@ -331,7 +331,7 @@ def stop_verdict(payload: dict, env=None, *, now: datetime | None = None, read_q
                      {"route": marker["route"], "status": marker["status"]}, why=why)
         import quota_ruling  # noqa: PLC0415
 
-        return _block_text(quota_ruling.line(r), r.action, now, reset, why)
+        return _block_text(quota_ruling.head(r), r.action, now, reset, why)  # 無 % 字樣
     except Exception:  # noqa: BLE001 — fail-open（P0）
         return ""
 

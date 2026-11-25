@@ -121,6 +121,9 @@ class VerdictTest(unittest.TestCase):
         self.assertEqual(_rule(_state(_short(90, 120))).action, QR.PARK)
         no_reset = _rule(_state(_axis("five_hour", 90, None)), plan=qw_plan.Plan("close"))
         self.assertEqual(no_reset.action, QR.NODISPATCH, "短窗 reset 量不到不出 PARK（F-07）")
+        bare = _rule(_state(_axis("five_hour", 90, None), _week(10)))
+        self.assertEqual((bare.action, bare.win), (QR.NODISPATCH, None),
+                         "短窗讀數 ≥ prepare 而 reset 缺：不得因軸被濾掉而落 CONTINUE（F-07）")
         stage = _rule(_state(_short(40, 100)), plan=qw_plan.Plan("close", reset=(
             NOW + timedelta(minutes=100)).timestamp()))
         self.assertEqual(stage.action, QR.PARK, "stage close 走第 3 列")
