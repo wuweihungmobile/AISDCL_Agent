@@ -55,7 +55,7 @@
 | REQ-AP-G1-02 | 推送閘：淨額 > 0 ⇒ 產同輪修復任務書、前綴推送可達；判決非 `CONTINUE` 不推 | APD §4.2、§4.3 | 待實作 |
 | REQ-AP-G1-03 | `AUTOSDD_NET_RATCHET_OFF` 在 `CLAUDECODE` 或 `AUTOSDD_UNATTENDED` 下無效並出聲 | APD §5 | 待實作 |
 | REQ-AP-G1-04 | 提交／推送期治理閘逃生口族（`AUTOSDD_NET_RATCHET_OFF`、`AUTOSDD_SNAPSHOT_GATE_OFF`）一律經單一述詞 `human_escape.honored()`；族名直接環境讀取只准出現在該檔；族常數只增不減 | 主控代決 ②；APD §5；SelfImproving_Ledger_DB_PRD AC-LD-12-3 註記 | 待實作（快照閘本身未實作，見 §5 OI 需求） |
-| REQ-AP-ASK-01 | AskUserQuestion 類別閘：只放行 `[IRREVERSIBLE]`（必填系統與原因）、`[COST]`（必填服務與預估 > 50 美元；服務為 Claude／Anthropic 且 `billing=subscription_only` 擋）、`[K1]`（須寫「須掌舵者親打」、選項不含「核准」）；「要不要＋可代決動作」句型阻斷（不論標籤）；名詞不阻斷；無人窗口全擋；放行落 `ask_allowed` | R-4.5.12-3～5【v2.1.29 勘誤】；APD §7 | 待實作 |
+| REQ-AP-ASK-01 | AskUserQuestion 類別閘：只放行 `[IRREVERSIBLE]`（必填系統與原因）、`[COST]`（必填服務與預估 > 50 美元；服務為 Claude／Anthropic 且 `billing=subscription_only` 擋）、`[K1]`（須寫「須掌舵者親打」、選項不含「核准」）；「要不要＋可代決動作」句型阻斷（不論標籤；v1.2：動作詞須為被問的對象＝疑問詞之後 12 字元內的複合動作詞，單詞「繼續」不收；阻斷訊息不得把不可復原或花錢的動作交給模型決定）；名詞不阻斷；無人窗口全擋；放行落 `ask_allowed` | R-4.5.12-3～5【v2.1.29 勘誤】；APD §7 | 待實作 |
 | REQ-AP-ASK-02 | `check_pending_handoff` 推回文案改「先代決、三類才問」；描述分類規則／複述掌舵者定義的句子不判交棒；`check_claim_provenance` 不把敘述過去事件的「被擋／擋下」當本場宣稱 | R-4.5.12-1；APD §7、§13 | 待實作 |
 | REQ-AP-CI-01 | `ci_wait` 認得排隊逾時（`queue_timeout`）並自動重跑（同 sha ≤ 2 次） | APD §6 | 待實作 |
 | REQ-AP-OW-01 | 舊視窗關閉事件驅動＋指數退避（上限 12 小時）；本 PRD 機制全部訊息家不含「請手動」「請您」「手動跑」「請人」（例外逐筆列名） | R-4.5.12-1／2；APD §8 | 待實作 |
@@ -107,17 +107,17 @@
 | AC-QV-11b | 保溫帳 pings 已達 n* ⇒ `ruling_wait_reset` 仍單跳、不付費 ping | `KW::RulingWaitResetTest::test_cap_does_not_block_single_hop` |
 | AC-QV-11c | 無人窗口 ⇒ 不掛 keepwarm；哨兵判定（C11）對 `WAIT_RESET` 維持撞線等待並以 `win＋skew` 武裝 | `KW::RulingWaitResetTest::test_unattended_hands_to_sentinel` |
 | AC-QV-11d | 模式非 auto 或 `AUTOSDD_KEEPWARM_OFF` ⇒ 判決理由句含「不會在重置後自動叫醒」；`check_pending_handoff` 半路停工判準把該句視為合法換手標記 | `KW::RulingWaitResetTest::test_no_carrier_is_said`、`PH::AutopilotWordingTest::test_no_carrier_sentence_is_legit_stop` |
+| AC-QV-11e | 掛載推動者（N-05）：判決 `WAIT_RESET`＋ctx 小於 `AUTOSDD_KEEPWARM_MIN_CTX_TOKENS`＋`background_tasks` 無 running 項 ⇒ `keepwarm.stop_verdict` 回非空推回文字（含 `keepwarm --sid` 與判決行）；同條件改 `no_usage`（ctx 量不到）、或保溫帳 `pings ≥ n*` ⇒ 仍推回；`background_tasks` 只有 running 的 watch（無 keepwarm）⇒ 仍推回；有 running keepwarm ⇒ 不推；`stop_hook_active` ⇒ 不推；`park.stop_verdict` 對同一 payload 回空 | `KW::RulingWaitResetTest::test_stop_pushes_keepwarm_on_wait_reset_despite_small_ctx` |
+| AC-QV-11f | 前四項仍豁免：同 AC-QV-11e 條件但 `AUTOSDD_UNATTENDED`／模式非 auto／`AUTOSDD_KEEPWARM_OFF`／已交棒 ⇒ 不推；判決非 `WAIT_RESET` ⇒ 回到原判準（小上下文不推） | `KW::RulingWaitResetTest::test_stop_first_four_still_exempt` |
+| AC-QV-12a | 換手計畫不出 PARK（N-01 ②）：E2 讀數（短窗 87%、D=14、`stage=free`）組出的判決 `WAIT_RESET` 餵 `switchplan.decide` ⇒ `action == STAY`、`reason` 含 `wait_reset`、`flags.keepwarm`，且**不是** `PARK_UNTIL`／`PARK_POLL` | `QV::ConsumerTest::test_switchplan_wait_reset_never_parks` |
+| AC-QV-12b | 換手計畫依判決對映：`PARK` ⇒ `PARK_UNTIL` 目標＝`win`（D>6 小時 ⇒ `PARK_POLL`）；`HALT_WEEKLY` ⇒ `PARK_POLL` 目標＝`wk`；`HALT_WEEKLY wk=none`（spend）⇒ `STAY spend_limit`；`CONTINUE`／`NODISPATCH` ⇒ 不由額度列命中；週軸 80%（≥ prepare、< halt）而判決 `CONTINUE` ⇒ 不出 PARK（舊判準以 prepare 判週軸）；取數失敗（`action=None`）⇒ 不出 PARK；`switchplan.Quota` 無 `short_pct`／`weekly_pct`／`prepare_pct` 欄（結構斷言） | `QV::ConsumerTest::test_switchplan_maps_ruling_actions` |
+| AC-QV-13a | park 提前恢復受判決約束（N-01 ①）：park 標記 `parked_pct=92`、當下讀數 80（< prepare、比基準低 12pp）、但 `plan.stage=close` ⇒ 判決 `PARK` ⇒ `parkearly.tick` 不呼叫 `fire_early`（以縫計數 0）、痕跡 `park_early_probe` 帶 `action=PARK` | `QV::ConsumerTest::test_parkearly_respects_park_ruling` |
+| AC-QV-13b | 判決 `CONTINUE` 且讀數比基準低 ≥ 5pp ⇒ fire 一次；判決 `CONTINUE` 但只低 3pp ⇒ 不 fire（遲滯閘保留）；判決 `CONTINUE deg=unmeasured` ⇒ 不 fire；`parkprobe.evaluate` 原始碼不再引用 `prepare_pct`（AST） | `QV::ConsumerTest::test_parkearly_fires_only_on_continue_with_drop` |
 
 ### 2.2 AC 換帳號（`QV::AcctSwitchTest`）
 
 | AC | 判準 | AT 座標 |
 |---|---|---|
-| AC-QV-12a | 換手計畫不出 PARK（N-01 ②）：E2 讀數（短窗 87%、D=14、`stage=free`）組出的判決 `WAIT_RESET` 餵 `switchplan.decide` ⇒ `action == STAY`、`reason` 含 `wait_reset`、`flags.keepwarm`，且**不是** `PARK_UNTIL`／`PARK_POLL` | `QV::ConsumerTest::test_switchplan_wait_reset_never_parks` |
-| AC-QV-12b | 換手計畫依判決對映：`PARK` ⇒ `PARK_UNTIL` 目標＝`win`（D>6 小時 ⇒ `PARK_POLL`）；`HALT_WEEKLY` ⇒ `PARK_POLL` 目標＝`wk`；`HALT_WEEKLY wk=none`（spend）⇒ `STAY spend_limit`；`CONTINUE`／`NODISPATCH` ⇒ 不由額度列命中；週軸 80%（≥ prepare、< halt）而判決 `CONTINUE` ⇒ 不出 PARK（舊判準以 prepare 判週軸）；取數失敗（`action=None`）⇒ 不出 PARK；`switchplan.Quota` 無 `short_pct`／`weekly_pct`／`prepare_pct` 欄（結構斷言） | `QV::ConsumerTest::test_switchplan_maps_ruling_actions` |
-| AC-QV-13a | park 提前恢復受判決約束（N-01 ①）：park 標記 `parked_pct=92`、當下讀數 80（< prepare、比基準低 12pp）、但 `plan.stage=close` ⇒ 判決 `PARK` ⇒ `parkearly.tick` 不呼叫 `fire_early`（以縫計數 0）、痕跡 `park_early_probe` 帶 `action=PARK` | `QV::ConsumerTest::test_parkearly_respects_park_ruling` |
-| AC-QV-13b | 判決 `CONTINUE` 且讀數比基準低 ≥ 5pp ⇒ fire 一次；判決 `CONTINUE` 但只低 3pp ⇒ 不 fire（遲滯閘保留）；判決 `CONTINUE deg=unmeasured` ⇒ 不 fire；`parkprobe.evaluate` 原始碼不再引用 `prepare_pct`（AST） | `QV::ConsumerTest::test_parkearly_fires_only_on_continue_with_drop` |
-| AC-QV-11e | 掛載推動者（N-05）：判決 `WAIT_RESET`＋ctx 小於 `AUTOSDD_KEEPWARM_MIN_CTX_TOKENS`＋`background_tasks` 無 running 項 ⇒ `keepwarm.stop_verdict` 回非空推回文字（含 `keepwarm --sid` 與判決行）；同條件改 `no_usage`（ctx 量不到）、或保溫帳 `pings ≥ n*` ⇒ 仍推回；`background_tasks` 只有 running 的 watch（無 keepwarm）⇒ 仍推回；有 running keepwarm ⇒ 不推；`stop_hook_active` ⇒ 不推；`park.stop_verdict` 對同一 payload 回空 | `KW::RulingWaitResetTest::test_stop_pushes_keepwarm_on_wait_reset_despite_small_ctx` |
-| AC-QV-11f | 前四項仍豁免：同 AC-QV-11e 條件但 `AUTOSDD_UNATTENDED`／模式非 auto／`AUTOSDD_KEEPWARM_OFF`／已交棒 ⇒ 不推；判決非 `WAIT_RESET` ⇒ 回到原判準（小上下文不推） | `KW::RulingWaitResetTest::test_stop_first_four_still_exempt` |
 | AC-AC-01a | 三種持久狀態新寫入 schema 必有 `account`；量不到 ⇒ `null`＋出聲 | `QV::AcctSwitchTest::test_writes_carry_account` |
 | AC-AC-02a | 標記 `34cd3507237f`、快取 `eaf5241f6fe2` ⇒ 改名 `.void-<ts>`、`account_switch` 一列、出聲一次、`--pace` 不印 halted | `QV::AcctSwitchTest::test_mismatch_voids_marker` |
 | AC-AC-02b | 舊格式標記＋同軸讀數低於門檻 ⇒ 作廢；高於 ⇒ 保留並補寫 `account` | `QV::AcctSwitchTest::test_legacy_marker_by_reading` |
@@ -174,10 +174,12 @@
 | AC-ASK-01d | `[COST]`＋`服務：Claude`：`billing=subscription_only` ⇒ 擋；`credits_fallback`／`api_key`／`unknown` 且 `預估：80 美元`、問題含「啟用超額使用額度」⇒ 放行；`預估：50 美元` ⇒ 擋（門檻嚴格大於） | `HK::AskGateTest::test_cost_claude_by_billing_and_threshold` |
 | AC-ASK-01e | `[COST]`＋`服務：GitHub Actions`＋`預估：60 美元`、`billing=subscription_only` ⇒ 放行（非 Claude 服務不讀 billing，F-11 ②）；缺 `服務：` ⇒ 擋 | `HK::AskGateTest::test_cost_non_claude_ignores_billing` |
 | AC-ASK-01f | `[K1]` 且含「須掌舵者親打」⇒ 放行；選項含「核准」⇒ 擋；缺字樣 ⇒ 擋 | `HK::AskGateTest::test_k1_hint_only` |
-| AC-ASK-01g | 任一類標籤＋可代決句型（例：`[IRREVERSIBLE] 系統：本機；不可復原原因：…；要不要 park？`）⇒ 擋；同標籤只含名詞「park」而無「要不要／是否…」句型 ⇒ 不因句型擋 | `HK::AskGateTest::test_self_decide_pattern_overrides_tag` |
+| AC-ASK-01g | 任一類標籤＋可代決句型（例：`[IRREVERSIBLE] 系統：本機；不可復原原因：…；要不要 park？`）⇒ 擋，且訊息為判準 4 文案（含「請改寫問句、去掉可代決的子問題」與命中的問句、**不含**「由你代決」「依最適方案決定」）；同標籤只含名詞「park」而無「要不要／是否…」句型 ⇒ 不因句型擋 | `HK::AskGateTest::test_self_decide_pattern_overrides_tag` |
+| AC-ASK-01k | 正例（N-04）：`[IRREVERSIBLE] 系統：GitHub；不可復原原因：push --force 覆寫遠端歷史。是否繼續？` ⇒ 放行並落 `ask_allowed`；`[COST] 服務：GitHub Actions；預估：60 美元。是否繼續？` ⇒ 放行；`[IRREVERSIBLE] 系統：GitHub；不可復原原因：…。是否執行 force push 覆寫遠端歷史（完成後主控會 park）？`（動作詞在疑問詞 12 字元之外）⇒ 放行；控制組 `[IRREVERSIBLE] …。是否繼續跑？` ⇒ 擋 | `HK::AskGateTest::test_labeled_continue_question_allowed` |
+| AC-ASK-01l | 阻斷訊息三分（N-04）：判準 2／3／4 三種訊息皆含「在得到回答之前，不得執行」；判準 2（無標籤）訊息含「若它屬於下列三類，請補上標籤」，且「代決」只出現在「不屬於就」之後的子句；判準 3 訊息指出缺哪一欄；判準 3／4 訊息不含「由你代決」「依最適方案決定」（整題授權語） | `HK::AskGateTest::test_block_messages_never_delegate_irreversible` |
 | AC-ASK-01h | 舊類別標籤 `[BIZ]`／`[SECRET]`／`[VISUAL]`／`[HARNESS]`、無標籤 ⇒ 擋 | `HK::AskGateTest::test_retired_tags_blocked` |
 | AC-ASK-01i | `AUTOSDD_UNATTENDED` ⇒ 任何問題擋（含三類必填齊全者） | `HK::AskGateTest::test_unattended_blocks_all` |
-| AC-ASK-01j | 動作詞表只增不減（後設鎖：`SELF_DECIDE_VERBS` ⊇ APD §7 列舉的 11 詞）；名詞詞表不存在（v1.0 的「推送」「合入」「rebase」「cherry-pick」「額度」「裁決」不在任何阻斷常數中） | `HK::AskGateTest::test_verbs_only_grow_and_no_noun_lexicon` |
+| AC-ASK-01j | 動作詞表只增不減（後設鎖：`SELF_DECIDE_VERBS` ⊇ APD §7 v1.2 列舉的 13 個複合動作詞）；單詞「繼續」不在表內（反向鎖，N-04）；名詞詞表不存在（v1.0 的「推送」「合入」「rebase」「cherry-pick」「額度」「裁決」不在任何阻斷常數中） | `HK::AskGateTest::test_verbs_only_grow_and_no_noun_lexicon` |
 | AC-ASK-02a | 推回文案先叫代決、列三類；不含「請您」「請手動」 | `PH::AutopilotWordingTest::test_pushback_prefers_self_decide` |
 | AC-ASK-02b | 「真正需要您決定的類別」「以後要請您決定的只有這兩類」（逐字取自 sid 406454ea 2026-11-25）⇒ 不判交棒 | `PH::AutopilotWordingTest::test_rule_description_not_handoff` |
 | AC-ASK-02c | 控制組：「需要您決定要不要推送」仍判交棒（判準未被放寬到失去鑑別力） | `PH::AutopilotWordingTest::test_real_handoff_still_caught` |
@@ -226,6 +228,10 @@
 | MU-QV-24 | 哨兵只對 `HALT_WEEKLY｜PARK` 維持等待（不含無人窗口的 `WAIT_RESET`） | AC-QV-11c |
 | MU-QV-25 | 宣稱守衛不考慮 AskUserQuestion 結果之前的判決 | AC-QV-06d |
 | MU-QV-26 | 判決 cap 改回 `min(decision.cap, getattr(plan, "cap", …))`，或 `decision.cap is None` 時改取 0／保溫次數 `plan.k`（N-06） | AC-QV-01g |
+| MU-QV-27 | `switchplan._wall` 恢復 `short_pct ≥ prepare_pct` 或 `stage∈{close,wall}` 判準（不看判決） | AC-QV-12a、AC-QV-12b |
+| MU-QV-28 | `switchplan` 把 `WAIT_RESET` 對映成 `PARK_UNTIL` | AC-QV-12a |
+| MU-QV-29 | `parkprobe.evaluate` 恢復 `cur < prepare_pct` 為唯一准許條件（不看判決） | AC-QV-13a |
+| MU-QV-30 | 拿掉 `cur ≤ parked_pct − EARLY_DROP_PP` 遲滯閘，或 `deg=unmeasured` 也准 fire | AC-QV-13b |
 | MU-QV-31 | 鎖的呼叫樣式拿掉 `pace_state`／`_pace_state`／`settled_quota`／`default_read`（回到 v1.1 只收直接原語） | AC-QV-10d |
 | MU-QV-32 | 拿掉 (ii) 門檻比較站點的收集 | AC-QV-10e |
 | MU-QV-33 | 白名單 `diag` 類放寬成「任何 C 站點」 | AC-QV-10f |
@@ -233,10 +239,6 @@
 | MU-QV-35 | 判決分支套 `pings ≥ n*` 不推 | AC-QV-11e |
 | MU-QV-36 | 判決分支把任何 running 背景任務視為載具（只要有 running 就不推） | AC-QV-11e |
 | MU-QV-37 | 判決分支拿掉前四項豁免 | AC-QV-11f |
-| MU-QV-27 | `switchplan._wall` 恢復 `short_pct ≥ prepare_pct` 或 `stage∈{close,wall}` 判準（不看判決） | AC-QV-12a、AC-QV-12b |
-| MU-QV-28 | `switchplan` 把 `WAIT_RESET` 對映成 `PARK_UNTIL` | AC-QV-12a |
-| MU-QV-29 | `parkprobe.evaluate` 恢復 `cur < prepare_pct` 為唯一准許條件（不看判決） | AC-QV-13a |
-| MU-QV-30 | 拿掉 `cur ≤ parked_pct − EARLY_DROP_PP` 遲滯閘，或 `deg=unmeasured` 也准 fire | AC-QV-13b |
 | MU-AC-1 | reconcile 不比對 `account`（只看存在） | AC-AC-02a |
 | MU-AC-2 | 舊格式標記一律保留 | AC-AC-02b |
 | MU-AC-3 | 逐字稿觸發器不記 byte offset（每次全讀） | AC-AC-03b |
@@ -269,6 +271,9 @@
 | MU-ASK-9 | `[COST]` 門檻 `>` 改 `≥`，或拿掉門檻 | AC-ASK-01d |
 | MU-ASK-10 | `[K1]` 不檢查「核准」選項 | AC-ASK-01f |
 | MU-ASK-11 | `[COST]` 非 Claude 服務也套 `billing` | AC-ASK-01e |
+| MU-ASK-12 | `SELF_DECIDE_VERBS` 加回單詞「繼續」 | AC-ASK-01k、AC-ASK-01j |
+| MU-ASK-13 | 判準 4 的阻斷訊息改回「這類決定由你代決」 | AC-ASK-01g、AC-ASK-01l |
+| MU-ASK-14 | 拿掉「疑問詞之後 12 字元內」距離限制（整句任一處有動作詞即命中） | AC-ASK-01k |
 | MU-CI-1 | 不檢查 `runner_name==""` | AC-CI-01a |
 | MU-CI-2 | 重跑上限拿掉 | AC-CI-01b |
 | MU-CI-3 | 時間窗改為 `≥ 14 分`（拿掉上界）或 `≥ 15 分`（收緊下界） | AC-CI-01a（14 分、16.5 分兩例） |
@@ -304,7 +309,7 @@
 | 推送閘與前綴推送（G1-02） | E2E-AP-G1-02 | 重建 HYG1 形狀（修 2＋登記 1）三提交，真 `autopilot push` 對 bare remote | `RV-AP-G102` | 無 |
 | 逃生口對稱（G1-03） | E2E-AP-G1-03 | 載具 C：真 `claude -p` 讓模型在拋棄式 repo 以 Bash／PowerShell 設 OFF 提交 ⇒ 棘輪照判並出聲；同指令在無 `CLAUDECODE` 的乾淨行程 ⇒ 放行 | `RV-AP-G103` | 無 |
 | 逃生口族（G1-04） | E2E-AP-G1-04 | 同 G1-03 的 `claude -p` 回合內，模型另以真子行程呼叫 `human_escape.honored("AUTOSDD_SNAPSHOT_GATE_OFF", os.environ)`（環境由 harness 注入，非測試設定）⇒ 印 False 與出聲句 | `RV-AP-G104` | 快照閘本身尚未實作：其 E2E 由 SelfImproving 帳本 DB 案實作階段補（§5 OI 需求）；本列只證述詞在真 harness 環境下的判定 |
-| 詢問類別閘（ASK-01） | E2E-AP-ASK-01 | 主載具 H：真 PreToolUse hook（真 `sessionctl_guard.py` 經載具）以近 14 天 15 次真實提問的 payload 重放＋三類各一筆合成正例（含 force-push、Claude 超額題）；輔載具 C：第一動作以 `claude-code-guide` 查 print 模式能否呼叫 AskUserQuestion，可 ⇒ 一筆真 `claude -p` 回合讓模型真呼叫（可代決題）⇒ 被擋 | `RV-AP-ASK01` | print 模式不可呼叫 ⇒ 輔載具該筆改「錄製的真互動 PreToolUse payload 重放」並照實記錄（F-23）；互動畫面顯示 block 理由不可程式目視（同既有〔OI-20261120-010〕劃界） |
+| 詢問類別閘（ASK-01） | E2E-AP-ASK-01 | 主載具 H：真 PreToolUse hook（真 `sessionctl_guard.py` 經載具）以近 14 天 15 次真實提問的 payload 重放＋三類各一筆合成正例（含 force-push「是否繼續？」題〔v1.2，N-04〕、Claude 超額題）；輔載具 C：第一動作以 `claude-code-guide` 查 print 模式能否呼叫 AskUserQuestion，可 ⇒ 一筆真 `claude -p` 回合讓模型真呼叫（可代決題）⇒ 被擋 | `RV-AP-ASK01` | print 模式不可呼叫 ⇒ 輔載具該筆改「錄製的真互動 PreToolUse payload 重放」並照實記錄（F-23）；互動畫面顯示 block 理由不可程式目視（同既有〔OI-20261120-010〕劃界） |
 | 推回與宣稱守衛假紅（ASK-02） | E2E-AP-ASK-02 | 載具 H：真 Stop hook 以 sid 406454ea 2026-11-25 兩次假推回回合重放 ⇒ 不推回；以近 14 天真實逐字稿全量重放（`tools/probe/handoff_census.py --midwork` 同母體）比較修前修後命中數，新增假紅 0 | `RV-AP-ASK02` | 無 |
 | CI 排隊逾時（CI-01） | E2E-AP-CI-01 | `gh api` 錄製三支 run attempt 1／2 回應重放＋真 `ci_wait` 行程；另於下一次真推送被動觀測 | `RV-AP-CI01`、`RV-AP-CI01-OBS` | 外部現象可能消失：被動觀測 0 命中照實記錄（不算 FAIL、不算 PASS），錄製重放為主證 |
 | 舊視窗（OW-01） | E2E-AP-OW-01 | 真行程替身（R-VER 替身）＋真排程重試鏈：替身維持 `status=shell` 2 次後轉閒置 ⇒ 第 3 次退避後關閉；全程痕跡無禁字 | `RV-AP-OW01` | 兩個真互動視窗不可自動化（harness UI）⇒ 以替身＋真排程驗到關閉動作前一刻；互動層列 APD §2 外部劃界 |
@@ -360,4 +365,5 @@
 | N-09 白名單定義 | AC-QV-10f；MU-QV-33 |
 | N-10 `park --done` 上限 | QVD §3.5.2 B7（劃界文字；由 AC-QV-10f 的白名單形狀覆蓋） |
 | N-05 WAIT_RESET 掛載推動者 | REQ-AP-QV-11；AC-QV-11e～f；MU-QV-34～37；E2E-AP-QV-11 Stop 段 |
+| N-04 詢問閘擋掉必填齊全的「是否繼續」且叫模型代決 | REQ-AP-ASK-01；AC-ASK-01g 改寫、AC-ASK-01j 改寫、AC-ASK-01k～l；MU-ASK-12～14；E2E-AP-ASK-01 合成正例補 `是否繼續` 題 |
 | N-06 `plan.cap` 不存在 | AC-QV-01g 改寫；MU-QV-26 |
