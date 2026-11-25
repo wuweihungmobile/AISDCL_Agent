@@ -89,7 +89,7 @@ python tools/autopilot.py merge --branch <代理分支> [--base-at-dispatch <sha
 - **冪等**：每步落痕跡 `~/.autosdd/autopilot/merge.jsonl {branch, step, sha, verdict}`；重跑同一指令時，步驟 2 會把全部提交判為已吸收 ⇒ `MERGE_VERDICT=noop`。
 - **不留半套**：任何非 ok 結局都在 `finally` 依步驟 6 的同一套「先刪連結、再刪目錄」移除 clone，並還原主樹（主樹在步驟 6 之前從未被寫）。
 - 禁止形態（鐵律五）：不用 `git stash`、`git checkout --`、`git reset --hard`、`git clean`；中止只用 `git rebase --abort`／`git cherry-pick --abort`（皆不在毀滅性清單）。
-- **驗證測的是合入樹的證明**：步驟 4.5 的自證（每次執行都做，fail-closed）＋ TCS AC-MG-03a 的紅綠自證（在 clone 的三個子樹各植一個會讓該 leg 轉紅的突變 ⇒ 全套必紅；同突變植在主樹而 clone 不植 ⇒ 全套必綠）。
+- **驗證測的是合入樹的證明**：步驟 4.5 的自證（每次執行都做，fail-closed）＋ TCS AC-MG-03b 的紅綠自證（只在 clone 的三個子樹各植一個會讓該 leg 轉紅的突變、主樹不植 ⇒ 全套必紅；拿掉 `PYTHONPATH` 注入的突變 MU-MG-6 必須讓這條 AT 轉紅）。
 
 ### 3.3 與 pre-push 的關係（REQ-AP-MG-02）
 

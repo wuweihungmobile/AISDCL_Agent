@@ -2,7 +2,7 @@
 
 - 版本：v1.1（SD-1，2026-11-25；依 QA-S 審查 FAIL〔P1×5、P2×11、P3×10〕修訂；規格階段，實作未開始）。v1.0（SD-0）→ v1.1 的逐條處置見 §14。
 - 上游：`docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` 修訂表 v2.1.28 與 v2.1.29（勘誤）、§4.1.6（R-4.1.6-1～8 及其【v2.1.29 勘誤】）、§4.1.7（R-4.1.7-1～6）、§4.1.5 R-4.1.5-1（量不到 ⇒ `cap ≤ cap_prepare`，本設計遵守、不取代）、§15.5 紅線 14、§4.1.4／§4.2.3【v2.1.24】／§4.5.10／§4.5.11 的【v2.1.28 註記】、§16.6 2026-11-25 第一列。
-- 驗收：`docs/03_testing/contracts/TCS-Autopilot-20261125.md`（REQ-AP-QV-01～10、REQ-AP-AC-01～04）。
+- 驗收：`docs/03_testing/contracts/TCS-Autopilot-20261125.md`（REQ-AP-QV-01～11、REQ-AP-AC-01～04）。
 - 兄弟設計：`docs/02_architecture/Autopilot_Pipeline_Design.md`（合入、推送、棘輪、CI、舊視窗、詢問類別閘、測試圍籬；〈外部限制〉全文住那裡，本檔 §2 只摘與額度有關者）。
 - 先例與被消費的設計：`docs/02_architecture/QuotaWall_CacheContinuity_Design.md`（額度牆計畫 `qw_plan`、閂鎖、保溫）、`docs/02_architecture/Control_Handover_Design.md`（park 等待期間額度提前恢復、`parkprobe.account_changed`）。
 
@@ -14,7 +14,7 @@
 
 ## 0. 一頁結論
 
-1. 停工、park、續跑、等重置、可派數五類決定，全部由 `quota_ruling.ruling()` 一次算出，輸出唯一動作（`CONTINUE｜NODISPATCH｜WAIT_RESET｜PARK｜HALT_WEEKLY`）與一行 `QUOTA_VERDICT=`。所有既有額度判讀站點逐一普查（§3.5：改接 C1～C20、劃界 B1～B5），每處標「改接」或「劃界（附 WHY）」；以機械鎖 `QV::SingleHouseTest` 釘住白名單，新增私有判讀站點即紅（R-4.1.6-2、REQ-AP-QV-09）。
+1. 停工、park、續跑、等重置、可派數五類決定，全部由 `quota_ruling.ruling()` 一次算出，輸出唯一動作（`CONTINUE｜NODISPATCH｜WAIT_RESET｜PARK｜HALT_WEEKLY`）與一行 `QUOTA_VERDICT=`。所有既有額度判讀站點逐一普查（§3.5：改接 C1～C20、劃界 B1～B5），每處標「改接」或「劃界（附 WHY）」；以機械鎖 `QV::SingleHouseTest` 釘住白名單，新增私有判讀站點即紅（R-4.1.6-2、REQ-AP-QV-10）。
 2. `cap` 只有一個來源：派工閘同一條管線（`decide`＋清倉＋可得性遲滯＋平穩機制，含目標模型），由 `quota_gate.dispatch_decision()` 抽出後供判決與派工閘共用（§3.2 末、§9）。
 3. 判決帶 `expires_at＝min(measured_at＋180 s, 短窗 reset)`（量不到時另見 §3.3），過期一律重算（R-4.1.6-3）；87%＋距重置 14 分 ⇒ `WAIT_RESET`，不是 `PARK`（R-4.1.6-4）；`WAIT_RESET` 有自己的叫醒載具，不受保溫的 `small_ctx`／`no_usage`／n* 限制，無人窗口改交哨兵（§3.6）。
 4. 量不到讀數 ⇒ `CONTINUE` 加 `deg=unmeasured`，`cap` 走 R-4.1.5-1 的降級上限（`1 ≤ cap ≤ cap_prepare`），不是 `cap=0`——不違反「靜默鎖死已禁止」（R-4.1.6-8 的【v2.1.29 勘誤】）。量不到 reset 時刻 ⇒ `NODISPATCH`，不出 `PARK`（避免 park 自己拒絕造成的死循環）。
@@ -131,7 +131,7 @@ QUOTA_VERDICT=<ACTION> acct=<12 碼|none> win=<短窗 reset ISO|none> wk=<週 re
 | C15 | escalation | `tools/lib/quota_escalation.py` L335（`decide(read_quota(now)…)`） | 改讀判決（第 1 列 spend ⇒ escalate 既有路徑）；同行數替換，淨增 0（該檔 400／400，§9） |
 | C16 | 原始讀數工具 | `tools/lib/quota_meter.py --json` | 首行印「診斷用，判斷請看 `python tools/sessionctl.py quota`」（R-4.1.6-7） |
 | C17 | QuotaWall CLI | `sessionctl/qw_cli.py` L44／L59 | 首行印判決行；計畫細節降為診斷段 |
-| C18 | **SelfImproving 巡邏與研究免掃**（主控代決 ①） | `tools/lib/selfimproving/sched.py` `quota_check()`／`quota_verdict()` L232～L265、`patrol.py` `_quota()` L96～L105（L233 呼叫）、`fourq.py` `_free_band()` L35 | 經子行程 `python tools/sessionctl.py quota --json` 取判決（SI 套件不得 import sessionctl，SSOT §2；也不 import 扁平 `quota_ruling`，因為它需要 sessionctl 的取數）：跳過＝`ACTION ≠ CONTINUE` **或** `deg=unmeasured`（保留 SI 一向的 fail-closed）；降載＝`--json` 的 `band ∈ {notice, converge}`（與現行降載集合同義）；子行程失敗或輸出不可解析＝跳過（fail-closed）。`writeverbs.py` L254 與 `evspec.py` 的 `--band` 值改記判決的 `ACTION`（`quota-band` 附註值＝判決行） |
+| C18 | **SelfImproving 巡邏與研究免掃**（主控代決 ①；REQ-AP-QV-09） | `tools/lib/selfimproving/sched.py` `quota_check()`／`quota_verdict()` L232～L265、`patrol.py` `_quota()` L96～L105（L233 呼叫）、`fourq.py` `_free_band()` L35 | 經子行程 `python tools/sessionctl.py quota --json` 取判決（SI 套件不得 import sessionctl，SSOT §2；也不 import 扁平 `quota_ruling`，因為它需要 sessionctl 的取數）：跳過＝`ACTION ≠ CONTINUE` **或** `deg=unmeasured`（保留 SI 一向的 fail-closed）；降載＝`--json` 的 `band ∈ {notice, converge}`（與現行降載集合同義）；子行程失敗或輸出不可解析＝跳過（fail-closed）。`writeverbs.py` L254 與 `evspec.py` 的 `--band` 值改記判決的 `ACTION`（`quota-band` 附註值＝判決行） |
 | C19 | 新 CLI 動詞 | — | `python tools/sessionctl.py quota [--json] [--next-est <pp>] [--model <family>]`（入口薄殼只分派，判準在 `quota_ruling`，取數在 `ruling_io`） |
 | C20 | Stop 宣稱守衛 | `.claude/hooks/check_claim_provenance.py` | 新增一族（只出聲）：最後一則回覆含額度判斷詞（「已重置」「可以派」「不需要 park」「halt」「額度夠」）而本回合 tool_result 無未過期 `QUOTA_VERDICT=` ⇒ 出聲（R-4.1.6-7）；假紅以真實語料量（TCS E2E-AP-QV-06） |
 
@@ -145,13 +145,13 @@ QUOTA_VERDICT=<ACTION> acct=<12 碼|none> win=<短窗 reset ISO|none> wk=<週 re
 | B4 | 量測與重放：`tools/probe/**`、`tools/lib/wastecensus/**`（含 `pace_replay.py`）、`tools/lib/realverify/**` | 不接閘門 rc、不據以行動（各檔頭自述） |
 | B5 | 測試：`tools/tests/**` | 測試本身 |
 
-#### 3.5.3 機械鎖（REQ-AP-QV-09；F-01 ③）
+#### 3.5.3 機械鎖（REQ-AP-QV-10；F-01 ③）
 
 - `QV::SingleHouseTest`：AST 掃 `tools/**/*.py`（除 B4、B5 目錄）與 `.claude/hooks/*.py`，收集呼叫 `read_quota`、`refresh_quota_blocking`、`quota_policy.decide`、`prepare_hits`、`qw_plan.plan`、`halt_verdict`、`read_halt_marker`、`weekly_forces_fresh` 的站點（檔＋函式名），與白名單常數 `RULING_INPUT_SITES`（＝B1～B3 的站點＋ `quota_ruling`／`ruling_io` 本身）**相等比對**：多一處（新增私有判讀）紅；少一處而白名單未改也紅（同 `hook_wiring.SHELL_FORM_CENSUS` 的相等判準）。
 - 白名單常數住測試檔，每項附一句 WHY；改白名單＝改本節表（同一 commit）。
 - 誠實劃界：AST 只看見直接呼叫；以 `getattr` 字串、`importlib` 動態呼叫的站點看不見；別名 import（`from lib.quota_gate import read_quota as rq`）由 AST 解析 import 別名後仍可認。
 
-### 3.6 叫醒載具（F-03；判決之外的「誰在 reset 後叫醒主控」）
+### 3.6 叫醒載具（F-03；REQ-AP-QV-11；判決之外的「誰在 reset 後叫醒主控」）
 
 | 判決 | 窗口 | 載具 | 叫醒目標 |
 |---|---|---|---|

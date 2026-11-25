@@ -1,20 +1,30 @@
 # TCS-Autopilot-20261125：自動駕駛開發——單一額度判決、換帳號作廢、合入推送管線、詢問類別閘（需求＋驗收合一）
 
-> 上游：PRD `docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` 修訂表 v2.1.28、§4.1.6、§4.1.7、§4.5.12、§15.5 紅線 14、§16.6 2026-11-25 兩列；設計 `docs/02_architecture/QuotaVerdict_AccountSwitch_Design.md`（下稱 QVD）、`docs/02_architecture/Autopilot_Pipeline_Design.md`（下稱 APD）。
-> **狀態（2026-11-25，SD-0）**：規格階段，實作未開始。所有 AT／MU／E2E 狀態欄＝「待實作」；未跑不得寫成已驗。
-> 測試座標約定：`QV`＝`tools/tests/test_sessionctl_qv.py`（新）、`MG`＝`tools/tests/test_autopilot_merge.py`（新）、`PS`＝`tools/tests/test_autopilot_push.py`（新）、`HK`＝`tools/tests/test_sessionctl_hooks.py`（既有，增量）、`OW`＝`tools/tests/test_sessionctl_oldwin.py`（既有，增量）、`CW`＝`tools/tests/test_ci_wait.py`（既有，增量）、`CR`＝`tools/tests/test_check_defect_log_crossref.py`（既有，增量）、`PH`＝`tools/tests/test_check_pending_handoff.py`（既有，增量）、`CP`＝`tools/tests/test_claim_provenance_r86.py`（既有，增量）。單元測試一律注入 `now`、路徑圍籬到 tmp、不讀真 `~/.claude`、不起真排程、不打真端點；禁用 skip。
-> **E2E 定義**（掌舵者 2026-11-18：「請將所有功能都寫好完整的E To E測試案例,不要遺漏任何一個!」）：真行程、真排程、真 `claude -p` 子行程、真 git、真逐字稿重放（sid `406454ea-91fc-4481-9c11-b28ed7d9e95f`）或真讀數錄製重放才算；單元測試不算。載具＝`python tools/realverify.py run --family <家族>`，結果入帳 `docs/06_quality/RealVerify_Result_Ledger.md`；未入帳＝未結。「錄製重放」＝把真實端點回應（payload＋兩個帳號標頭，取自真實 `quota_burn.jsonl` 的 `34cd3507237f`／`eaf5241f6fe2` 樣本）錄成夾具，經 `quota_meter` 既有注入縫回放（不新增端點知識站點，守紅線 1 (b)）。
+> 上游：PRD `docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` 修訂表 v2.1.28、v2.1.29（勘誤）、§4.1.5 R-4.1.5-1、§4.1.6、§4.1.7、§4.5.12、§15.5 紅線 14、§16.6 2026-11-25 兩列；設計 `docs/02_architecture/QuotaVerdict_AccountSwitch_Design.md` v1.1（下稱 QVD）、`docs/02_architecture/Autopilot_Pipeline_Design.md` v1.1（下稱 APD）、`docs/04_planning/ADR/ADR-XPLAT-018-autopilot-merge-carrier.md`（下稱 ADR-018）；SelfImproving_PRD AC-SI-30-1／NFR-SI-07-5／FC-l 與 SelfImproving_Ledger_DB_PRD AC-LD-12-3 的 2026-11-25 註記。
+> **狀態（2026-11-25，SD-1 v1.1）**：規格階段，實作未開始。所有 AT／MU／E2E 狀態欄＝「待實作」；未跑不得寫成已驗。v1.0 → v1.1 依 QA-S 審查修訂（§6）。
+> 測試座標約定：`QV`＝`tools/tests/test_sessionctl_qv.py`（新）、`MG`＝`tools/tests/test_autopilot_merge.py`（新）、`PS`＝`tools/tests/test_autopilot_push.py`（新）、`HK`＝`tools/tests/test_sessionctl_hooks.py`（既有，增量）、`OW`＝`tools/tests/test_sessionctl_oldwin.py`（既有，增量）、`CW`＝`tools/tests/test_ci_wait.py`（既有，增量）、`CR`＝`tools/tests/test_check_defect_log_crossref.py`（既有，增量）、`PH`＝`tools/tests/test_check_pending_handoff.py`（既有，增量）、`CP`＝`tools/tests/test_claim_provenance_r86.py`（既有，增量）、`SI`＝`tools/tests/test_selfimproving_schedule_patrol.py`（既有，改斷言＋增量；實作棒以 `git grep -ln "quota_check\|quota_verdict" tools/tests` 現查其他受影響 SI 測試檔）、`KW`＝`tools/tests/test_sessionctl_keepwarm*.py`（既有，實作棒現查檔名）。單元測試一律注入 `now`、路徑圍籬到 tmp、不讀真 `~/.claude`、不起真排程、不打真端點；禁用 skip。
+> **E2E 定義**（掌舵者 2026-11-18：「請將所有功能都寫好完整的E To E測試案例,不要遺漏任何一個!」）：真行程、真排程、真 `claude -p` 子行程、真 git、真逐字稿重放（sid `406454ea-91fc-4481-9c11-b28ed7d9e95f`）或真讀數錄製重放才算；單元測試不算。執行＝`python tools/realverify.py run --family <家族>`，結果入帳 `docs/06_quality/RealVerify_Result_Ledger.md`；未入帳＝未結。
+> **E2E 載具（v1.1 指名；F-14）**：
+> - **載具 H（真 hook 二進位＋合成／錄製 payload）**：realverify 既有「工具副本沙盒」（`tools/lib/realverify/cases/sessionctl_park.py` 等：被測碼逐位元組複製到沙盒、hook 經 `_hook_launcher` 真跑），以 stdin 餵 hook payload；**不經 `claude -p`**。
+> - **載具 E（端點替身）**：既有 `tools/lib/realverify/cases/prd_px_lib.py` 的 T5 替身（本機 TLS CONNECT 代理＋自簽 CA＋沙盒 HOME 假 token）。**只注入被測 CLI／hook 子行程的環境**，回應以錄製的 payload 與兩個帳號標頭（取自真實 `quota_burn.jsonl` 的 `34cd3507237f`／`eaf5241f6fe2` 樣本）組成。不用於 `claude -p`：usage 端點與 messages API 同 host，CONNECT 層分不開，替身會攔下 claude 自己的流量，且假 token 讓 claude 無法認證。
+> - **載具 C（真 `claude -p`）**：真憑證、`--model haiku`，只用於必須由 harness 本身產生行為的列（WT-01 隔離起點、G1-03／G1-04 的 `CLAUDECODE` 注入、ASK-01 模型真呼叫）；不掛端點替身；額度讀數只走 `AUTOSDD_QUOTA_CACHE_DIR` 指到的錄製快取，且快取年齡在 TTL 內（不觸發補量）。
+> - **時間**：不新增 `now` 注入縫（QuotaWall 設計慣例：不開測試用環境變數；守衛面准入）。改用**時間平移重放**：錄製夾具的 `measured_at`／`resets_at` 依真牆鐘平移（例：reset＝真 now＋14 分），真 CLI 於真時刻執行；需要跨過有效期者以 `sessionctl runlong`／`waitfor` 真等。
+> - 不可達者：每列「不可達部分與備援」欄寫明。
 
 ## 0. 模組落點表（照 `docs/02_architecture/Root_Layout_and_Module_Placement.md` §2）
 
 | 元件 | 路徑 | §2 格 |
 |---|---|---|
-| QV 判決／取數／呈現 | 新 `tools/lib/sessionctl/qv_verdict.py`、`qv_io.py`、`qv_render.py` | 函式庫（既有 sessionctl 套件；WHY 見 QVD §8） |
+| 判決純函式、判決行、計費姿態推導 | 新扁平 `tools/lib/quota_ruling.py` | 函式庫：單檔共用工具（只 import `quota_policy`；QVD §8） |
+| 取數、`quota` 動詞實作、`--pace` 區塊 | 新 `tools/lib/sessionctl/ruling_io.py` | 函式庫（既有 sessionctl 套件） |
 | 換帳號 | 新 `tools/lib/sessionctl/acctswitch.py` | 同上 |
-| 詢問類別閘 | 新 `tools/lib/sessionctl/askgate.py`；接線 `.claude/hooks/sessionctl_guard.py`、`.claude/settings.json` | 同上＋守衛面 |
-| 合入／推送 | 新套件 `tools/lib/autopilot/`；入口 `tools/autopilot.py` | 函式庫（新套件）＋指令入口 |
+| 派工閘管線抽出 | 既有 `tools/lib/quota_gate.py` 新函式 `dispatch_decision()` | 存量 hub |
+| 詢問類別閘 | 新 `tools/lib/sessionctl/askgate.py`；接線 `.claude/hooks/sessionctl_guard.py`、`.claude/settings.json` | 既有套件＋守衛面 |
+| 合入／推送 | 新套件 `tools/lib/autopilot/`（`merge`、`carrier`、`pushgate`、`ledgersplit`、`locks`、`outcome`）；入口 `tools/autopilot.py` | 函式庫（新套件）＋指令入口 |
+| 治理閘逃生口述詞 | 新扁平 `tools/lib/human_escape.py` | 函式庫：單檔共用工具 |
+| 痕跡圍籬 | 新扁平 `tools/lib/suite_fence.py`；`min_tests_margin.py` 承接自 runner 抽出的兩函式 | 函式庫：單檔共用工具 |
 | LOC 抽出 | 新扁平 `tools/lib/model_window_table.py`；`quota_halt_marker.py` 承接 halt 判讀 | 函式庫（扁平共用） |
-| 既有改動 | `ledger_closing_guards.py`、`tools/git-hooks/pre-push`、`ciwait/core.py`、`oldwin.py`、`oldwin_sched.py`、`check_pending_handoff.py`、`check_claim_provenance.py`、`context_budget_guard.py`、`run_root_unittests.py`、`session_resume_planner.py`、`quota_*`、`session_brief.py`、sessionctl watch／park 族 | 既有家 |
+| 既有改動 | `ledger_closing_guards.py`、`tools/git-hooks/pre-push`、`ciwait/core.py`、`oldwin.py`、`oldwin_sched.py`、`check_pending_handoff.py`、`check_claim_provenance.py`、`context_budget_guard.py`、`run_root_unittests.py`、`session_resume_planner.py`、`quota_*`、`session_brief.py`、`relay_machine.py`、sessionctl watch／park／qw／kw／switchfacts／handoff_build／converge 族、`selfimproving/{sched,patrol,fourq,writeverbs,evspec}.py` | 既有家 |
 | 測試 | 新三檔（QV、MG、PS）＋既有檔增量 | 測試 |
 | 真機 E2E 家族 | `tools/lib/realverify/cases/quotaverdict.py`、`tools/lib/realverify/cases/autopilot.py`（新家族檔） | realverify |
 
@@ -22,55 +32,78 @@
 
 | REQ | 需求 | PRD／設計 | 狀態 |
 |---|---|---|---|
-| REQ-AP-QV-01 | 單一判決函式：同一份輸入只產一個 ACTION；原始讀數帶與 QW stage 在函式內合成（QVD §3.2 決策表六列） | R-4.1.6-1、R-4.1.6-4 | 待實作 |
-| REQ-AP-QV-02 | 判決行格式與有效期；過期必重算 | R-4.1.6-2、R-4.1.6-3；QVD §3.3、§4 | 待實作 |
+| REQ-AP-QV-01 | 單一判決函式：同一份輸入只產一個 ACTION；原始讀數帶、模型分軌週軸、spend 軸、QW stage 在函式內合成（QVD §3.2 決策表七列）；`cap` 唯一來源＝派工閘管線 `dispatch_decision()`；配速床／趕工戳記只影響 cap、不影響動作 | R-4.1.6-1、R-4.1.6-4、R-4.1.6-5【v2.1.29 勘誤】 | 待實作 |
+| REQ-AP-QV-02 | 判決行格式（含附加欄 `mdl=`、`deg=`）與有效期；過期必重算；讀數不可用時 `expires_at＝now＋max(TTL, retry_after)` | R-4.1.6-2、R-4.1.6-3【v2.1.29 勘誤】；QVD §3.3、§4 | 待實作 |
 | REQ-AP-QV-03 | halt 標記不壓補量；補量受紅線 1 四條件 | R-4.1.6-6；QVD §3.4 | 待實作 |
-| REQ-AP-QV-04 | park 只在判決 `PARK｜HALT_WEEKLY` 時登記；`--why` 退役、`--next-est` 取代 | R-4.1.6-5；QVD §5 | 待實作 |
-| REQ-AP-QV-05 | watch 額度事件只由判決觸發、單一序列閂鎖 `(acct, ACTION, win)`；`WAIT_RESET` 處置不含 park | R-4.1.6-2／4；QVD §3.5 | 待實作 |
-| REQ-AP-QV-06 | 主控額度宣稱須有本回合未過期判決行（Stop 只出聲） | R-4.1.6-7 | 待實作 |
-| REQ-AP-QV-07 | 讀不到判決 ⇒ `NODISPATCH` 並出聲；`--json` 帶 `billing` 欄（與 `posture_line` 同源） | R-4.1.6-8；QVD §3.3 | 待實作 |
+| REQ-AP-QV-04 | park 只在判決 `PARK｜HALT_WEEKLY` 時登記；`--why` 退役、`--next-est` 取代（缺省值由程式推導、只能往上調）；量不到 reset 不判 PARK；park 的所有訊息與判決動作一致 | R-4.1.6-5；QVD §3.2 第 3 列、§5 | 待實作 |
+| REQ-AP-QV-05 | watch 額度事件只由判決觸發、單一序列閂鎖 `(acct, ACTION, win)`；`WAIT_RESET` 處置不含 park | R-4.1.6-2／4；QVD §3.5 C4／C5 | 待實作 |
+| REQ-AP-QV-06 | 主控與子代理的額度宣稱須有本回合未過期判決行（Stop 只出聲）；提問期間到達的事件回覆後以有效期重算 | R-4.1.6-7、R-4.5.12-4 | 待實作 |
+| REQ-AP-QV-07 | 量不到讀數 ⇒ `CONTINUE`＋`deg=unmeasured`＋`1 ≤ cap ≤ cap_prepare` 並出聲（不是 cap 0）；`--json` 帶 `billing`（與 `posture_line` 同一推導函式）與 `band` | R-4.1.5-1、R-4.1.6-8【v2.1.29 勘誤】；QVD §3.2 第 6 列、§3.3 | 待實作 |
 | REQ-AP-QV-08 | LOC 抽出為純搬移：搬移 commit 全套綠、行為零差異；抽出後各檔在分級內、`SPECIAL_FILES` 門檻下修 | QVD §9 | 待實作 |
+| REQ-AP-QV-09 | SelfImproving 巡邏、研究免掃、四問降載改讀判決（經 CLI `--json`，不 import sessionctl）：跳過＝`ACTION ≠ CONTINUE` 或 `deg=unmeasured`；降載＝`band ∈ {notice, converge}`；子行程失敗＝跳過 | 主控代決 ①；SelfImproving_PRD AC-SI-30-1、NFR-SI-07-5、FC-l 註記；QVD §3.5 C18 | 待實作 |
+| REQ-AP-QV-10 | 單一判讀家機械鎖：判決輸入原語的呼叫站點與白名單相等；扁平檔不得 import `lib.sessionctl` | R-4.1.6-8；QVD §3.5.3 | 待實作 |
+| REQ-AP-QV-11 | `WAIT_RESET` 叫醒載具：互動窗口由 keepwarm 以 `ruling_wait_reset` 來源單跳到 `win＋skew`（不受 `small_ctx`／`no_usage`／n* 限制）；無人窗口交哨兵；模式非 auto／保溫關閉時理由句明寫無載具 | R-4.1.6-4【v2.1.29 勘誤】；QVD §3.6 | 待實作 |
 | REQ-AP-AC-01 | halt 標記、rush 戳記、閂鎖、保溫帳新寫入帶 `account`；量不到寫 `null` 並出聲 | R-4.1.7-1 | 待實作 |
 | REQ-AP-AC-02 | 帳號不符 ⇒ 標記改名 `.void-<ts>` 作廢、落 `account_switch`、出聲一次；舊格式標記依同軸讀數判 | R-4.1.7-3～5 | 待實作 |
-| REQ-AP-AC-03 | 三個零 API 觸發器（憑證檔 mtime／size、逐字稿 `/login`、指紋變化）皆觸發補量 | R-4.1.7-2 | 待實作 |
-| REQ-AP-AC-04 | 被動觀測：真實 `/login` 後一個 TTL 內必有 `account_switch`；判決行附「已作廢 n 個」 | R-4.1.7-6 | 待實作 |
-| REQ-AP-MG-01 | `autopilot merge`：repo 外 rebase、略過已吸收、帳本尾端提交、補連動鎖、全套、綠才 ff、清理；冪等、不留半套 | APD §3.2 | 待實作 |
+| REQ-AP-AC-03 | 三個零 API 觸發器（憑證檔 mtime／size、逐字稿 `/login`、指紋變化）皆觸發補量；觸發器本身不作廢任何標記 | R-4.1.7-2、R-4.1.7-3 | 待實作 |
+| REQ-AP-AC-04 | 被動觀測：真實 `/login` 後一個 TTL 內必有 `account_switch`；判決行與 `sessionctl status` 顯示帳號指紋；判決行附「已作廢 n 個」 | R-4.1.7-6 | 待實作 |
+| REQ-AP-MG-01 | `autopilot merge`：repo 外獨立 clone rebase、略過已吸收、帳本尾端提交、補連動鎖、全套、綠才 ff、清理；冪等、不留半套 | APD §3.2 | 待實作 |
 | REQ-AP-MG-02 | 合入期全套＝pre-push 同款（合成 stdin 呼叫，leg 集合相同） | APD §3.3 | 待實作 |
-| REQ-AP-WT-01 | 代理 worktree 起點＝本地 HEAD（`worktree.baseRef: "head"`）；merge 記錄 `base_drift` | APD §3.1 | 待實作 |
-| REQ-AP-G1-01 | 帳本淨額棘輪：推送期基準＝remote sha 並阻斷；提交期只出聲 | APD §4.1 | 待實作 |
-| REQ-AP-G1-02 | 推送閘：淨額 > 0 ⇒ 產同輪修復任務書、前綴推送；判決非 `CONTINUE` 不推 | APD §4.2、§4.3 | 待實作 |
+| REQ-AP-MG-03 | 驗證載具測的是合入樹：`.venv` 連結＋`PYTHONPATH`＋每次執行期自證（`carrier_leak`）＋三子樹紅綠自證；連結清理只刪連結；空間不足 `no_space` | APD §3.2 步 0／4.5／6；ADR-018 D1～D3 | 待實作 |
+| REQ-AP-WT-01 | 代理 worktree 起點＝本地 HEAD（`worktree.baseRef: "head"`）；merge 記錄 `base_drift`；合入後殘留代理分支／worktree 普查 | APD §3.1；ADR-018 D4 | 待實作 |
+| REQ-AP-G1-01 | 帳本淨額棘輪：推送期逐 ref 比 pre-push stdin 的 `<local_sha>` 對 `<remote_sha>`（不讀工作樹）並阻斷；提交期只出聲 | APD §4.1 | 待實作 |
+| REQ-AP-G1-02 | 推送閘：淨額 > 0 ⇒ 產同輪修復任務書、前綴推送可達；判決非 `CONTINUE` 不推 | APD §4.2、§4.3 | 待實作 |
 | REQ-AP-G1-03 | `AUTOSDD_NET_RATCHET_OFF` 在 `CLAUDECODE` 或 `AUTOSDD_UNATTENDED` 下無效並出聲 | APD §5 | 待實作 |
-| REQ-AP-ASK-01 | AskUserQuestion 類別閘：只放行 `[IRREVERSIBLE]`（任何系統整體毀壞不可復原，必填系統與原因）、`[COST]`（非訂閱制且預估 > 50 美元；`billing=subscription_only` 一律擋）、`[K1]`（須寫「須掌舵者親打」）；可代決詞表優先阻斷；無人窗口全擋；放行落 `ask_allowed` | R-4.5.12-3～5；APD §7 | 待實作 |
+| REQ-AP-G1-04 | 提交／推送期治理閘逃生口族（`AUTOSDD_NET_RATCHET_OFF`、`AUTOSDD_SNAPSHOT_GATE_OFF`）一律經單一述詞 `human_escape.honored()`；族名直接環境讀取只准出現在該檔；族常數只增不減 | 主控代決 ②；APD §5；SelfImproving_Ledger_DB_PRD AC-LD-12-3 註記 | 待實作（快照閘本身未實作，見 §5 OI 需求） |
+| REQ-AP-ASK-01 | AskUserQuestion 類別閘：只放行 `[IRREVERSIBLE]`（必填系統與原因）、`[COST]`（必填服務與預估 > 50 美元；服務為 Claude／Anthropic 且 `billing=subscription_only` 擋）、`[K1]`（須寫「須掌舵者親打」、選項不含「核准」）；「要不要＋可代決動作」句型阻斷（不論標籤）；名詞不阻斷；無人窗口全擋；放行落 `ask_allowed` | R-4.5.12-3～5【v2.1.29 勘誤】；APD §7 | 待實作 |
 | REQ-AP-ASK-02 | `check_pending_handoff` 推回文案改「先代決、三類才問」；描述分類規則／複述掌舵者定義的句子不判交棒；`check_claim_provenance` 不把敘述過去事件的「被擋／擋下」當本場宣稱 | R-4.5.12-1；APD §7、§13 | 待實作 |
 | REQ-AP-CI-01 | `ci_wait` 認得排隊逾時（`queue_timeout`）並自動重跑（同 sha ≤ 2 次） | APD §6 | 待實作 |
-| REQ-AP-OW-01 | 舊視窗關閉事件驅動＋指數退避（上限 12 小時）；任何文案不含「請手動」「請您」 | R-4.5.12-1／2；APD §8 | 待實作 |
-| REQ-AP-FN-01 | 全套期間痕跡圍籬：真痕跡目錄出現夾具形新列 ⇒ 全套 rc≠0 | APD §9 | 待實作 |
+| REQ-AP-OW-01 | 舊視窗關閉事件驅動＋指數退避（上限 12 小時）；本 PRD 機制全部訊息家不含「請手動」「請您」「手動跑」「請人」（例外逐筆列名） | R-4.5.12-1／2；APD §8 | 待實作 |
+| REQ-AP-FN-01 | 全套期間痕跡圍籬：真痕跡目錄出現夾具形新列 ⇒ 全套 rc≠0；runner 先抽出再加（SPECIAL 不破） | APD §9、§11 | 待實作 |
 
 ## 2. 驗收（AC → AT）
 
-### 2.1 QV（`QV::VerdictTest` 等；純函式，注入 state／markers／plan／now）
+### 2.1 QV（`QV::VerdictTest` 等；純函式，注入 state／decision／markers／plan／model／now）
 
 | AC | 判準 | AT 座標 |
 |---|---|---|
 | AC-QV-01a | 短窗 87%、D=14、`stage=free`、`QV_WAIT_RESET_MIN=45` ⇒ `WAIT_RESET`；輸出不含 `PARK` | `QV::VerdictTest::test_87pct_14min_waits_reset_not_park` |
-| AC-QV-01b | 決策表六列逐列正反例（含第 3 列 D>45 ⇒ `PARK`、量不到 reset ⇒ `PARK`、第 2 列週軸 ⇒ `HALT_WEEKLY` 優先於短窗） | `QV::VerdictTest::test_table_rows_*` |
-| AC-QV-01c | 性質：對笛卡兒積（band × stage × D × next_est × 標記）輸出恰一個 ACTION、`cap>0` 僅在 `CONTINUE` | `QV::VerdictTest::test_exactly_one_action_property` |
-| AC-QV-01d | 重放真實 `quota_burn.jsonl`（測試時複製到 tmp 的固定夾具，取自 2026-11-11～25）每列，「同一輸出兩個 ACTION」＝0 | `QV::VerdictTest::test_burn_ledger_replay_single_action` |
-| AC-QV-02a | 判決行欄位齊全、`expires_at＝min(measured_at+180s, 短窗 reset)`、時刻帶 offset、`vid` 對同輸入穩定 | `QV::RenderTest::test_line_fields_and_expiry` |
-| AC-QV-02b | `--pace`、watch、park、SessionStart 簡報四處第一個額度行皆為 `QUOTA_VERDICT=` | `QV::ConsumerTest::test_four_consumers_print_verdict_first` |
-| AC-QV-02c | 消費端拿到過期判決 ⇒ 重算並落 `stale_verdict_recomputed`；不以舊 vid 行動 | `QV::ConsumerTest::test_stale_verdict_recomputed` |
+| AC-QV-01b | 決策表七列逐列正反例：第 1 列 spend 撞限 ⇒ `HALT_WEEKLY wk=none`；第 2 列週軸 ⇒ `HALT_WEEKLY` 且**優先於**同時成立的短窗第 3 列；第 3 列 D>45 ⇒ `PARK`、短窗 reset 量不到 ⇒ `NODISPATCH`；第 4 列 `stage=nodispatch` ⇒ `NODISPATCH`；第 5 列 `next_est ≥ R−V` 的三分支、`next_est < R−V` ⇒ 不命中；第 6 列見 AC-QV-07a；第 7 列 | `QV::VerdictTest::test_table_rows_*`（每列一方法，正反例各一） |
+| AC-QV-01c | 性質：對笛卡兒積（band × stage × D（含量不到）× next_est × 標記 × 模型 × 讀數可用與否）輸出恰一個 ACTION、`cap>0` 僅在 `CONTINUE` | `QV::VerdictTest::test_exactly_one_action_property` |
+| AC-QV-01d | 具名時刻斷言（F-17；取自真實 `quota_burn.jsonl` 2026-11-24～25 的固定夾具，測試時複製到 tmp）：2026-11-25 03:46:19 列（five_hour 87%、reset 04:00、`stage=free`）⇒ `WAIT_RESET win=…04:00`；04:00:32 列（0%）⇒ `CONTINUE`；2026-11-24 20:50 列（`account=34cd3507237f`）與 03:43 列（`account=eaf5241f6fe2`）的 `acct` 欄各自等於該列帳號 | `QV::VerdictTest::test_named_moments_from_burn_ledger` |
+| AC-QV-01e | 模型分軌（F-06）：Fable 專屬週軸 100%、全模型週軸 60% ⇒ `model=sonnet` 判 `CONTINUE`、`model=fable` 判 `HALT_WEEKLY` | `QV::VerdictTest::test_model_scoped_weekly_axis` |
+| AC-QV-01f | 配速床與趕工戳記只改 cap（F-08）：同一份原始讀數，`decision` 分別以有／無配速床、有／無 rush 產生 ⇒ 四種組合的 ACTION 相同、cap 可不同 | `QV::VerdictTest::test_pace_floor_and_rush_affect_cap_only` |
+| AC-QV-01g | cap 來源（F-01 ②）：`CONTINUE` 時 `cap == min(dispatch_decision(...).cap, plan.cap)`；`quota_gate()` PreToolUse 記 fanout 帳所用的 cap 與同一時刻判決行 `cap=` 相等 | `QV::VerdictTest::test_cap_is_dispatch_pipeline`、`QV::ConsumerTest::test_gate_and_line_share_cap` |
+| AC-QV-02a | 判決行欄位齊全、`expires_at＝min(measured_at+180s, 短窗 reset)`、時刻帶 offset、`vid` 對同輸入穩定、附加欄只在尾端 | `QV::RenderTest::test_line_fields_and_expiry` |
+| AC-QV-02b | `--pace`、watch、park、SessionStart 簡報、`qw_cli`、交接包六處第一個額度行皆為 `QUOTA_VERDICT=` | `QV::ConsumerTest::test_consumers_print_verdict_first` |
+| AC-QV-02c | 消費端拿到過期判決 ⇒ 重算並落 `stale_verdict_recomputed`；不以舊 vid 行動（例：watch 輸出檔的舊 vid 為 `PARK`、重算為 `CONTINUE` ⇒ 不 park） | `QV::ConsumerTest::test_stale_verdict_recomputed` |
+| AC-QV-02d | 讀數不可用時 `expires_at＝now＋max(180, retry_after)`，且 `> now`（F-19） | `QV::RenderTest::test_unusable_state_expiry_in_future` |
 | AC-QV-03a | halt 標記有效＋快取超過 TTL ⇒ 補量恰一次（同 TTL 內第二次不補） | `QV::GatherTest::test_halt_does_not_suppress_refresh` |
-| AC-QV-03b | 429 ⇒ 降級出聲、判決 `NODISPATCH`、不重試 | `QV::GatherTest::test_429_degrades_to_nodispatch` |
+| AC-QV-03b | 429（帶 retry-after）⇒ 降級出聲、判決 `CONTINUE deg=unmeasured`、`1 ≤ cap ≤ cap_prepare`、不重試 | `QV::GatherTest::test_429_degrades_to_capped_continue` |
 | AC-QV-04a | 判決 `CONTINUE` ⇒ `park` rc 4 並印判決行；傳 `--why` ⇒ argparse 錯誤並指路 `--next-est` | `QV::ParkTest::test_continue_refuses_and_why_retired` |
 | AC-QV-04b | `--next-est` ≥ R−V 且 D>45 ⇒ `PARK` ⇒ 登記（縫 `ARM`）並印排程憑證；D≤45 ⇒ `WAIT_RESET`、不登記 | `QV::ParkTest::test_next_est_drives_park_or_wait` |
+| AC-QV-04c | park 的任何輸出（拒絕、登記、狀態）所印動作與當下判決 ACTION 一致；拒絕文案不含 `--why`（`--done --why` 除外）；短窗 reset 量不到時判決為 `NODISPATCH` 而非 `PARK`，park 拒絕訊息與 Stop 推回不互相指向（F-07） | `QV::ParkTest::test_park_messages_match_verdict` |
+| AC-QV-04d | `--next-est` 缺省＝`cal_agent × max(1, n_plan)`；給的值低於缺省 ⇒ 取缺省（F-25） | `QV::ParkTest::test_next_est_default_and_floor` |
 | AC-QV-05a | watch 單一序列：`WATCH_VERDICT=quota action=<A> vid=<v> expires_at=<t>`；同 `(acct,ACTION,win)` 只觸發一次 | `QV::WatchTest::test_single_series_latch` |
 | AC-QV-05b | `WAIT_RESET` 處置列不含「park」；`keepwarm.SERIES` 不存在 | `QV::WatchTest::test_wait_reset_disposition_has_no_park` |
 | AC-QV-06a | Stop 宣稱守衛：重放 L2564 回合（夾具化逐字稿片段）⇒ 出聲一次 | `CP::QuotaVerdictClaimTest::test_l2564_claim_without_verdict_voices` |
 | AC-QV-06b | 同回合有未過期 `QUOTA_VERDICT=` ⇒ 靜默；只有過期者 ⇒ 出聲 | `CP::QuotaVerdictClaimTest::test_fresh_verdict_silences` |
-| AC-QV-07a | 讀不到 state 或帳號量不到且有軸 ≥ prepare ⇒ `NODISPATCH`＋出聲 | `QV::VerdictTest::test_unreadable_is_nodispatch` |
-| AC-QV-07b | `billing` 四值推導與 `posture_line()` 同源（共用函式）；欄位缺 ⇒ `unknown` | `QV::RenderTest::test_billing_from_posture` |
-| AC-QV-08a | 抽出後 `check_loc_budget --json` 無違規；`context_budget_guard.py` 的 `SPECIAL_FILES` 門檻等於新實值 | `tools/tests/test_adr_xplat001_c1c2_lock.py`（既有，CLOSE 重釘後綠） |
+| AC-QV-06c | 子代理陳述（F-18）：判準函式吃子代理逐字稿片段（含額度判斷詞、無判決行）⇒ 回出聲文字；接線面（SubagentStop 未註冊）照實劃界，見 E2E 表 | `CP::QuotaVerdictClaimTest::test_subagent_transcript_judged_same` |
+| AC-QV-06d | 提問期間的事件（R-4.5.12-4）：AskUserQuestion tool_result 之前取得的判決行，在其後的額度陳述中視同過期（判準＝判決行時刻早於最近一次 AskUserQuestion 結果）⇒ 出聲 | `CP::QuotaVerdictClaimTest::test_verdict_before_question_is_stale` |
+| AC-QV-07a | 讀不到 state（無可用軸）、無標記、無 L3 地板 ⇒ `CONTINUE deg=unmeasured`、`1 ≤ cap ≤ cap_prepare`＋出聲；同時有同帳號 halt 標記 ⇒ 依標記走第 2／3 列 | `QV::VerdictTest::test_unreadable_is_capped_continue` |
+| AC-QV-07b | `billing` 四值推導由 `quota_ruling.billing_from_posture()` 產生，`posture_line()` 呼叫同一函式；欄位缺 ⇒ `unknown` | `QV::RenderTest::test_billing_from_posture` |
+| AC-QV-08a | 抽出後 `check_loc_budget --json` 無違規；`context_budget_guard.py`、`run_root_unittests.py` 的 `SPECIAL_FILES` 門檻等於新實值 | `tools/tests/test_adr_xplat001_c1c2_lock.py`（既有，CLOSE 重釘後綠） |
 | AC-QV-08b | `pace_report` 不再存在於 `quota_gate`（hub 成員只縮不長） | `QV::LocTest::test_pace_report_moved_out_of_hub` |
+| AC-QV-09a | SI `quota_check` 以替身 CLI 輸出（`--json`）判定：`CONTINUE` ⇒ 不跳過；`WAIT_RESET`／`PARK`／`NODISPATCH`／`HALT_WEEKLY` ⇒ 跳過 `quota-band`；`CONTINUE deg=unmeasured` ⇒ 跳過；子行程 rc≠0 或 JSON 不可解析 ⇒ 跳過 | `SI::QuotaVerdictConsumptionTest::test_skip_by_action_and_deg` |
+| AC-QV-09b | 降載＝`band ∈ {notice, converge}`（`fourq` 用 `fourq_degrade_items_max`）；`research.skip` 的 `band` 附註值＝判決行 | `SI::QuotaVerdictConsumptionTest::test_degrade_and_skip_note` |
+| AC-QV-09c | `tools/lib/selfimproving/` 不 import `sessionctl` 也不 import `quota_gate`（AST） | `SI::QuotaVerdictConsumptionTest::test_no_cross_package_import` |
+| AC-QV-10a | 單一家鎖：判決輸入原語的呼叫站點集合 == `RULING_INPUT_SITES` | `QV::SingleHouseTest::test_sites_equal_allowlist` |
+| AC-QV-10b | 鎖有鑑別力：合成樹多一個私有判讀站點 ⇒ 紅；白名單多一個不存在站點 ⇒ 紅；別名 import 仍可認 | `QV::SingleHouseTest::test_lock_discriminates` |
+| AC-QV-10c | 扁平檔（`tools/lib/*.py`）不 import `lib.sessionctl`（AST） | `QV::SingleHouseTest::test_flat_files_do_not_import_sessionctl` |
+| AC-QV-11a | 互動 auto：判決 `WAIT_RESET`、`stage=free`、ctx 小於 `AUTOSDD_KEEPWARM_MIN_CTX_TOKENS` ⇒ `wake_target` 回 `(win＋skew, "ruling_wait_reset", …)`，`skip_reason` 不使指令不掛 | `KW::RulingWaitResetTest::test_small_ctx_still_wakes_at_win` |
+| AC-QV-11b | 保溫帳 pings 已達 n* ⇒ `ruling_wait_reset` 仍單跳、不付費 ping | `KW::RulingWaitResetTest::test_cap_does_not_block_single_hop` |
+| AC-QV-11c | 無人窗口 ⇒ 不掛 keepwarm；哨兵判定（C11）對 `WAIT_RESET` 維持撞線等待並以 `win＋skew` 武裝 | `KW::RulingWaitResetTest::test_unattended_hands_to_sentinel` |
+| AC-QV-11d | 模式非 auto 或 `AUTOSDD_KEEPWARM_OFF` ⇒ 判決理由句含「不會在重置後自動叫醒」；`check_pending_handoff` 半路停工判準把該句視為合法換手標記 | `KW::RulingWaitResetTest::test_no_carrier_is_said`、`PH::AutopilotWordingTest::test_no_carrier_sentence_is_legit_stop` |
 
 ### 2.2 AC 換帳號（`QV::AcctSwitchTest`）
 
@@ -83,44 +116,59 @@
 | AC-AC-03a | 憑證檔 (mtime,size) 變 ⇒ 觸發；不變 ⇒ 不觸發；macOS（注入平台）⇒ T① 缺席並照實出聲 | `QV::AcctSwitchTest::test_trigger_credentials_file` |
 | AC-AC-03b | 逐字稿增量出現 `<command-name>/login</command-name>` ⇒ 觸發；byte offset 前已讀者不重觸發 | `QV::AcctSwitchTest::test_trigger_login_record` |
 | AC-AC-03c | 指紋變化 ⇒ 觸發 reconcile | `QV::AcctSwitchTest::test_trigger_fingerprint_change` |
+| AC-AC-03d | 觸發器成立但補量失敗（量不到指紋）⇒ 不作廢任何標記（R-4.1.7-3）；補量成功且指紋相同 ⇒ 不作廢 | `QV::AcctSwitchTest::test_trigger_alone_never_voids` |
 | AC-AC-04a | 換帳號後第一行判決附「已作廢 n 個舊帳號標記」；同一對 old→new 只出聲一次 | `QV::AcctSwitchTest::test_first_verdict_reports_voided` |
 | AC-AC-04b | 任何輸出不含「建議換帳號」類字樣（詞表） | `QV::AcctSwitchTest::test_no_switch_advice_wording` |
+| AC-AC-04c | `sessionctl status` 輸出含帳號指紋（12 碼）或 `acct=none`（F-18） | `QV::AcctSwitchTest::test_status_shows_fingerprint` |
 
 ### 2.3 合入、推送、棘輪（`MG`／`PS`／`CR`；真 git 於 tmp 拋棄式 repo）
 
 | AC | 判準 | AT 座標 |
 |---|---|---|
-| AC-MG-01a | W11b2 形狀（代理起點落後、main 已含 W6）⇒ rebase 成功；有衝突 ⇒ `conflict`＋衝突包、主樹與拋棄式 worktree 都不留 rebase 狀態 | `MG::MergeTest::test_rebase_or_conflict_bundle` |
+| AC-MG-01a | W11b2 形狀（代理起點落後、main 已含 W6）⇒ rebase 成功；有衝突 ⇒ `conflict`＋衝突包、主樹與 clone 都不留 rebase 狀態 | `MG::MergeTest::test_rebase_or_conflict_bundle` |
 | AC-MG-01b | 同指令重跑 ⇒ `MERGE_VERDICT=noop`（patch-id 略過） | `MG::MergeTest::test_idempotent_rerun` |
 | AC-MG-01c | 全套紅（縫：假 pre-push 回 1）⇒ `red`、主樹 HEAD 不動 | `MG::MergeTest::test_red_suite_keeps_main` |
 | AC-MG-01d | 帳本變更散在三個提交 ⇒ 結果中帳本只出現在尾端單一提交、其餘提交不含帳本檔 | `MG::MergeTest::test_ledger_changes_moved_to_tail` |
-| AC-MG-01e | 清理用 `git worktree remove`（不帶 `--force`）與 `git branch -d`；`git worktree list` 回到起始集合 | `MG::MergeTest::test_cleanup_no_force` |
+| AC-MG-01e | 清理用 `git worktree remove`（不帶 `--force`）與 `git branch -d`；`git worktree list` 與 `git branch --list "worktree-agent-*"` 回到起始集合 | `MG::MergeTest::test_cleanup_no_force` |
 | AC-MG-01f | 鎖：第二個 merge 在鎖存在時回 `busy`；主樹髒 ⇒ `dirty` | `MG::MergeTest::test_lock_and_dirty` |
 | AC-MG-01g | `repin_growth_problems()` 非空 ⇒ `repin_blocked`、不改上限常數 | `MG::MergeTest::test_repin_blocked` |
+| AC-MG-01h | 驗證載具是獨立 clone：clone 的 `git rev-parse --git-common-dir` 指向 clone 自己（不是主樹 `.git`） | `MG::CarrierTest::test_clone_has_own_git_dir` |
 | AC-MG-02a | 合成 stdin 呼叫的 pre-push 與真 `git push` 觸發的 pre-push 收到相同四欄、跑相同 leg 集合（以 leg 名稱集合比對） | `MG::PrePushParityTest::test_synthetic_stdin_same_legs` |
+| AC-MG-03a | 執行期自證：以注入縫讓 `import autoclaude` 解析到 clone 外 ⇒ `MERGE_VERDICT=carrier_leak`、不跑全套、印兩個實際路徑 | `MG::CarrierTest::test_leak_is_fail_closed` |
+| AC-MG-03b | 紅綠自證：只在 clone 的 `tools/`、`AutoClaude/`、`AISDLC_SDD/<LATEST>/` 各植一個讓對應 leg 轉紅的突變（主樹不植）⇒ 全套紅且三條 leg 各自紅；不植 ⇒ 綠 | `MG::CarrierTest::test_clone_only_mutations_turn_suite_red`（真全套，`runlong`／`waitfor`；E2E-AP-MG-03 同載具） |
+| AC-MG-03c | 清理：`.venv` 連結被刪、目標（主樹 `.venv`）完好；以注入縫讓連結身分驗不到 ⇒ 中止清理並記痕跡、不遞迴刪 | `MG::CarrierTest::test_link_removed_target_intact` |
+| AC-MG-03d | 可用空間 < 2×已追蹤檔總大小（縫：空間查詢）⇒ `no_space`、不建 clone | `MG::CarrierTest::test_no_space` |
 | AC-WT-01a | `.claude/settings.json` 含 `worktree.baseRef == "head"` | `HK::SettingsTest::test_worktree_baseref_head` |
 | AC-WT-01b | `--base-at-dispatch` 與 merge-base 不等 ⇒ 落 `base_drift` 痕跡、仍完成 rebase | `MG::MergeTest::test_base_drift_recorded` |
-| AC-G1-01a | `PHASE=push`＋`BASE=<舊 sha>`、工作樹＝HEAD 但 HEAD 比 base 多 1 筆未結 ⇒ 阻斷 | `CR::PushRangeRatchetTest::test_push_phase_uses_remote_base` |
+| AC-WT-01c | 殘留普查：合入痕跡已 ok／noop 的代理分支或 worktree 仍存在 ⇒ 普查回非空、`sessionctl status` 顯示殘留數 | `MG::MergeTest::test_residual_agent_branches_census` |
+| AC-G1-01a | `PHASE=push`、`LOCAL=<local_sha>`、`BASE=<remote_sha>`：`local_sha` 比 base 多 1 筆未結 ⇒ 阻斷 | `CR::PushRangeRatchetTest::test_push_phase_uses_local_sha` |
 | AC-G1-01b | 未設 `PHASE`（提交期）淨額 > 0 ⇒ 出聲、問題清單為空 | `CR::PushRangeRatchetTest::test_commit_phase_voices_only` |
-| AC-G1-01c | pre-push 匯出兩變數（新分支用 merge-base 回退值） | `CR::PushRangeRatchetTest::test_prepush_exports_base` |
+| AC-G1-01c | pre-push 逐 ref 匯出三變數（新分支 remote 全零用 merge-base 回退值；local 全零＝刪 ref ⇒ 跳過） | `CR::PushRangeRatchetTest::test_prepush_exports_per_ref` |
+| AC-G1-01d | **前綴推送放行**（F-05）：工作樹與 HEAD 含尾端新未結列，stdin 的 `local_sha`＝尾端父提交 ⇒ 淨額 0、放行 | `CR::PushRangeRatchetTest::test_prefix_push_allowed_despite_worktree_tail` |
+| AC-G1-01e | stdin 兩行（一行淨額 0、一行淨額 >0）⇒ 阻斷，訊息列出淨額 >0 那一 ref | `CR::PushRangeRatchetTest::test_multi_ref_stdin` |
 | AC-G1-02a | 尾端提交含新未結列 ⇒ `PUSH_VERDICT=net_positive prefix=<尾端父提交>`、產修復任務書 | `PS::PushGateTest::test_prefix_push_on_net_positive` |
 | AC-G1-02b | 修復提交把列轉 fixed ⇒ 整段可推 | `PS::PushGateTest::test_full_push_after_fix` |
 | AC-G1-02c | 判決非 `CONTINUE`（縫：假 `sessionctl quota --json`）⇒ 不推 | `PS::PushGateTest::test_no_push_unless_continue` |
+| AC-G1-02d | prefix 計算：尾端提交不是帳本提交（帳本未剝離）⇒ `prefix=none` 並產任務書，不推任何一點 | `PS::PushGateTest::test_prefix_none_when_tail_not_ledger` |
 | AC-G1-03a | `CLAUDECODE=1`＋OFF ⇒ 照常判並出聲；`AUTOSDD_UNATTENDED`＋OFF 同；兩者皆無＋OFF ⇒ 依舊放行 | `CR::PushRangeRatchetTest::test_off_ignored_under_claudecode` |
+| AC-G1-04a | `human_escape.honored()` 對族內每一成員三態（人＋OFF ⇒ True；`CLAUDECODE`＋OFF ⇒ False 且回出聲句；未設 ⇒ False 無句）；`AUTOSDD_SNAPSHOT_GATE_OFF` 在族內 | `CR::HumanEscapeTest::test_honored_three_states` |
+| AC-G1-04b | AST：族成員名稱的直接環境讀取（`os.environ`／`env.get`／`getenv` 帶該字串）只出現在 `human_escape.py` | `CR::HumanEscapeTest::test_family_reads_only_via_predicate` |
+| AC-G1-04c | `HUMAN_ONLY_ESCAPES` ⊇ {`AUTOSDD_NET_RATCHET_OFF`, `AUTOSDD_SNAPSHOT_GATE_OFF`}（只增不減） | `CR::HumanEscapeTest::test_family_only_grows` |
 
 ### 2.4 詢問類別閘與推回（`HK`／`PH`／`CP`）
 
 | AC | 判準 | AT 座標 |
 |---|---|---|
 | AC-ASK-01a | 重放 L2431 的問題（推送逃生口）⇒ rc 2，訊息含三類清單 | `HK::AskGateTest::test_l2431_blocked` |
-| AC-ASK-01b | `[IRREVERSIBLE]`＋`系統：<x>`＋`不可復原原因：<y>`、無詞表命中 ⇒ 放行並落 `ask_allowed`；系統名非本機／專案／GitHub（例：雲端資料庫）同樣放行 | `HK::AskGateTest::test_irreversible_any_system_allowed` |
+| AC-ASK-01b | `[IRREVERSIBLE]`＋`系統：GitHub`＋`不可復原原因：push --force 覆寫遠端歷史` ⇒ 放行（含「推送」類名詞不擋，F-11 ①）；系統名非本機／專案／GitHub（例：雲端資料庫）同樣放行；放行落 `ask_allowed` | `HK::AskGateTest::test_irreversible_any_system_allowed` |
 | AC-ASK-01c | `[IRREVERSIBLE]` 缺系統或原因 ⇒ 擋 | `HK::AskGateTest::test_irreversible_requires_fields` |
-| AC-ASK-01d | `[COST]` 且 `billing=subscription_only` ⇒ 擋；`credits_fallback`／`api_key`／`unknown` 且 `預估：60 美元` ⇒ 放行；`預估：40 美元` ⇒ 擋 | `HK::AskGateTest::test_cost_by_billing_and_threshold` |
-| AC-ASK-01e | `[K1]` 且含「須掌舵者親打」⇒ 放行；選項含「核准」⇒ 擋 | `HK::AskGateTest::test_k1_hint_only` |
-| AC-ASK-01f | 任一類標籤＋詞表命中（例：`[IRREVERSIBLE] … 要不要 park`）⇒ 擋 | `HK::AskGateTest::test_lexicon_overrides_tag` |
-| AC-ASK-01g | 舊類別標籤 `[BIZ]`／`[SECRET]`／`[VISUAL]`／`[HARNESS]`、無標籤 ⇒ 擋 | `HK::AskGateTest::test_retired_tags_blocked` |
-| AC-ASK-01h | `AUTOSDD_UNATTENDED` ⇒ 任何問題擋 | `HK::AskGateTest::test_unattended_blocks_all` |
-| AC-ASK-01i | 詞表只增不減（後設鎖：常數集合 ⊇ 本 TCS 列舉的 16 詞） | `HK::AskGateTest::test_lexicon_only_grows` |
+| AC-ASK-01d | `[COST]`＋`服務：Claude`：`billing=subscription_only` ⇒ 擋；`credits_fallback`／`api_key`／`unknown` 且 `預估：80 美元`、問題含「啟用超額使用額度」⇒ 放行；`預估：50 美元` ⇒ 擋（門檻嚴格大於） | `HK::AskGateTest::test_cost_claude_by_billing_and_threshold` |
+| AC-ASK-01e | `[COST]`＋`服務：GitHub Actions`＋`預估：60 美元`、`billing=subscription_only` ⇒ 放行（非 Claude 服務不讀 billing，F-11 ②）；缺 `服務：` ⇒ 擋 | `HK::AskGateTest::test_cost_non_claude_ignores_billing` |
+| AC-ASK-01f | `[K1]` 且含「須掌舵者親打」⇒ 放行；選項含「核准」⇒ 擋；缺字樣 ⇒ 擋 | `HK::AskGateTest::test_k1_hint_only` |
+| AC-ASK-01g | 任一類標籤＋可代決句型（例：`[IRREVERSIBLE] 系統：本機；不可復原原因：…；要不要 park？`）⇒ 擋；同標籤只含名詞「park」而無「要不要／是否…」句型 ⇒ 不因句型擋 | `HK::AskGateTest::test_self_decide_pattern_overrides_tag` |
+| AC-ASK-01h | 舊類別標籤 `[BIZ]`／`[SECRET]`／`[VISUAL]`／`[HARNESS]`、無標籤 ⇒ 擋 | `HK::AskGateTest::test_retired_tags_blocked` |
+| AC-ASK-01i | `AUTOSDD_UNATTENDED` ⇒ 任何問題擋（含三類必填齊全者） | `HK::AskGateTest::test_unattended_blocks_all` |
+| AC-ASK-01j | 動作詞表只增不減（後設鎖：`SELF_DECIDE_VERBS` ⊇ APD §7 列舉的 11 詞）；名詞詞表不存在（v1.0 的「推送」「合入」「rebase」「cherry-pick」「額度」「裁決」不在任何阻斷常數中） | `HK::AskGateTest::test_verbs_only_grow_and_no_noun_lexicon` |
 | AC-ASK-02a | 推回文案先叫代決、列三類；不含「請您」「請手動」 | `PH::AutopilotWordingTest::test_pushback_prefers_self_decide` |
 | AC-ASK-02b | 「真正需要您決定的類別」「以後要請您決定的只有這兩類」（逐字取自 sid 406454ea 2026-11-25）⇒ 不判交棒 | `PH::AutopilotWordingTest::test_rule_description_not_handoff` |
 | AC-ASK-02c | 控制組：「需要您決定要不要推送」仍判交棒（判準未被放寬到失去鑑別力） | `PH::AutopilotWordingTest::test_real_handoff_still_caught` |
@@ -130,13 +178,14 @@
 
 | AC | 判準 | AT 座標 |
 |---|---|---|
-| AC-CI-01a | 三支真 run（45427135743、45439253352、45456241389）attempt 1 jobs JSON 錄製夾具 ⇒ `queue_timeout`；有步驟的 cancelled、14 分取消、同 ref 有較新 run ⇒ 不命中 | `CW::QueueTimeoutTest::test_classify_recorded_attempts` |
+| AC-CI-01a | 三支真 run（45427135743、45439253352、45456241389）attempt 1 jobs JSON 錄製夾具 ⇒ `queue_timeout`；有步驟的 cancelled、14 分取消、16.5 分取消、同 ref 有較新 run ⇒ 不命中 | `CW::QueueTimeoutTest::test_classify_recorded_attempts` |
 | AC-CI-01b | 命中 ⇒ 呼叫 `gh run rerun <id> --failed`（縫 `run`）、末行 `pass rerun=queue_timeout×1`；第 3 次 ⇒ `fail reason=queue_timeout_exhausted` rc 1 | `CW::QueueTimeoutTest::test_rerun_and_exhaustion` |
-| AC-OW-01a | `oldwin.py`、`sessionctl_guard.py`、`qw_prompt.py` 全部使用者可見字串不含「請手動」「請您」（例外清單逐筆列名才准） | `OW::AutopilotTest::test_no_manual_wording` |
+| AC-OW-01a | APD §8 字樣鎖射程內全部使用者可見字串不含「請手動」「請您」「手動跑」「請人」；例外清單逐筆「檔:函式＋WHY」，清單外命中即紅；例外清單本身每項都必須仍有命中（過期例外即紅） | `OW::AutopilotTest::test_no_manual_wording_across_message_homes` |
 | AC-OW-01b | not_idle ⇒ 退避間隔 60·2^k、總時長到 12 小時才 `oldwin_retry_exhausted`；`MAX_RETRIES` 常數不存在 | `OW::AutopilotTest::test_exponential_backoff_12h` |
-| AC-OW-01c | 舊視窗 Stop（已交棒且已 ack）⇒ `oldwin_idle_hint`＋60 秒後排程一次 | `OW::AutopilotTest::test_old_stop_triggers_check` |
+| AC-OW-01c | 舊視窗 Stop（已交棒且已 ack）⇒ `oldwin_idle_hint`＋60 秒後排程一次；未 ack ⇒ 不排 | `OW::AutopilotTest::test_old_stop_triggers_check` |
 | AC-OW-01d | `status=shell` 長時間不變 ⇒ 不終止 | `OW::AutopilotTest::test_shell_never_killed` |
 | AC-FN-01a | 圍籬期間真痕跡目錄（tmp 模擬）新增一列帶 `%TEMP%`／`sc-*`／夾具 sid ⇒ 判洩漏；真系統同時段寫入的非夾具形列 ⇒ 不判 | runner 既有測試檔（WP-FENCE 現查）`::TraceFenceTest` |
+| AC-FN-01b | runner 抽出為純搬移：`min_tests_note_stale_tokens` 自 `min_tests_margin`（或備援家）import 的結果與搬移前逐字相同；runner raw 行數 ≤ 新 SPECIAL 門檻 | `::TraceFenceTest::test_extraction_is_pure_move`＋AC-QV-08a 同鎖 |
 
 ## 3. 突變清單（MU；QA 逐條實打，每條至少一條 AT 轉紅，未轉紅＝補斷言）
 
@@ -147,62 +196,135 @@
 | MU-QV-3 | `expires_at` 只取 `measured_at+TTL`（不取短窗 reset 的 min） | AC-QV-02a |
 | MU-QV-4 | 恢復 halt 有效即不補量 | AC-QV-03a |
 | MU-QV-5 | park 恢復接受 `--why` | AC-QV-04a |
-| MU-QV-6 | 讀不到判決改回 `CONTINUE` | AC-QV-07a |
+| MU-QV-6 | 量不到改回 `NODISPATCH`（cap 0）或改回不設限 `CONTINUE`（cap None） | AC-QV-07a、AC-QV-03b |
 | MU-QV-7 | Stop 宣稱守衛不看 `expires_at` | AC-QV-06b |
+| MU-QV-8 | 第 2 列與第 3 列對調（短窗優先於週軸） | AC-QV-01b |
+| MU-QV-9 | 拿掉第 4 列（`stage=nodispatch` 落 CONTINUE） | AC-QV-01b |
+| MU-QV-10 | 第 5 列比較改 `>`、或拿掉第 5 列 | AC-QV-01b、AC-QV-04b |
+| MU-QV-11 | 短窗 reset 量不到時回 `PARK` | AC-QV-01b、AC-QV-04c |
+| MU-QV-12 | 拿掉 spend 列（第 1 列） | AC-QV-01b |
+| MU-QV-13 | 第 2 列看全部模型分軌軸（不看 `model`） | AC-QV-01e |
+| MU-QV-14 | 動作改讀 `decision.band`（墊高帶影響動作） | AC-QV-01f |
+| MU-QV-15 | `cap` 改用 `quota_policy.decide().cap`（不經 `dispatch_decision`） | AC-QV-01g |
+| MU-QV-16 | 消費端拿舊 vid 行動（跳過過期檢查） | AC-QV-02c |
+| MU-QV-17 | 不可用狀態 `expires_at＝measured_at＋TTL` | AC-QV-02d |
+| MU-QV-18 | `next_est` 不取缺省下界 | AC-QV-04d |
+| MU-QV-19 | SI 跳過判準忽略 `deg=unmeasured` | AC-QV-09a |
+| MU-QV-20 | SI 子行程失敗改為不跳過 | AC-QV-09a |
+| MU-QV-21 | 白名單 `RULING_INPUT_SITES` 多加一個實際新增的私有站點（鎖被放寬成包含式比對） | AC-QV-10b |
+| MU-QV-22 | `wake_target` 對 `ruling_wait_reset` 套 `small_ctx` 限制 | AC-QV-11a |
+| MU-QV-23 | `ruling_wait_reset` 計入保溫帳 n* | AC-QV-11b |
+| MU-QV-24 | 哨兵只對 `HALT_WEEKLY｜PARK` 維持等待（不含無人窗口的 `WAIT_RESET`） | AC-QV-11c |
+| MU-QV-25 | 宣稱守衛不考慮 AskUserQuestion 結果之前的判決 | AC-QV-06d |
 | MU-AC-1 | reconcile 不比對 `account`（只看存在） | AC-AC-02a |
 | MU-AC-2 | 舊格式標記一律保留 | AC-AC-02b |
 | MU-AC-3 | 逐字稿觸發器不記 byte offset（每次全讀） | AC-AC-03b |
+| MU-AC-4 | 觸發器成立即作廢（不等補量指紋；R-4.1.7-3 核心安全判準） | AC-AC-03d |
+| MU-AC-5 | 補量失敗時作廢 | AC-AC-03d |
 | MU-MG-1 | 略過已吸收改成不比 patch-id | AC-MG-01b |
 | MU-MG-2 | 紅時仍 ff | AC-MG-01c |
 | MU-MG-3 | 清理加 `--force` | AC-MG-01e |
 | MU-MG-4 | 帳本不剝離到尾端 | AC-MG-01d |
-| MU-G1-1 | 推送期基準改回 `HEAD` | AC-G1-01a |
+| MU-MG-5 | 載具改回 `git worktree add` | AC-MG-01h |
+| MU-MG-6 | 拿掉 `PYTHONPATH` 注入 | AC-MG-03b（全套變綠＝測到主樹） |
+| MU-MG-7 | 拿掉執行期自證 | AC-MG-03a |
+| MU-MG-8 | 清理以遞迴刪除處理 `.venv` 連結 | AC-MG-03c |
+| MU-WT-1 | 不比對 `--base-at-dispatch`（不記 `base_drift`） | AC-WT-01b |
+| MU-WT-2 | 殘留普查只看 worktree、不看分支 | AC-WT-01c |
+| MU-G1-1 | 推送期比較對象改回工作樹或 `HEAD` | AC-G1-01a、AC-G1-01d |
 | MU-G1-2 | 提交期恢復阻斷 | AC-G1-01b |
-| MU-G1-3 | 拿掉 `CLAUDECODE` 判斷 | AC-G1-03a |
-| MU-ASK-1 | 詞表檢查移到標籤檢查之後且標籤命中即放行 | AC-ASK-01f |
-| MU-ASK-2 | `[COST]` 不讀 `billing` | AC-ASK-01d |
-| MU-ASK-3 | 恢復舊五類標籤 | AC-ASK-01g |
+| MU-G1-3 | 拿掉 `CLAUDECODE` 判斷 | AC-G1-03a、AC-G1-04a |
+| MU-G1-4 | pre-push 只對 stdin 第一行呼叫棘輪 | AC-G1-01e |
+| MU-G1-5 | prefix 一律取 HEAD 的父提交（不驗尾端是帳本提交） | AC-G1-02d |
+| MU-G1-6 | `ledger_closing_guards` 改回直接讀 `os.environ` 的 OFF | AC-G1-04b |
+| MU-ASK-1 | 可代決句型檢查移到標籤檢查之後且標籤命中即放行 | AC-ASK-01g |
+| MU-ASK-2 | `[COST]` 對 Claude 服務不讀 `billing` | AC-ASK-01d |
+| MU-ASK-3 | 恢復舊五類標籤 | AC-ASK-01h |
 | MU-ASK-4 | 推回判準拿掉「類別定義語」豁免 | AC-ASK-02b |
 | MU-ASK-5 | 豁免放寬到「所有含『您』的句子」 | AC-ASK-02c |
+| MU-ASK-6 | 恢復 v1.0 名詞詞表優先阻斷 | AC-ASK-01b、AC-ASK-01d、AC-ASK-01j |
+| MU-ASK-7 | 無人窗口分支拿掉 | AC-ASK-01i |
+| MU-ASK-8 | `[IRREVERSIBLE]` 必填欄位檢查拿掉 | AC-ASK-01c |
+| MU-ASK-9 | `[COST]` 門檻 `>` 改 `≥`，或拿掉門檻 | AC-ASK-01d |
+| MU-ASK-10 | `[K1]` 不檢查「核准」選項 | AC-ASK-01f |
+| MU-ASK-11 | `[COST]` 非 Claude 服務也套 `billing` | AC-ASK-01e |
 | MU-CI-1 | 不檢查 `runner_name==""` | AC-CI-01a |
 | MU-CI-2 | 重跑上限拿掉 | AC-CI-01b |
+| MU-CI-3 | 時間窗改為 `≥ 14 分`（拿掉上界）或 `≥ 15 分`（收緊下界） | AC-CI-01a（14 分、16.5 分兩例） |
 | MU-OW-1 | 退避改回固定 3 次 | AC-OW-01b |
+| MU-OW-2 | 舊視窗 Stop 不檢查 ack 即排程 | AC-OW-01c |
+| MU-OW-3 | 字樣鎖射程縮回三支檔 | AC-OW-01a |
 | MU-FN-1 | 圍籬比對只看檔案大小不看列內容 | AC-FN-01a |
 
 ## 4. E2E 覆蓋表（一功能一列，不得遺漏；全部入帳 `docs/06_quality/RealVerify_Result_Ledger.md` 才算結）
 
 | 功能 | E2E | 載具（真的是什麼） | realverify 案例 | 不可達部分與備援 |
 |---|---|---|---|---|
-| 單一判決（QV-01） | E2E-AP-QV-01 | 真逐字稿重放：sid 406454ea L2445～L2569＋`quota_burn` 20:50／03:43／03:46／04:00 四列＋halt 標記原檔，真跑 `sessionctl quota` 於兩個時刻（`now` 注入：03:46、09:21） | `RV-AP-QV01` | 無；斷言 03:46＝`WAIT_RESET win=04:00`、09:21＝`CONTINUE acct=eaf5241f6fe2`、無 halted 行 |
-| 判決行與有效期（QV-02） | E2E-AP-QV-02 | 真 `claude -p`（沙盒 `AUTOSDD_QUOTA_CACHE_DIR`、`AUTOSDD_TRACE_DIR`）：先跑 `watch` 得判決、錄製重放推進讀數與時鐘超過 `expires_at`、再跑 `park` | `RV-AP-QV02` | 無；斷言 park 依新判決、痕跡 `stale_verdict_recomputed` |
-| halt 不壓補量（QV-03） | E2E-AP-QV-03 | 真 `claude -p` 回合中跑 `--pace` 兩次（相隔 > TTL），錄製重放計數取數次數 | `RV-AP-QV03` | 無 |
-| park 前置（QV-04） | E2E-AP-QV-04 | 真排程（沙盒命名空間、R-VER 隔離）：A＝`CONTINUE` 不產排程；B＝`--next-est` 放不下 ⇒ `AutoSDD_HandoffSpawn_*` 且 NextRunTime 非空，收尾撤銷 | `RV-AP-QV04` | macOS 走 launchd，憑證是 rc（既有 park 劃界） |
-| watch 單序列（QV-05） | E2E-AP-QV-05 | 真 `sessionctl watch` 背景行程＋錄製重放（87%→0% 跨重置） | `RV-AP-QV05` | 無；斷言只觸發一次 `WAIT_RESET`、重置後不再觸發 |
-| Stop 宣稱守衛（QV-06） | E2E-AP-QV-06 | 真 Stop hook 以逐字稿 406454ea 重放 | `RV-AP-QV06` | 無；斷言 L2564 回合出聲一次 |
-| 失效方向與 billing（QV-07） | E2E-AP-QV-07 | 真 `sessionctl quota --json` 於三種錄製快取（缺 posture、無 credits、credits 可用） | `RV-AP-QV07` | 無 |
+| 單一判決（QV-01） | E2E-AP-QV-01 | 載具 E＋時間平移重放：以 sid 406454ea 03:46 的真實讀數（87%）與 halt 標記原檔（舊帳號 `34cd3507237f`）組沙盒；替身回 `eaf5241f6fe2` 標頭；真 `python tools/sessionctl.py quota` 於「reset＝now＋14 分」與「reset 已過、0%」兩個平移時刻真跑 | `RV-AP-QV01` | 無；斷言前者 `WAIT_RESET`、後者 `CONTINUE acct=eaf5241f6fe2`、兩者皆無 halted 行 |
+| 判決行與有效期（QV-02） | E2E-AP-QV-02 | 載具 E：真 `sessionctl watch` 背景行程得判決 → 替身換讀數 → 真等超過 `expires_at`（`runlong`／`waitfor`）→ 真 `park` | `RV-AP-QV02` | 無；斷言 park 依新判決、痕跡 `stale_verdict_recomputed` |
+| halt 不壓補量（QV-03） | E2E-AP-QV-03 | 載具 E：沙盒放有效 halt 標記，真 `python tools/session_resume_planner.py --pace` 兩次（相隔 > TTL，真等），替身計數 GET 次數 | `RV-AP-QV03` | 無；斷言 GET＝2、首行為判決行 |
+| park 前置（QV-04） | E2E-AP-QV-04 | 真排程（沙盒命名空間、R-VER 隔離）：A＝`CONTINUE` 不產排程；B＝`--next-est` 放不下 ⇒ `AutoSDD_HandoffSpawn_*` 且 NextRunTime 非空；C＝短窗 reset 量不到 ⇒ 判 `NODISPATCH`、park rc 4 且訊息不含 `--why`；收尾撤銷 | `RV-AP-QV04` | macOS 走 launchd，憑證是 rc（既有 park 劃界） |
+| watch 單序列（QV-05） | E2E-AP-QV-05 | 真 `sessionctl watch` 背景行程＋載具 E（87%→0% 跨平移後的重置點） | `RV-AP-QV05` | 無；斷言只觸發一次 `WAIT_RESET`、重置後不再觸發 |
+| Stop 宣稱守衛（QV-06） | E2E-AP-QV-06 | 載具 H：真 Stop hook（`check_claim_provenance.py`）以逐字稿 406454ea 重放；另以近 14 天真實逐字稿全量重放（同 `tools/probe/handoff_census.py` 母體）記 QV 詞族新增命中數，人工抽核 | `RV-AP-QV06` | 斷言 L2564 回合出聲一次；全量重放的新增命中經人工抽核判為假紅者 ≤ 2（超過即改詞表重跑，F-16）；子代理面：SubagentStop 未註冊（無暴露證據不擴守衛面），以判準函式吃真實子代理逐字稿重放代替並登記〈理論洞清單〉 |
+| 失效方向與 billing（QV-07） | E2E-AP-QV-07 | 真 `sessionctl quota --json` 於三種錄製快取（缺 posture、無 credits、credits 可用）＋載具 E 回 429（帶 retry-after） | `RV-AP-QV07` | 無；斷言 429 時 `CONTINUE deg=unmeasured`、`1 ≤ cap ≤ cap_prepare`、`expires_at > now` |
 | LOC 純搬移（QV-08） | E2E-AP-QV-08 | 真 pre-push（合成 stdin）於搬移 commit 與前一 commit 各跑一次，leg 結果相同 | `RV-AP-QV08` | 無 |
-| 標記帶帳號（AC-01） | E2E-AP-AC-01 | 真 `claude -p` 回合觸發 halt 寫入（錄製讀數 ≥ halt），讀真寫出的沙盒標記檔驗 `account` | `RV-AP-AC01` | 無 |
-| 換帳號作廢（AC-02） | E2E-AP-AC-02 | 真 `claude -p`，沙盒 `CLAUDE_CONFIG_DIR` 內換一份憑證檔（觸發 mtime），錄製重放回兩帳號標頭；真 PostToolUse hook 下一次工具呼叫後落 `account_switch`、halt 作廢、`--pace` 首行為 QV | `RV-AP-AC02` | 不切換真帳號（不可、也不該）；以真憑證檔變化＋錄製標頭取代 |
-| `/login` 觸發（AC-03） | E2E-AP-AC-03 | 逐字稿 406454ea L173～L210 重放，真 hook 讀增量 | `RV-AP-AC03` | 無；斷言 L210 時刻判決為新帳號 |
-| 被動觀測（AC-04） | E2E-AP-AC-04 | 觀測型：每次 SessionStart 掃痕跡與逐字稿 `/login` 記錄配對 | `RV-AP-AC04-OBS` | 依掌舵者自然換帳號產生樣本；樣本 0 時照實記「未觀測」，不算 PASS，也不要求人額外操作 |
-| 合入管線（MG-01） | E2E-AP-MG-01 | 真 git：repo 外拋棄式 clone 重建 W6／W11b2 兩分支（含已吸收提交與三提交帳本），真跑 `autopilot merge` | `RV-AP-MG01` | 全套以真 pre-push 的縮小 leg（拋棄式 repo 內只含 MG 測試）代表；完整 leg 對等由 E2E-AP-MG-02 證 |
+| SI 改讀判決（QV-09） | E2E-AP-QV-09 | 沙盒 repo 副本＋載具 E：真跑 SelfImproving 排程巡邏入口（`tools/selfimproving.py` 的巡邏動詞；實作棒現查乾跑旗標，無則於沙盒副本真跑），三種錄製讀數（free、87% 近重置、量不到）各一次 | `RV-AP-QV09` | 無；斷言三次的 `research.skip`／不跳過與判決動作一致、量不到必跳過 |
+| 單一家鎖（QV-10） | E2E-AP-QV-10 | 沙盒 git repo 副本植入一個私有判讀站點，真跑 `python -m unittest discover -s tools/tests -p test_sessionctl_qv.py`（子行程） | `RV-AP-QV10` | 無；斷言 rc≠0 且訊息列出該站點；移除後 rc 0 |
+| WAIT_RESET 叫醒（QV-11） | E2E-AP-QV-11 | 互動面：載具 E 讀數 87%、reset＝now＋3 分（平移），合成小上下文逐字稿，真 `sessionctl keepwarm` 背景行程 ⇒ 在 `win＋skew` ± 30 秒內結束並印叫醒末行；無人面：同讀數於 `AUTOSDD_UNATTENDED` 下真跑哨兵武裝（沙盒排程命名空間）⇒ NextRunTime≈`win＋skew` | `RV-AP-QV11` | macOS 排程憑證是 rc（既有劃界） |
+| 標記帶帳號（AC-01） | E2E-AP-AC-01 | 載具 H＋E：真 PostToolUse hook（`context_budget_guard.py`）以錄製讀數 ≥ halt 觸發 halt 寫入，讀真寫出的沙盒標記檔驗 `account` | `RV-AP-AC01` | 無 |
+| 換帳號作廢（AC-02） | E2E-AP-AC-02 | 載具 H＋E：沙盒 HOME 內換一份憑證檔（真 mtime 變化），替身改回第二帳號標頭；真 PostToolUse hook 下一次呼叫後落 `account_switch`、halt 作廢、真 `--pace` 首行為判決行 | `RV-AP-AC02` | 不切換真帳號（不可、也不該）；以真憑證檔變化＋錄製標頭取代 |
+| `/login` 觸發（AC-03） | E2E-AP-AC-03 | 載具 H：逐字稿 406454ea L173～L210 重放，真 hook 讀增量 | `RV-AP-AC03` | 無；斷言 L210 時刻判決為新帳號。**本列是 AC 家族結案主證** |
+| 被動觀測（AC-04） | E2E-AP-AC-04 | 觀測型：每次 SessionStart 掃痕跡與逐字稿 `/login` 記錄配對 | `RV-AP-AC04-OBS` | **不擋結案**（F-20）：觀測期 30 天；樣本 0 照實記「未觀測」；有樣本且不配對＝再開症狀 |
+| 合入管線（MG-01） | E2E-AP-MG-01 | 真 git：repo 外拋棄式 clone 重建 W6／W11b2 兩分支（含已吸收提交與三提交帳本），真跑 `autopilot merge` | `RV-AP-MG01` | 全套以真 pre-push 的縮小 leg（拋棄式 repo 內只含 MG 測試）代表；完整 leg 對等由 E2E-AP-MG-02、完整載具由 E2E-AP-MG-03 證 |
 | pre-push 對等（MG-02） | E2E-AP-MG-02 | 真 pre-push：合成 stdin 一次、對拋棄式 bare remote 真 `git push` 一次，比 leg 集合 | `RV-AP-MG02` | 無 |
-| worktree 起點（WT-01） | E2E-AP-WT-01 | 真 `claude -p` 於拋棄式 repo（含一個未推送提交、`worktree.baseRef: "head"`）派 `isolation: "worktree"` 子代理執行 `git rev-parse HEAD~0`，斷言含該未推送提交 | `RV-AP-WT01` | 無 |
-| 推送範圍棘輪（G1-01） | E2E-AP-G1-01 | 拋棄式 bare remote＋真 `git push` 觸發真 pre-push | `RV-AP-G101` | 無 |
+| 合入載具（MG-03） | E2E-AP-MG-03 | 真 `autopilot merge` 對本 repo 的真 local clone：clone 內三子樹各植一突變 ⇒ 真全套紅（三 leg 各紅）；再跑一次不植 ⇒ 綠；收尾驗主樹 `.venv` 完好、連結已刪 | `RV-AP-MG03` | Windows 全額佔碟：開跑前查空間；不足 ⇒ 案例記 `no_space` 並以 macOS（clonefile）機器補跑，未補跑前不算結 |
+| worktree 起點（WT-01） | E2E-AP-WT-01 | 載具 C：真 `claude -p` 於拋棄式 repo（含一個未推送提交、`worktree.baseRef: "head"`）派 `isolation: "worktree"` 子代理執行 `git rev-parse HEAD`，斷言含該未推送提交；收尾以 `autopilot merge --dry-run` 的殘留普查驗回收 | `RV-AP-WT01` | 無 |
+| 推送範圍棘輪（G1-01） | E2E-AP-G1-01 | 拋棄式 bare remote＋真 `git push` 觸發真 pre-push：整段推（擋）與前綴推（放行）各一次，工作樹含尾端新列 | `RV-AP-G101` | 無 |
 | 推送閘與前綴推送（G1-02） | E2E-AP-G1-02 | 重建 HYG1 形狀（修 2＋登記 1）三提交，真 `autopilot push` 對 bare remote | `RV-AP-G102` | 無 |
-| 逃生口對稱（G1-03） | E2E-AP-G1-03 | 真 `claude -p` 子行程內設 OFF 提交（拋棄式 repo）⇒ 棘輪照判；同指令在無 `CLAUDECODE` 的乾淨行程 ⇒ 放行 | `RV-AP-G103` | 無 |
-| 詢問類別閘（ASK-01） | E2E-AP-ASK-01 | 真 PreToolUse hook（真 `sessionctl_guard.py` 經載具）以近 14 天 15 次真實提問重放＋三類各一筆合成正例；另一筆真 `claude -p` 回合讓模型真的呼叫 AskUserQuestion（可代決題）⇒ 被擋 | `RV-AP-ASK01` | 互動畫面顯示 block 理由不可程式目視：以 `claude -p` 的 stream 輸出與 hook 痕跡代替（同既有〔OI-20261120-010〕劃界） |
-| 推回與宣稱守衛假紅（ASK-02） | E2E-AP-ASK-02 | 真 Stop hook 以 sid 406454ea 2026-11-25 兩次假推回回合重放 ⇒ 不推回；以近 14 天真實逐字稿全量重放（`tools/probe/handoff_census.py --midwork` 同母體）比較修前修後命中數，新增假紅 0 | `RV-AP-ASK02` | 無 |
+| 逃生口對稱（G1-03） | E2E-AP-G1-03 | 載具 C：真 `claude -p` 讓模型在拋棄式 repo 以 Bash／PowerShell 設 OFF 提交 ⇒ 棘輪照判並出聲；同指令在無 `CLAUDECODE` 的乾淨行程 ⇒ 放行 | `RV-AP-G103` | 無 |
+| 逃生口族（G1-04） | E2E-AP-G1-04 | 同 G1-03 的 `claude -p` 回合內，模型另以真子行程呼叫 `human_escape.honored("AUTOSDD_SNAPSHOT_GATE_OFF", os.environ)`（環境由 harness 注入，非測試設定）⇒ 印 False 與出聲句 | `RV-AP-G104` | 快照閘本身尚未實作：其 E2E 由 SelfImproving 帳本 DB 案實作階段補（§5 OI 需求）；本列只證述詞在真 harness 環境下的判定 |
+| 詢問類別閘（ASK-01） | E2E-AP-ASK-01 | 主載具 H：真 PreToolUse hook（真 `sessionctl_guard.py` 經載具）以近 14 天 15 次真實提問的 payload 重放＋三類各一筆合成正例（含 force-push、Claude 超額題）；輔載具 C：第一動作以 `claude-code-guide` 查 print 模式能否呼叫 AskUserQuestion，可 ⇒ 一筆真 `claude -p` 回合讓模型真呼叫（可代決題）⇒ 被擋 | `RV-AP-ASK01` | print 模式不可呼叫 ⇒ 輔載具該筆改「錄製的真互動 PreToolUse payload 重放」並照實記錄（F-23）；互動畫面顯示 block 理由不可程式目視（同既有〔OI-20261120-010〕劃界） |
+| 推回與宣稱守衛假紅（ASK-02） | E2E-AP-ASK-02 | 載具 H：真 Stop hook 以 sid 406454ea 2026-11-25 兩次假推回回合重放 ⇒ 不推回；以近 14 天真實逐字稿全量重放（`tools/probe/handoff_census.py --midwork` 同母體）比較修前修後命中數，新增假紅 0 | `RV-AP-ASK02` | 無 |
 | CI 排隊逾時（CI-01） | E2E-AP-CI-01 | `gh api` 錄製三支 run attempt 1／2 回應重放＋真 `ci_wait` 行程；另於下一次真推送被動觀測 | `RV-AP-CI01`、`RV-AP-CI01-OBS` | 外部現象可能消失：被動觀測 0 命中照實記錄（不算 FAIL、不算 PASS），錄製重放為主證 |
-| 舊視窗（OW-01） | E2E-AP-OW-01 | 真行程替身（R-VER 替身）＋真排程重試鏈：替身維持 `status=shell` 2 次後轉閒置 ⇒ 第 3 次退避後關閉；全程痕跡無「請手動」 | `RV-AP-OW01` | 兩個真互動視窗不可自動化（harness UI）⇒ 以替身＋真排程驗到關閉動作前一刻；互動層列 APD §2 外部劃界 |
+| 舊視窗（OW-01） | E2E-AP-OW-01 | 真行程替身（R-VER 替身）＋真排程重試鏈：替身維持 `status=shell` 2 次後轉閒置 ⇒ 第 3 次退避後關閉；全程痕跡無禁字 | `RV-AP-OW01` | 兩個真互動視窗不可自動化（harness UI）⇒ 以替身＋真排程驗到關閉動作前一刻；互動層列 APD §2 外部劃界 |
 | 痕跡圍籬（FN-01） | E2E-AP-FN-01 | 真跑 `run_root_unittests.py`，搭一支故意洩漏的探針測試（紅綠自證：有探針 rc≠0、拿掉 rc 0） | `RV-AP-FN01` | 無 |
 
-覆蓋檢查：§1 每個 REQ 在本表恰有至少一列（QV-01～08、AC-01～04、MG-01～02、WT-01、G1-01～03、ASK-01～02、CI-01、OW-01、FN-01，共 23 列）；不可達者皆有備援與劃界，不留任何未完成的真機項。
+覆蓋檢查：§1 每個 REQ 在本表恰有至少一列（QV-01～11、AC-01～04、MG-01～03、WT-01、G1-01～04、ASK-01～02、CI-01、OW-01、FN-01，共 28 列）；不可達者皆有備援與劃界。
 
-## 5. 跨檔鎖與收尾（CLOSE）
+## 5. 跨檔鎖、收尾（CLOSE）與需主控登記的 OI
 
 - 新測試檔三支（QV、MG、PS）⇒ c1c2 重釘、`_TREE_FILE_FLOORS`、skip 普查、`MIN_TESTS`＋ONBOARDING 同步，由 CLOSE 一次做（並行包只回報建議值）。
-- CI paths：compat-ci 兩支加 `tools/lib/autopilot/**`、`tools/autopilot.py`、`tools/lib/model_window_table.py`；`non_evolvable_globs` 同。
+- CI paths：compat-ci 兩支加 `tools/lib/autopilot/**`、`tools/autopilot.py`、`tools/lib/model_window_table.py`、`tools/lib/quota_ruling.py`、`tools/lib/human_escape.py`、`tools/lib/suite_fence.py`；`non_evolvable_globs` 加 `tools/lib/autopilot/**`、`tools/autopilot.py`、`tools/lib/quota_ruling.py`、`tools/lib/human_escape.py`。
 - SSOT §3：「autopilot＋QuotaVerdict」預告列改反引號登記（檔案存在後）。
-- 根 CLAUDE.md：守衛面清單加 `tools/lib/model_window_table.py`；現查表加 `sessionctl quota`、`autopilot merge／push`；〈換 session 的 SOP〉`park --why` → `--next-est`；機械守衛總表 `sessionctl_guard.py` 列補 PreToolUse／AskUserQuestion。
+- 根 CLAUDE.md、記憶檔、被取代條文與測試：依 APD §12 CLOSE 列、§16 與 QVD §6 對照表逐項，同 commit 收齊。
 - 本 TCS 的 realverify 案例 id 登記於 `docs/06_quality/RealVerify_Protocol/cases.json`。
+- **需主控以 `python tools/openitems.py open` 登記的 OI**（本棒不自行開 OI；凍結時一併登記，id 回填 PRD §16.6 兩列與本節）：
+  1. 快照閘（SelfImproving 帳本 DB 案 AC-LD-12-3）實作時必須經 `human_escape.honored()`，並在 `docs/03_testing/contracts/TCS-SelfImprovingLedgerDb-*` 補一條 AT（`CLAUDECODE`＋`AUTOSDD_SNAPSHOT_GATE_OFF` ⇒ 照常擋並出聲）與一條 E2E。
+  2. 既有「畫面目視」類 OI 依 APD §16 轉載具或改劃界（逐筆處置）。
+  3. PRD §16.6 2026-11-25 兩列原寫「〔OI〕」佔位的實作與 E2E 項（第一列實作 2＋E2E 15、第二列實作 1＋E2E 3；見 PRD 【v2.1.29 勘誤】）。
+
+## 6. v1.0 → v1.1 處置索引（QA-S 發現）
+
+| 發現 | 本檔落點 |
+|---|---|
+| F-01 | REQ-AP-QV-01、QV-10；AC-QV-01g、AC-QV-02b、AC-QV-10a～c；MU-QV-15、21；E2E-AP-QV-10 |
+| F-02 | REQ-AP-QV-07；AC-QV-03b、AC-QV-07a；MU-QV-6；E2E-AP-QV-07 |
+| F-03 | REQ-AP-QV-11；AC-QV-11a～d；MU-QV-22～24；E2E-AP-QV-11 |
+| F-04 | REQ-AP-MG-03；AC-MG-01h、AC-MG-03a～d；MU-MG-5～8；E2E-AP-MG-03 |
+| F-05 | REQ-AP-G1-01；AC-G1-01a、01c～01e；MU-G1-1、4；E2E-AP-G1-01 |
+| F-06 | AC-QV-01e；MU-QV-13 |
+| F-07 | AC-QV-01b、AC-QV-04c；MU-QV-11；E2E-AP-QV-04 C 段 |
+| F-08 | AC-QV-01b（spend）、AC-QV-01f；MU-QV-12、14 |
+| F-11 | AC-ASK-01b、01d、01e、01g、01j；MU-ASK-6、11 |
+| F-13 | §3 新增 MU-QV-8～25、MU-AC-4～5、MU-MG-5～8、MU-WT-1～2、MU-G1-4～6、MU-ASK-6～11、MU-CI-3、MU-OW-2～3 |
+| F-14 | 檔頭〈E2E 載具〉、§4 每列載具欄 |
+| F-15 | REQ-AP-OW-01、AC-OW-01a；MU-OW-3 |
+| F-16 | E2E-AP-QV-06 |
+| F-17 | AC-QV-01d |
+| F-18 | AC-QV-06c、AC-QV-06d、AC-AC-04c |
+| F-19 | AC-QV-02d；MU-QV-17 |
+| F-20 | E2E-AP-AC-04 |
+| F-23 | E2E-AP-ASK-01 |
+| F-25 | AC-QV-04d；MU-QV-18 |
+| 代決 ① | REQ-AP-QV-09；AC-QV-09a～c；MU-QV-19～20；E2E-AP-QV-09 |
+| 代決 ② | REQ-AP-G1-04；AC-G1-04a～c；MU-G1-6；E2E-AP-G1-04；§5 OI 需求 1 |

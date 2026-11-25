@@ -36,7 +36,7 @@
 ### D3　每次自證（fail-closed）＋紅綠自證測試
 
 - 執行期自證（合入步驟 4.5）：以 clone 的 `.venv` 直譯器、全套同一份環境，在 clone 根執行 `import autoclaude, lib.quota_policy` 並印兩者 `__file__`；任一不在 clone 之下 ⇒ `MERGE_VERDICT=carrier_leak`，不跑全套。這把 ADR-006「失效是靜默的」那一格改成大聲。
-- 測試期紅綠自證（TCS AC-MG-03a、E2E-AP-MG-03）：在 clone 的 `tools/`、`AutoClaude/`、`AISDLC_SDD/<LATEST>/` 三個子樹各植一個會讓對應 leg 轉紅的突變 ⇒ 全套必紅；同突變只植在主樹 ⇒ 全套必綠。後者證明子行程鏈（pre-push → 子專案 hook → `local_ci_gate` → pytest）沒有在某一層丟掉 `PYTHONPATH` 而回頭測主樹——執行期自證只驗頂層，這條驗全鏈。
+- 測試期紅綠自證（TCS AC-MG-03b、E2E-AP-MG-03；執行期自證的 AT 是 AC-MG-03a）：在 clone 的 `tools/`、`AutoClaude/`、`AISDLC_SDD/<LATEST>/` 三個子樹各植一個會讓對應 leg 轉紅的突變（主樹不植）⇒ 全套必紅。主樹沒有這些突變，所以「必紅」本身就證明子行程鏈（pre-push → 子專案 hook → `local_ci_gate` → pytest）每一層都在測 clone、沒有在某一層丟掉 `PYTHONPATH` 而回頭測主樹（editable `.pth` 指向的正是主樹）——執行期自證只驗頂層，這條驗全鏈。對應突變 MU-MG-6：拿掉 `PYTHONPATH` 注入 ⇒ 這條 AT 必須轉紅（全套變綠＝測到主樹）。測試一律不改真主樹。
 
 ### D4　寫入者可用 harness 內建隔離，前提三條
 
