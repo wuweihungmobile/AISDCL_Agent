@@ -14,7 +14,7 @@
 
 ## 0. 一頁結論
 
-1. 停工、park、續跑、等重置、可派數五類決定，全部由 `quota_ruling.ruling()` 一次算出，輸出唯一動作（`CONTINUE｜NODISPATCH｜WAIT_RESET｜PARK｜HALT_WEEKLY`）與一行 `QUOTA_VERDICT=`。所有既有額度判讀站點逐一普查（§3.5：改接 C1～C20、劃界 B1～B5），每處標「改接」或「劃界（附 WHY）」；以機械鎖 `QV::SingleHouseTest` 釘住白名單，新增私有判讀站點即紅（R-4.1.6-2、REQ-AP-QV-10）。
+1. 停工、park、續跑、等重置、可派數五類決定，全部由 `quota_ruling.ruling()` 一次算出，輸出唯一動作（`CONTINUE｜NODISPATCH｜WAIT_RESET｜PARK｜HALT_WEEKLY`）與一行 `QUOTA_VERDICT=`。所有既有額度判讀站點逐一普查（§3.5：改接 C1～C21、劃界 B1～B6；v1.2 補 park 提前恢復與換手計畫的 park 分支），每處標「改接」或「劃界（附 WHY）」；以機械鎖 `QV::SingleHouseTest` 釘住白名單，新增私有判讀站點即紅（R-4.1.6-2、REQ-AP-QV-10）。
 2. `cap` 只有一個來源：派工閘同一條管線（`decide`＋清倉＋可得性遲滯＋平穩機制，含目標模型），由 `quota_gate.dispatch_decision()` 抽出後供判決與派工閘共用（§3.2 末、§9）。
 3. 判決帶 `expires_at＝min(measured_at＋180 s, 短窗 reset)`（量不到時另見 §3.3），過期一律重算（R-4.1.6-3）；87%＋距重置 14 分 ⇒ `WAIT_RESET`，不是 `PARK`（R-4.1.6-4）；`WAIT_RESET` 有自己的叫醒載具，不受保溫的 `small_ctx`／`no_usage`／n* 限制，無人窗口改交哨兵（§3.6）。
 4. 量不到讀數 ⇒ `CONTINUE` 加 `deg=unmeasured`，`cap` 走 R-4.1.5-1 的降級上限（`1 ≤ cap ≤ cap_prepare`），不是 `cap=0`——不違反「靜默鎖死已禁止」（R-4.1.6-8 的【v2.1.29 勘誤】）。量不到 reset 時刻 ⇒ `NODISPATCH`，不出 `PARK`（避免 park 自己拒絕造成的死循環）。
@@ -126,7 +126,8 @@ QUOTA_VERDICT=<ACTION> acct=<12 碼|none> win=<短窗 reset ISO|none> wk=<週 re
 | C10 | SessionStart 簡報 | `tools/lib/session_brief.py` `quota_line()` L219～L250（L240 `decide`）、L505～L506（第二處 `decide`） | 兩處皆改：由呼叫端（SessionStart hook）注入判決，簡報以 `quota_ruling.brief_line(r)` 呈現（扁平檔不 import 套件，§8） |
 | C11 | 哨兵巡邏 | planner `_sentinel_tick()` L664 讀 `quota_messages.halt_verdict`；L1482 `read_halt_marker` | 讀判決：`HALT_WEEKLY｜PARK` 維持撞線等待；無人窗口的 `WAIT_RESET` 依 §3.6 交哨兵武裝；帳號不符的 halt 標記交 §7 |
 | C12 | 無人續燒判帶 | `tools/lib/relay_machine.py` L149～L161（`decide(...).band ∈ {free, notice}`） | 改為判決 `ACTION == CONTINUE`（`deg=unmeasured` 時沿用 relay 既有 fail-closed：不續燒） |
-| C13 | 換手決策的額度輸入 | `sessionctl/switchfacts.py` L114～L128 | 改讀判決的 `ACTION`、`win`、`cap` |
+| C13 | 換手決策的額度輸入**與換手計畫的 park 分支**（v1.2 擴寫，N-01 ②） | `sessionctl/switchfacts.py` `quota_facts()` L113～L131（自行取 `park._pace_state`、`qw_plan.plan`、`prepare_pct` 組 `switchplan.Quota`）；`sessionctl/switchplan.py` `_short_hit()`／`_wall()` L99～L120（`stage∈{close,wall}` 或 `short_pct ≥ prepare_pct` 或 `weekly_pct ≥ prepare_pct` ⇒ `PARK_UNTIL`／`PARK_POLL`；經 `controlfacts.decide`、`watch_wake.py` L120～L131 消費）——E2 情境（87%、D=14）判決為 `WAIT_RESET`，它卻出 PARK，且週軸以 prepare（不是 halt）判，與決策表第 2 列也不同 | ①`switchplan.Quota` 的判讀欄 `stage`／`short_pct`／`weekly_pct`／`prepare_pct` 退役，改帶判決欄 `action`（`ACTION`）、`win`、`wk`、`vid`；`credential`、`stale`、`wait_min`（＝`plan.d_min`，只供 `long_wait` 輪詢形態）、`target_axis` 保留。②`_wall()` 依判決 ACTION 對映、不再自比門檻：`PARK` ⇒ `PARK_UNTIL`（`long_wait` 或 `target_axis≠short` 時 `PARK_POLL`），目標＝`win`；`HALT_WEEKLY` ⇒ `PARK_POLL`，目標＝`wk`（`wk=none` 的 spend 列 ⇒ 不出 PARK，回 `STAY` 理由 `spend_limit`）；**`WAIT_RESET` ⇒ `STAY`、理由 `wait_reset`、`Flags.keepwarm=True`、carrier＝`keepwarm（ruling_wait_reset）`，絕不出 `PARK_*`**；`NODISPATCH`／`CONTINUE` ⇒ 回 `None`（交下一列）。`credential` 為真時照舊不出 PARK。③`_short_hit()` 刪除（無呼叫端）。④`switchfacts.quota_facts()` 改由 `ruling_io.gather()` 取判決後組 `Quota`（不再自讀 `park._pace_state`／`policy`；`qw_plan.plan` 只取 `d_min`、`stale`，屬 C 站點診斷用，見 §3.5.3 白名單）；取數失敗 ⇒ `action=None` ⇒ `_wall` 回 `None`（與 `decide` 的「量不到偏續跑」同向）。⑤量測重放 `wastecensus/sections_ctl.py` L184（B4）依新 `Inputs` 形狀同 commit 改，不另寫判準 |
+| C21 | **park 提前恢復**（v1.2 新增，N-01 ①） | `sessionctl/parkearly.py` `tick()` L89～L117（`park._pace_state`→`parkprobe.evaluate`→`recovered` ⇒ `fire_early` 起 `park --fire`＝提前「續跑」）；`sessionctl/parkprobe.py` `evaluate()` L60～L75（`recovered ⇔ cur ≤ parked_pct − EARLY_DROP_PP ∧ cur < policy.prepare_pct`）——cur < prepare 但 `plan.stage=close` 時判決為 `PARK`，它卻提前續跑 | `parkearly.tick` 改為：取 `ruling_io.gather()` 的判決 ⇒ **`fire_early` 的必要條件＝`ACTION == CONTINUE` 且無 `deg=unmeasured`**；`parkprobe.evaluate` 改簽名為 `evaluate(marker, state, ruling, now)`：`recovered ⇔ ruling.action == CONTINUE ∧ ¬ruling.degraded ∧ cur ≤ parked_pct − EARLY_DROP_PP`。`cur < policy.prepare_pct` 這一半**退役**（准許與否只由判決決定）；`cur ≤ parked_pct − 5pp` 這一半**保留為判決之後的遲滯閘**（WHY：它只能讓提前恢復更少、不能讓它在判決不准時發生——一個只收緊、不放寬的 AND 項不構成第二個判讀家；用途是避免讀數在 prepare 附近抖動時 park／提前恢復來回翻轉，Control_Handover DES §8.3 的既有設計理由）。`account_changed` 分支不變（換帳號＝另一個判決輸入，判決本身以新帳號 `state` 重算）。痕跡 `park_early_probe` 加欄 `vid`、`action` |
 | C14 | 交接包額度欄 | `sessionctl/handoff_build.py` L125 | 寫判決行（§4 第 3 點：`--ack` 時重算） |
 | C15 | escalation | `tools/lib/quota_escalation.py` L335（`decide(read_quota(now)…)`） | 改讀判決（第 1 列 spend ⇒ escalate 既有路徑）；同行數替換，淨增 0（該檔 400／400，§9） |
 | C16 | 原始讀數工具 | `tools/lib/quota_meter.py --json` | 首行印「診斷用，判斷請看 `python tools/sessionctl.py quota`」（R-4.1.6-7） |
@@ -302,7 +303,7 @@ engine-bridge 閉包（SSOT §4 第 6 點）：`quota_ruling` 只被 `quota_gate
 
 | 鎖／機制 | 常數 | 史料 | 消費端 | 唯一持有者 |
 |---|---|---|---|---|
-| 判決決策表 | `quota_ruling.py`（`QV_WAIT_RESET_MIN` 讀 `quota_policy`） | PRD §4.1.6、本檔 §3.2 | §3.5.1 C1～C20 | WP-QV |
+| 判決決策表 | `quota_ruling.py`（`QV_WAIT_RESET_MIN` 讀 `quota_policy`） | PRD §4.1.6、本檔 §3.2 | §3.5.1 C1～C21 | WP-QV |
 | 單一家白名單 `RULING_INPUT_SITES` | `tools/tests/test_sessionctl_qv.py` | 本檔 §3.5.2 | 全 repo 判讀站點 | WP-QV（改白名單＝改 §3.5 同 commit） |
 | 派工閘管線 `dispatch_decision` | `quota_gate.py` | 本檔 §3.1 | 判決、C1 | WP-QV |
 | halt 標記 schema | `quota_halt_marker.py` | 痕跡目錄 | `quota_messages`、planner、`acctswitch` | WP-AC（在 WP-QV 收工並親驗後） |
@@ -380,4 +381,5 @@ WP-QV 與 WP-AC 動同一組 quota 檔 ⇒ **串行**。SI 套件測試（`tools
 
 | 發現 | 本檔落點 |
 |---|---|
+| N-01 普查漏 park 提前恢復（parkearly／parkprobe）與換手計畫 park 分支（switchplan） | §3.5.1 C13 擴寫、新 C21；PRD R-4.1.6-2【v2.1.29 勘誤（續）】 |
 | N-06 `plan.cap` 不存在、與 PRD「cap 唯一來源」衝突 | §3.1 `plan` 列、§3.2 `cap` 段（只取 `decision.cap`；`None` ⇒ `max_fanout`） |

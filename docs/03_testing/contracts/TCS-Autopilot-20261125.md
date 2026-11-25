@@ -24,7 +24,7 @@
 | 治理閘逃生口述詞 | 新扁平 `tools/lib/human_escape.py` | 函式庫：單檔共用工具 |
 | 痕跡圍籬 | 新扁平 `tools/lib/suite_fence.py`；`min_tests_margin.py` 承接自 runner 抽出的兩函式 | 函式庫：單檔共用工具 |
 | LOC 抽出 | 新扁平 `tools/lib/model_window_table.py`；`quota_halt_marker.py` 承接 halt 判讀 | 函式庫（扁平共用） |
-| 既有改動 | `ledger_closing_guards.py`、`tools/git-hooks/pre-push`、`ciwait/core.py`、`oldwin.py`、`oldwin_sched.py`、`check_pending_handoff.py`、`check_claim_provenance.py`、`context_budget_guard.py`、`run_root_unittests.py`、`session_resume_planner.py`、`quota_*`、`session_brief.py`、`relay_machine.py`、sessionctl watch／park／qw／kw／switchfacts／handoff_build／converge 族、`selfimproving/{sched,patrol,fourq,writeverbs,evspec}.py` | 既有家 |
+| 既有改動 | `ledger_closing_guards.py`、`tools/git-hooks/pre-push`、`ciwait/core.py`、`oldwin.py`、`oldwin_sched.py`、`check_pending_handoff.py`、`check_claim_provenance.py`、`context_budget_guard.py`、`run_root_unittests.py`、`session_resume_planner.py`、`quota_*`、`session_brief.py`、`relay_machine.py`、sessionctl watch／park／parkearly／parkprobe／qw／kw／switchfacts／switchplan／controlfacts／handoff_build／converge 族、`selfimproving/{sched,patrol,fourq,writeverbs,evspec}.py` | 既有家 |
 | 測試 | 新三檔（QV、MG、PS）＋既有檔增量 | 測試 |
 | 真機 E2E 家族 | `tools/lib/realverify/cases/quotaverdict.py`、`tools/lib/realverify/cases/autopilot.py`（新家族檔） | realverify |
 
@@ -32,7 +32,7 @@
 
 | REQ | 需求 | PRD／設計 | 狀態 |
 |---|---|---|---|
-| REQ-AP-QV-01 | 單一判決函式：同一份輸入只產一個 ACTION；原始讀數帶、模型分軌週軸、spend 軸、QW stage 在函式內合成（QVD §3.2 決策表七列）；`cap` 唯一來源＝派工閘管線 `dispatch_decision()`；配速床／趕工戳記只影響 cap、不影響動作 | R-4.1.6-1、R-4.1.6-4、R-4.1.6-5【v2.1.29 勘誤】 | 待實作 |
+| REQ-AP-QV-01 | 單一判決函式：同一份輸入只產一個 ACTION；原始讀數帶、模型分軌週軸、spend 軸、QW stage 在函式內合成（QVD §3.2 決策表七列）；`cap` 唯一來源＝派工閘管線 `dispatch_decision()`；配速床／趕工戳記只影響 cap、不影響動作；換手計畫（`switchplan._wall`）與 park 提前恢復（`parkearly.tick`）只依判決 ACTION、不自比門檻（v1.2，QVD §3.5 C13、C21） | R-4.1.6-1、R-4.1.6-2、R-4.1.6-4、R-4.1.6-5【v2.1.29 勘誤】 | 待實作 |
 | REQ-AP-QV-02 | 判決行格式（含附加欄 `mdl=`、`deg=`）與有效期；過期必重算；讀數不可用時 `expires_at＝now＋max(TTL, retry_after)` | R-4.1.6-2、R-4.1.6-3【v2.1.29 勘誤】；QVD §3.3、§4 | 待實作 |
 | REQ-AP-QV-03 | halt 標記不壓補量；補量受紅線 1 四條件 | R-4.1.6-6；QVD §3.4 | 待實作 |
 | REQ-AP-QV-04 | park 只在判決 `PARK｜HALT_WEEKLY` 時登記；`--why` 退役、`--next-est` 取代（缺省值由程式推導、只能往上調）；量不到 reset 不判 PARK；park 的所有訊息與判決動作一致 | R-4.1.6-5；QVD §3.2 第 3 列、§5 | 待實作 |
@@ -109,6 +109,10 @@
 
 | AC | 判準 | AT 座標 |
 |---|---|---|
+| AC-QV-12a | 換手計畫不出 PARK（N-01 ②）：E2 讀數（短窗 87%、D=14、`stage=free`）組出的判決 `WAIT_RESET` 餵 `switchplan.decide` ⇒ `action == STAY`、`reason` 含 `wait_reset`、`flags.keepwarm`，且**不是** `PARK_UNTIL`／`PARK_POLL` | `QV::ConsumerTest::test_switchplan_wait_reset_never_parks` |
+| AC-QV-12b | 換手計畫依判決對映：`PARK` ⇒ `PARK_UNTIL` 目標＝`win`（D>6 小時 ⇒ `PARK_POLL`）；`HALT_WEEKLY` ⇒ `PARK_POLL` 目標＝`wk`；`HALT_WEEKLY wk=none`（spend）⇒ `STAY spend_limit`；`CONTINUE`／`NODISPATCH` ⇒ 不由額度列命中；週軸 80%（≥ prepare、< halt）而判決 `CONTINUE` ⇒ 不出 PARK（舊判準以 prepare 判週軸）；取數失敗（`action=None`）⇒ 不出 PARK；`switchplan.Quota` 無 `short_pct`／`weekly_pct`／`prepare_pct` 欄（結構斷言） | `QV::ConsumerTest::test_switchplan_maps_ruling_actions` |
+| AC-QV-13a | park 提前恢復受判決約束（N-01 ①）：park 標記 `parked_pct=92`、當下讀數 80（< prepare、比基準低 12pp）、但 `plan.stage=close` ⇒ 判決 `PARK` ⇒ `parkearly.tick` 不呼叫 `fire_early`（以縫計數 0）、痕跡 `park_early_probe` 帶 `action=PARK` | `QV::ConsumerTest::test_parkearly_respects_park_ruling` |
+| AC-QV-13b | 判決 `CONTINUE` 且讀數比基準低 ≥ 5pp ⇒ fire 一次；判決 `CONTINUE` 但只低 3pp ⇒ 不 fire（遲滯閘保留）；判決 `CONTINUE deg=unmeasured` ⇒ 不 fire；`parkprobe.evaluate` 原始碼不再引用 `prepare_pct`（AST） | `QV::ConsumerTest::test_parkearly_fires_only_on_continue_with_drop` |
 | AC-AC-01a | 三種持久狀態新寫入 schema 必有 `account`；量不到 ⇒ `null`＋出聲 | `QV::AcctSwitchTest::test_writes_carry_account` |
 | AC-AC-02a | 標記 `34cd3507237f`、快取 `eaf5241f6fe2` ⇒ 改名 `.void-<ts>`、`account_switch` 一列、出聲一次、`--pace` 不印 halted | `QV::AcctSwitchTest::test_mismatch_voids_marker` |
 | AC-AC-02b | 舊格式標記＋同軸讀數低於門檻 ⇒ 作廢；高於 ⇒ 保留並補寫 `account` | `QV::AcctSwitchTest::test_legacy_marker_by_reading` |
@@ -217,6 +221,10 @@
 | MU-QV-24 | 哨兵只對 `HALT_WEEKLY｜PARK` 維持等待（不含無人窗口的 `WAIT_RESET`） | AC-QV-11c |
 | MU-QV-25 | 宣稱守衛不考慮 AskUserQuestion 結果之前的判決 | AC-QV-06d |
 | MU-QV-26 | 判決 cap 改回 `min(decision.cap, getattr(plan, "cap", …))`，或 `decision.cap is None` 時改取 0／保溫次數 `plan.k`（N-06） | AC-QV-01g |
+| MU-QV-27 | `switchplan._wall` 恢復 `short_pct ≥ prepare_pct` 或 `stage∈{close,wall}` 判準（不看判決） | AC-QV-12a、AC-QV-12b |
+| MU-QV-28 | `switchplan` 把 `WAIT_RESET` 對映成 `PARK_UNTIL` | AC-QV-12a |
+| MU-QV-29 | `parkprobe.evaluate` 恢復 `cur < prepare_pct` 為唯一准許條件（不看判決） | AC-QV-13a |
+| MU-QV-30 | 拿掉 `cur ≤ parked_pct − EARLY_DROP_PP` 遲滯閘，或 `deg=unmeasured` 也准 fire | AC-QV-13b |
 | MU-AC-1 | reconcile 不比對 `account`（只看存在） | AC-AC-02a |
 | MU-AC-2 | 舊格式標記一律保留 | AC-AC-02b |
 | MU-AC-3 | 逐字稿觸發器不記 byte offset（每次全讀） | AC-AC-03b |
@@ -264,8 +272,8 @@
 | 單一判決（QV-01） | E2E-AP-QV-01 | 載具 E＋時間平移重放：以 sid 406454ea 03:46 的真實讀數（87%）與 halt 標記原檔（舊帳號 `34cd3507237f`）組沙盒；替身回 `eaf5241f6fe2` 標頭；真 `python tools/sessionctl.py quota` 於「reset＝now＋14 分」與「reset 已過、0%」兩個平移時刻真跑 | `RV-AP-QV01` | 無；斷言前者 `WAIT_RESET`、後者 `CONTINUE acct=eaf5241f6fe2`、兩者皆無 halted 行 |
 | 判決行與有效期（QV-02） | E2E-AP-QV-02 | 載具 E：真 `sessionctl watch` 背景行程得判決 → 替身換讀數 → 真等超過 `expires_at`（`runlong`／`waitfor`）→ 真 `park` | `RV-AP-QV02` | 無；斷言 park 依新判決、痕跡 `stale_verdict_recomputed` |
 | halt 不壓補量（QV-03） | E2E-AP-QV-03 | 載具 E：沙盒放有效 halt 標記，真 `python tools/session_resume_planner.py --pace` 兩次（相隔 > TTL，真等），替身計數 GET 次數 | `RV-AP-QV03` | 無；斷言 GET＝2、首行為判決行 |
-| park 前置（QV-04） | E2E-AP-QV-04 | 真排程（沙盒命名空間、R-VER 隔離）：A＝`CONTINUE` 不產排程；B＝`--next-est` 放不下 ⇒ `AutoSDD_HandoffSpawn_*` 且 NextRunTime 非空；C＝短窗 reset 量不到 ⇒ 判 `NODISPATCH`、park rc 4 且訊息不含 `--why`；收尾撤銷 | `RV-AP-QV04` | macOS 走 launchd，憑證是 rc（既有 park 劃界） |
-| watch 單序列（QV-05） | E2E-AP-QV-05 | 真 `sessionctl watch` 背景行程＋載具 E（87%→0% 跨平移後的重置點） | `RV-AP-QV05` | 無；斷言只觸發一次 `WAIT_RESET`、重置後不再觸發 |
+| park 前置（QV-04） | E2E-AP-QV-04 | 真排程（沙盒命名空間、R-VER 隔離）：A＝`CONTINUE` 不產排程；B＝`--next-est` 放不下 ⇒ `AutoSDD_HandoffSpawn_*` 且 NextRunTime 非空；C＝短窗 reset 量不到 ⇒ 判 `NODISPATCH`、park rc 4 且訊息不含 `--why`；D（v1.2，N-01 ①）＝沙盒 park 標記（`parked_pct=92`）＋錄製讀數 80%、`stage=close`，真跑 `python tools/session_resume_planner.py --sentinel-tick`（沙盒任務書）⇒ 痕跡 `park_early_probe action=PARK`、無 `park --fire` 子行程（`fire_early` 的子行程 argv 以 R-VER 替身攔截計數）；換成 0% 讀數 ⇒ 恰一次；收尾撤銷 | `RV-AP-QV04` | macOS 走 launchd，憑證是 rc（既有 park 劃界） |
+| watch 單序列（QV-05） | E2E-AP-QV-05 | 真 `sessionctl watch` 背景行程＋載具 E（87%→0% 跨平移後的重置點） | `RV-AP-QV05` | 無；斷言只觸發一次 `WAIT_RESET`、重置後不再觸發；同一回合 `switch_plan` 痕跡（`switchplan.trace_plan`）無 `PARK_UNTIL`／`PARK_POLL`（v1.2，N-01 ②） |
 | Stop 宣稱守衛（QV-06） | E2E-AP-QV-06 | 載具 H：真 Stop hook（`check_claim_provenance.py`）以逐字稿 406454ea 重放；另以近 14 天真實逐字稿全量重放（同 `tools/probe/handoff_census.py` 母體）記 QV 詞族新增命中數，人工抽核 | `RV-AP-QV06` | 斷言 L2564 回合出聲一次；全量重放的新增命中經人工抽核判為假紅者 ≤ 2（超過即改詞表重跑，F-16）；子代理面：SubagentStop 未註冊（無暴露證據不擴守衛面），以判準函式吃真實子代理逐字稿重放代替並登記〈理論洞清單〉 |
 | 失效方向與 billing（QV-07） | E2E-AP-QV-07 | 真 `sessionctl quota --json` 於三種錄製快取（缺 posture、無 credits、credits 可用）＋載具 E 回 429（帶 retry-after） | `RV-AP-QV07` | 無；斷言 429 時 `CONTINUE deg=unmeasured`、`1 ≤ cap ≤ cap_prepare`、`expires_at > now` |
 | LOC 純搬移（QV-08） | E2E-AP-QV-08 | 真 pre-push（合成 stdin）於搬移 commit 與前一 commit 各跑一次，leg 結果相同 | `RV-AP-QV08` | 無 |
@@ -334,4 +342,5 @@
 
 | 發現 | 本檔落點 |
 |---|---|
+| N-01 普查漏 parkearly／parkprobe 與 switchplan | REQ-AP-QV-01；AC-QV-12a～b、AC-QV-13a～b；MU-QV-27～30；E2E-AP-QV-04 D 段、E2E-AP-QV-05 斷言補 |
 | N-06 `plan.cap` 不存在 | AC-QV-01g 改寫；MU-QV-26 |
