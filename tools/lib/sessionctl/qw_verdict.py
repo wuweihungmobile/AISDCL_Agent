@@ -1,7 +1,8 @@
 """QuotaWall 判決：擋派、Stop 推回、牆中靜音（R218 Q1；DES §6、REQ-QW-10～16）。
 
 本檔只回**判決值**（Stop 推回訊息／靜音分類；擋派分支已退役，QVD C2），不 import hook、
-不擋任何東西；`converge`、兩支 hook 的接線在 Q4（守衛面，主控親套）。任何例外 ⇒ 放行（`(0, "")`／`""`）＝fail-open。
+不擋任何東西；`converge`、兩支 hook 的接線在 Q4（守衛面，主控親套）。
+任何例外 ⇒ 放行（`(0, "")`／`""`）＝fail-open。
 `AUTOSDD_QUOTAWALL_OFF` 只關擋派與推回；牆中偵測、牆內延後、牆中靜音是正確性，不受影響。
 """
 from __future__ import annotations
