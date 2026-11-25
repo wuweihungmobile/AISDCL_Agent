@@ -1,6 +1,6 @@
 # ADR-XPLAT-018：自動合入的驗證載具——獨立 clone＋`.venv` 連結＋每次自證；寫入者可用 harness 內建隔離（`baseRef: head`）
 
-- **狀態**：**提案 v1.1**（SD-1 起草，SD-2 依 QA 複審 N-03 加 D5，2026-11-25；隨 `docs/02_architecture/Autopilot_Pipeline_Design.md` v1.1 一併送 QA 複審，通過後由主控依〈凍結常態規則〉凍結為 Accepted）。本檔是設計文件，不含生產碼。
+- **狀態**：**提案 v1.2**（SD-1 起草，SD-2 依 QA 複審 N-03 加 D5，SD-3 依 QA 第三輪 R-02 改 `.env` 為路徑覆寫、clone 去 `--local`，2026-11-25；隨 `docs/02_architecture/Autopilot_Pipeline_Design.md` v1.1 一併送 QA 複審，通過後由主控依〈凍結常態規則〉凍結為 Accepted）。本檔是設計文件，不含生產碼。
 - **平台**：平台中立（Windows 11＋PowerShell 為主控機；POSIX 差異逐項寫在 §2）。
 - **關聯**：`docs/02_architecture/Autopilot_Pipeline_Design.md` §3（合入管線）、`docs/03_testing/contracts/TCS-Autopilot-20261125.md`（REQ-AP-MG-01～03、REQ-AP-WT-01）、PRD `docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` 修訂表 v2.1.28 列（掌舵者 2026-11-25 立案原文）。
 - **修訂對象**：**部分取代** [ADR-XPLAT-006](ADR-XPLAT-006-parallel-agent-snapshot-fanout.md) §7「已拒絕的方案」中兩列——「直接開 harness 內建隔離」與「linked worktree 當驗證者載具」——以及爭點 4 的裁決「不可直接開啟」。ADR-006 的其他決策（快照式唯讀驗證樹、Stage 2 放棄、Stage 3 擱置、爭點 5 的 `.pth` 事實）**全部維持**。ADR-006 原文不改；CLOSE 窗口在其 §7 表後加一行指向本檔（只增不改）。
@@ -16,13 +16,15 @@
 
 ### D1　驗證載具＝repo 外獨立 clone（不是 linked worktree）
 
-`git clone --local --no-checkout <主樹> <tempfile.gettempdir()/autopilot-<ts>>`，在 clone 內建拋棄式分支並套上代理提交、checkout。
+`git clone --no-checkout <主樹路徑> <tempfile.gettempdir()/autopilot-<ts>>`，在 clone 內建拋棄式分支並套上代理提交、checkout。
+
+**不帶 `--local`**（v1.2，SD-3 依 QA 第三輪 R-02 實測）：本地路徑來源下 git 預設就會「能硬連結就硬連結、不能就複製物件」；明寫 `--local` 反而把硬連結失敗變成致命錯誤。SD-3 當回合在主控機實測（暫存目錄 `C:`、來源 repo 在 `D:` 的拋棄式小 repo）：`git clone --local --no-checkout` ⇒ rc 128「fatal: failed to create link … Improper link」；同一對路徑不帶 `--local` ⇒ rc 0。v1.1 的寫法在主控機上連 clone 都建不起來。跨卷時物件改為複製，步驟 0 的空間檢查因此加計物件庫大小（見下表第 3 列）。
 
 | ADR-006 §7 拒絕 linked worktree 的理由 | 獨立 clone 下的狀態 |
 |---|---|
 | 共用 `refs/stash` | **結構上不共用**：clone 有自己的 `.git`（`git rev-parse --git-common-dir` 指向 clone 自己）；`.git/config`、`.git/info/exclude` 同樣不共用（ADR-006 §8 第 10 點的附帶問題一併消失） |
 | 無 `.venv`（忘了帶 `PYTHONPATH` 是靜默失效） | 由 D2 組裝；失效改為**大聲**（D3 自證 fail-closed） |
-| 真實磁碟貴一個數量級 | 物件以 `--local` 硬連結共享（同一卷）；工作樹在 Windows 全額佔碟（無 clonefile），合入步驟 0 先檢查可用空間 ≥ 2×已追蹤檔總大小，不足 ⇒ `no_space`（ADR-006 §2.3「每棵驗證樹全額佔碟、開樹前檢查餘裕」逐字沿用） |
+| 真實磁碟貴一個數量級 | 物件在同一卷時由 git 自動硬連結共享，跨卷時複製（v1.2：不帶 `--local`，見上）；工作樹在 Windows 全額佔碟（無 clonefile），合入步驟 0 先檢查可用空間 ≥ 2×已追蹤檔總大小，**暫存目錄與主樹不同卷時再加計物件庫大小**（`git count-objects -v` 的 `size-pack`＋`size`；同卷與否以兩路徑的 `os.stat().st_dev` 判），不足 ⇒ `no_space`（ADR-006 §2.3「每棵驗證樹全額佔碟、開樹前檢查餘裕」逐字沿用） |
 
 為什麼不用 ADR-006 的整樹拷貝（`cp -c -R`／`robocopy`）：合入結果要先 rebase 才存在，整樹拷貝會把主樹的未提交狀態與 `.git` 一起帶過去，rebase 必須在拷貝內做、等於在一份含主樹 stash 與 config 的 `.git` 上寫——那正是 ADR-006 要避免的共用面；且 Windows 無 clonefile，整樹拷貝連 `.venv` 一起全額複製（數 GB）。獨立 clone 只帶已提交內容，符合「驗證標的＝合入的提交」。
 
@@ -58,12 +60,18 @@ ADR-006 爭點 4 的三項事實逐條處置：
 
    | 項 | 處置 | WHY |
    |---|---|---|
-   | `.env` | 帶入：同卷**硬連結**（不複製內容到別處；跨卷 ⇒ 不帶並以 `carrier_divergence` 記「無法帶入」，不跑全套） | 四層 env 鏈的本機層；缺席＝讀出廠值，可能假綠。硬連結使 clone 刪除時只刪目錄項、主樹檔不受影響；機密不出現第二份內容 |
+   | `.env` | **不進 clone**（v1.2，R-02；取代 v1.1 的同卷硬連結）：clone 內不產生任何 `.env` 檔；全套子行程環境設路徑覆寫 `AUTOSDD_LOCAL_ENV_FILE=<主樹>/.env`，env 鏈的本機層讀者改從該路徑**唯讀**讀取（規則見表後〈`.env` 路徑覆寫〉） | 四層 env 鏈的本機層；缺席＝讀出廠值，可能假綠，所以必須讓 clone 讀到主樹那一份。v1.1 的硬連結有兩個問題：①主控機暫存目錄在 `C:`、repo 在 `D:`，硬連結必然跨卷失敗，每次合入都判 `carrier_divergence`（QA 第三輪 R-02 實測環境）；②硬連結與主樹是同一個檔，clone 內任何就地改寫都會改到主樹的機密檔。路徑覆寫兩個問題都沒有：不依賴卷，clone 裡沒有可寫的那一份 |
    | `.dev_env_state.json` | 帶入：複製（非機密、數百位元組） | 平台出處判準讀它；缺席會走「未跑 dev_start」分支而與主樹不同 |
    | `.venv/` | D2（連結） | — |
    | `arch-fitness.json`、`build/reports/**` | 不帶 | 全套的**產物**，不是輸入；clone 內重新產生 |
    | `.hypothesis/` | 不帶 | 快取；缺席只影響速度與範例重播，不改判定（重播差異由基線吸收） |
    | `.act-runs/`、`.vscode/`、`.claude/worktrees/` | 不帶 | 與全套無關 |
+
+   **`.env` 路徑覆寫**（v1.2，R-02）：
+   - **為什麼是路徑覆寫、不是把值注入子行程環境**（QA 建議 (b) 的兩個做法擇一）：env 鏈是「行程 env ＞ `AutoClaude/.env`（引擎三鍵）＞ 根 `.env` ＞ `env.shared` ＞ 出廠」（`tools/lib/quota_env_layers.py` 檔頭、`AutoClaude/autoclaude/utils/config.py` `_ENV_FILES`）。把 `.env` 的值灌進行程環境，等於把它從第三層抬到第一層：會蓋過 `AutoClaude/.env` 的引擎三鍵；`--env-doctor` 與讀 `os.environ` 的測試會看到來源變成 process；`.env` 裡的機密（API key、DB DSN）也會出現在每一個子行程的環境裡，而 `AutoClaude/autoclaude/execution/boot_self_check.py` 的 `permission_bypass_allowed_from_env()`（L360～L363）刻意只讀行程環境、不讀 `.env`（「這是安全閘，要由啟動方式明確注入」）——`.env` 若寫了那個旗標，注入會讓這道安全閘在 clone 內打開、在主樹不開，判定與主樹不同。路徑覆寫只換「第三層從哪個檔讀」，層序與來源標籤都不變。
+   - **讀者**：根 `.env` 的讀者只有兩個家——harness 側 `quota_env_layers`（`merged_file_env()`、`diagnose()` 的本機層路徑）與引擎側 `config.py` 的 `_ENV_FILES` 第二項（根 `.env`）。兩者改為：`AUTOSDD_LOCAL_ENV_FILE` 有設，**且** `<repo 根>/.git/autopilot-clone` 標記存在（步驟 4.5 由載具寫入 clone 的 `.git/`，不在工作樹、不被追蹤），**且**呼叫端讀的是預設 repo 根（測試傳入的拋棄式 root 不受影響）⇒ 本機層改讀該路徑；三條件缺一 ⇒ 照舊讀 `<repo 根>/.env`。WHY 要標記：沒有它，任何行程設這個變數就能把本機層換成任意檔，等於多一條改額度門檻的路；只認 autopilot clone，主樹與一般 worktree 設了也無效。WP-MERGE 第一動作以 `git grep` 重查根 `.env` 的讀者，表外新讀者同 commit 納入。
+   - **唯讀**：讀者只以讀取模式開檔。會寫本機層的 `python tools/lib/quota_policy.py --env-doctor --fix` 與 `tools/git-hooks/post-merge`，在覆寫生效時一律拒寫（rc 2，印「本機層由 AUTOSDD_LOCAL_ENV_FILE 指向主樹、唯讀」）。
+   - **驗證**（步驟 4.5，取代 v1.1 的「`.env` 存在且雜湊相等」）：主樹有 `.env` 時，①clone 根沒有 `.env`；②以 clone 的 `.venv` 直譯器、全套同一份環境，印出 harness 側本機層路徑與引擎側 `_ENV_FILES` 第二項，兩者都必須解析到主樹 `.env`；③載具讀主樹 `.env` 的內容雜湊入基線鍵。任一不符 ⇒ `carrier_divergence`（附哪一項），不跑全套。主樹沒有 `.env` ⇒ 不設覆寫、跳過並記痕跡（clone 同樣沒有，語意與主樹相同）。全套跑完若 clone 根出現 `.env`（某測試寫了它）⇒ 記痕跡 `clone_env_written`；它在覆寫下不被讀、隨 clone 刪除，主樹不受影響。
 
    WP-MERGE 第一動作以「同一 HEAD 的乾淨 clone 跑全套 vs 主樹 pre-push」逐 leg 對照，把普查中缺席會改變判定的項補進表（同一 commit 改本表）；之後新增 ignored 輸入檔＝改表。帶入後、跑全套前，**每筆白名單項在 clone 內必須存在且內容雜湊等於主樹**（主樹本身沒有該檔者跳過並記痕跡），否則 `MERGE_VERDICT=carrier_divergence`（附缺項），不跑全套。
 2. **基線對照**：同一 clone、同一環境，在套上代理提交**之前**（主樹本地 HEAD）先跑一次同款全套作基線；以 `(主樹 HEAD sha, CARRIER_LOCAL_STATE 內容雜湊, 主樹 .venv 直譯器路徑)` 為鍵快取於 `~/.autosdd/autopilot/baseline.jsonl`，同鍵且結果為綠者重用、不重跑（主樹 HEAD 不變時連續合入只付一次基線）。判定：基線綠＋候選紅 ⇒ `red`（代理的）；基線紅 ⇒ 候選的紅 leg 集合 ⊆ 基線紅 leg 集合 ⇒ `MERGE_VERDICT=carrier_divergence legs=<基線紅 leg>`（載具或主樹本身的問題，不算到代理頭上；產修復任務書，主控派修載具／主樹，不 ff）；候選多出基線沒有的紅 leg ⇒ `red`（只列多出的 leg）。
@@ -83,12 +91,13 @@ ADR-006 爭點 4 的三項事實逐條處置：
 ## 4. 後果
 
 - 正面：合入閘測到的是合入樹，且這件事每次被驗；寫入者隔離與 main-only 原則並存；殘留分支有鎖；機器本地狀態的差異不會被算成代理的紅（D5 基線）。
-- 負面（D5）：主樹 HEAD 每變一次多付一次基線全套（同鍵重用）；`.env` 跨卷時無法帶入、該次合入改走 `carrier_divergence`。
+- 負面（D5）：主樹 HEAD 每變一次多付一次基線全套（同鍵重用）。（v1.1 的「`.env` 跨卷時無法帶入」已由 v1.2 的路徑覆寫消除；代價是根 `.env` 的兩個讀者家各多一個條件分支，以及 `--fix`／post-merge 在 clone 內拒寫。）
+- 負面（D1，v1.2）：暫存目錄與主樹不同卷時，物件庫整份複製一次（時間與空間），步驟 0 已加計。
 - 負面：Windows 每次合入一棵全額工作樹（數百 MB 等級，以 `df` 類工具量，不用 `du`，ADR-006 §2.3）；連結的建立與刪除是新的平台差異面（D2 已逐平台寫明）。
 - 誠實劃界：執行期自證只驗兩個頂層套件的解析；以 `importlib` 動態載入或子行程清空環境的路徑，只有測試期紅綠自證（三子樹各一突變）看得到，且只對植了突變的那幾條 leg 有鑑別力。
 
 ## 5. 三問
 
-1. 另一台機器會不會回來？junction／symlink 依平台分支、刪除前驗身分；`PYTHONPATH` 分隔符取 `os.pathsep`；自證每次執行；每台機器不同的 `.env`／`.dev_env_state.json` 由 D5 白名單帶入該機器自己的那一份並逐筆驗雜湊，其餘機器本地差異由同機基線對照吸收（基線鍵含主樹 HEAD 與白名單雜湊，跨機器不共用）。
+1. 另一台機器會不會回來？junction／symlink 依平台分支、刪除前驗身分；`PYTHONPATH` 分隔符取 `os.pathsep`；自證每次執行；每台機器不同的 `.env`／`.dev_env_state.json` 由 D5 處置（`.env` 以路徑覆寫讀該機器主樹那一份、`.dev_env_state.json` 複製，逐筆驗）；暫存目錄與 repo 是否同卷因機器而異（主控機即不同卷），v1.2 起 clone 不帶 `--local`、`.env` 不靠硬連結，兩種配置走同一條路，只差空間檢查是否加計物件庫；其餘機器本地差異由同機基線對照吸收（基線鍵含主樹 HEAD 與白名單雜湊，跨機器不共用）。
 2. 文件／座標是否一致？Autopilot 設計 §3、TCS、ADR-006 §7 後加的指向行（CLOSE）、根 CLAUDE.md 鐵律七檢查表第 4 條加註，同 commit 收齊。
 3. 有沒有「之後再看」？無；Windows 佔碟是已知成本，已由步驟 0 的空間檢查處置；ADR-006 爭點 3 的機器本地狀態族由 D5 接手（白名單初始成員由 WP-MERGE 第一動作以逐 leg 對照補齊，屬實作步驟、不是延後）。
