@@ -1,7 +1,7 @@
 # TCS-Autopilot-20261125：自動駕駛開發——單一額度判決、換帳號作廢、合入推送管線、詢問類別閘（需求＋驗收合一）
 
-> 上游：PRD `docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` 修訂表 v2.1.28、v2.1.29（勘誤）與 v2.1.29（續）、§4.1.5 R-4.1.5-1、§4.1.6、§4.1.7、§4.5.12、§15.5 紅線 14、§16.6 2026-11-25 兩列；設計 `docs/02_architecture/QuotaVerdict_AccountSwitch_Design.md` v1.2（下稱 QVD）、`docs/02_architecture/Autopilot_Pipeline_Design.md` v1.2（下稱 APD）、`docs/04_planning/ADR/ADR-XPLAT-018-autopilot-merge-carrier.md`（下稱 ADR-018）；SelfImproving_PRD AC-SI-30-1／NFR-SI-07-5／FC-l 與 SelfImproving_Ledger_DB_PRD AC-LD-12-3 的 2026-11-25 註記。
-> **狀態（2026-11-25，SD-2 v1.2）**：規格階段，實作未開始。所有 AT／MU／E2E 狀態欄＝「待實作」；未跑不得寫成已驗。v1.0 → v1.1 依 QA-S 審查修訂（§6）；v1.1 → v1.2 依 QA 複審修訂（§7）。
+> 上游：PRD `docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` 修訂表 v2.1.28、v2.1.29（勘誤）與 v2.1.29（續）、§4.1.5 R-4.1.5-1、§4.1.6、§4.1.7、§4.5.12、§15.5 紅線 14、§16.6 2026-11-25 兩列；設計 `docs/02_architecture/QuotaVerdict_AccountSwitch_Design.md` v1.3（下稱 QVD）、`docs/02_architecture/Autopilot_Pipeline_Design.md` v1.3（下稱 APD）、`docs/04_planning/ADR/ADR-XPLAT-018-autopilot-merge-carrier.md`（下稱 ADR-018）；SelfImproving_PRD AC-SI-30-1／NFR-SI-07-5／FC-l 與 SelfImproving_Ledger_DB_PRD AC-LD-12-3 的 2026-11-25 註記。
+> **狀態（2026-11-25，SD-3 v1.3）**：規格階段，實作未開始。所有 AT／MU／E2E 狀態欄＝「待實作」；未跑不得寫成已驗。v1.0 → v1.1 依 QA-S 審查修訂（§6）；v1.1 → v1.2 依 QA 複審修訂（§7）；v1.2 → v1.3 依 QA 第三輪修訂（§8）。
 > 測試座標約定：`QV`＝`tools/tests/test_sessionctl_qv.py`（新）、`MG`＝`tools/tests/test_autopilot_merge.py`（新）、`PS`＝`tools/tests/test_autopilot_push.py`（新）、`HK`＝`tools/tests/test_sessionctl_hooks.py`（既有，增量）、`OW`＝`tools/tests/test_sessionctl_oldwin.py`（既有，增量）、`CW`＝`tools/tests/test_ci_wait.py`（既有，增量）、`CR`＝`tools/tests/test_check_defect_log_crossref.py`（既有，增量）、`PH`＝`tools/tests/test_check_pending_handoff.py`（既有，增量）、`CP`＝`tools/tests/test_claim_provenance_r86.py`（既有，增量）、`SI`＝`tools/tests/test_selfimproving_schedule_patrol.py`（既有，改斷言＋增量；實作棒以 `git grep -ln "quota_check\|quota_verdict" tools/tests` 現查其他受影響 SI 測試檔）、`KW`＝`tools/tests/test_sessionctl_keepwarm*.py`（既有，實作棒現查檔名）。單元測試一律注入 `now`、路徑圍籬到 tmp、不讀真 `~/.claude`、不起真排程、不打真端點；禁用 skip。
 > **E2E 定義**（掌舵者 2026-11-18：「請將所有功能都寫好完整的E To E測試案例,不要遺漏任何一個!」）：真行程、真排程、真 `claude -p` 子行程、真 git、真逐字稿重放（sid `406454ea-91fc-4481-9c11-b28ed7d9e95f`）或真讀數錄製重放才算；單元測試不算。執行＝`python tools/realverify.py run --family <家族>`，結果入帳 `docs/06_quality/RealVerify_Result_Ledger.md`；未入帳＝未結。
 > **E2E 載具（v1.1 指名；F-14）**：
@@ -24,7 +24,7 @@
 | 治理閘逃生口述詞 | 新扁平 `tools/lib/human_escape.py` | 函式庫：單檔共用工具 |
 | 痕跡圍籬 | 新扁平 `tools/lib/suite_fence.py`；`min_tests_margin.py` 承接自 runner 抽出的兩函式 | 函式庫：單檔共用工具 |
 | LOC 抽出 | 新扁平 `tools/lib/model_window_table.py`；`quota_halt_marker.py` 承接 halt 判讀 | 函式庫（扁平共用） |
-| 既有改動 | `ledger_closing_guards.py`、`tools/git-hooks/pre-push`、`ciwait/core.py`、`oldwin.py`、`oldwin_sched.py`、`check_pending_handoff.py`、`check_claim_provenance.py`、`context_budget_guard.py`、`run_root_unittests.py`、`session_resume_planner.py`、`quota_*`、`session_brief.py`、`relay_machine.py`、sessionctl watch／park／parkearly／parkprobe／qw／kw／switchfacts／switchplan／controlfacts／handoff_build／converge 族、`selfimproving/{sched,patrol,fourq,writeverbs,evspec}.py` | 既有家 |
+| 既有改動 | `ledger_closing_guards.py`、`tools/git-hooks/pre-push`、`ciwait/core.py`、`oldwin.py`、`oldwin_sched.py`、`check_pending_handoff.py`、`check_claim_provenance.py`、`context_budget_guard.py`、`run_root_unittests.py`、`session_resume_planner.py`、`quota_*`、`session_brief.py`、`relay_machine.py`、sessionctl watch／park／parkearly／parkprobe／qw／kw／switchfacts／switchplan／controlfacts／handoff_build／converge 族、`sessionctl/statuscmd.py`（v1.3，R-03：`Quota:` 診斷行改印判決欄）、`wastecensus/sections_ctl.py`（L184、L321 重放隨新簽名改；v1.3，R-04）、`selfimproving/{sched,patrol,fourq,writeverbs,evspec}.py`；`quota_env_layers.py`、`AutoClaude/autoclaude/utils/config.py`、`tools/git-hooks/post-merge`（`.env` 路徑覆寫的讀者與拒寫者；v1.3，R-02） | 既有家 |
 | 測試 | 新三檔（QV、MG、PS）＋既有檔增量 | 測試 |
 | 真機 E2E 家族 | `tools/lib/realverify/cases/quotaverdict.py`、`tools/lib/realverify/cases/autopilot.py`（新家族檔） | realverify |
 
@@ -110,7 +110,7 @@
 | AC-QV-11e | 掛載推動者（N-05）：判決 `WAIT_RESET`＋ctx 小於 `AUTOSDD_KEEPWARM_MIN_CTX_TOKENS`＋`background_tasks` 無 running 項 ⇒ `keepwarm.stop_verdict` 回非空推回文字（含 `keepwarm --sid` 與判決行）；同條件改 `no_usage`（ctx 量不到）、或保溫帳 `pings ≥ n*` ⇒ 仍推回；`background_tasks` 只有 running 的 watch（無 keepwarm）⇒ 仍推回；有 running keepwarm ⇒ 不推；`stop_hook_active` ⇒ 不推；`park.stop_verdict` 對同一 payload 回空 | `KW::RulingWaitResetTest::test_stop_pushes_keepwarm_on_wait_reset_despite_small_ctx` |
 | AC-QV-11f | 前四項仍豁免：同 AC-QV-11e 條件但 `AUTOSDD_UNATTENDED`／模式非 auto／`AUTOSDD_KEEPWARM_OFF`／已交棒 ⇒ 不推；判決非 `WAIT_RESET` ⇒ 回到原判準（小上下文不推） | `KW::RulingWaitResetTest::test_stop_first_four_still_exempt` |
 | AC-QV-12a | 換手計畫不出 PARK（N-01 ②）：E2 讀數（短窗 87%、D=14、`stage=free`）組出的判決 `WAIT_RESET` 餵 `switchplan.decide` ⇒ `action == STAY`、`reason` 含 `wait_reset`、`flags.keepwarm`，且**不是** `PARK_UNTIL`／`PARK_POLL` | `QV::ConsumerTest::test_switchplan_wait_reset_never_parks` |
-| AC-QV-12b | 換手計畫依判決對映：`PARK` ⇒ `PARK_UNTIL` 目標＝`win`（D>6 小時 ⇒ `PARK_POLL`）；`HALT_WEEKLY` ⇒ `PARK_POLL` 目標＝`wk`；`HALT_WEEKLY wk=none`（spend）⇒ `STAY spend_limit`；`CONTINUE`／`NODISPATCH` ⇒ 不由額度列命中；週軸 80%（≥ prepare、< halt）而判決 `CONTINUE` ⇒ 不出 PARK（舊判準以 prepare 判週軸）；取數失敗（`action=None`）⇒ 不出 PARK；`switchplan.Quota` 無 `short_pct`／`weekly_pct`／`prepare_pct` 欄（結構斷言） | `QV::ConsumerTest::test_switchplan_maps_ruling_actions` |
+| AC-QV-12b | 換手計畫依判決對映：`PARK` ⇒ `PARK_UNTIL` 目標＝`win`（D>6 小時 ⇒ `PARK_POLL`）；`HALT_WEEKLY` ⇒ `PARK_POLL` 目標＝`wk`；`HALT_WEEKLY wk=none`（spend）⇒ `STAY spend_limit`；`CONTINUE`／`NODISPATCH` ⇒ 不由額度列命中；週軸 80%（≥ prepare、< halt）而判決 `CONTINUE` ⇒ 不出 PARK（舊判準以 prepare 判週軸）；取數失敗（`action=None`）⇒ 不出 PARK；**`credential=True` 且判決 `PARK`、`stage` 相當於舊判準的 close／wall（例：短窗 92%、D=40 分）⇒ 不出 PARK**（v1.3，R-06：舊 `_short_hit` 在 close／wall 不看 credential 即判 PARK，屬行為變更）；`credential=True` 且判決 `HALT_WEEKLY` ⇒ 同樣不出 PARK；`switchplan.Quota` 無 `short_pct`／`weekly_pct`／`prepare_pct` 欄（結構斷言） | `QV::ConsumerTest::test_switchplan_maps_ruling_actions` |
 | AC-QV-13a | park 提前恢復受判決約束（N-01 ①）：park 標記 `parked_pct=92`、當下讀數 80（< prepare、比基準低 12pp）、但 `plan.stage=close` ⇒ 判決 `PARK` ⇒ `parkearly.tick` 不呼叫 `fire_early`（以縫計數 0）、痕跡 `park_early_probe` 帶 `action=PARK` | `QV::ConsumerTest::test_parkearly_respects_park_ruling` |
 | AC-QV-13b | 判決 `CONTINUE` 且讀數比基準低 ≥ 5pp ⇒ fire 一次；判決 `CONTINUE` 但只低 3pp ⇒ 不 fire（遲滯閘保留）；判決 `CONTINUE deg=unmeasured` ⇒ 不 fire；`parkprobe.evaluate` 原始碼不再引用 `prepare_pct`（AST） | `QV::ConsumerTest::test_parkearly_fires_only_on_continue_with_drop` |
 
@@ -246,6 +246,7 @@
 | MU-QV-37 | 判決分支拿掉前四項豁免 | AC-QV-11f |
 | MU-QV-38 | 鎖的 (i) 收集改回只看 `Call.func`（v1.2 的直接呼叫判準；R-01） | AC-QV-10d（`BoolOp` 縫與函式參照兩例轉紅） |
 | MU-QV-39 | (i) 的 `ast.Name` 判準拿掉「解析到模組層綁定」（只認屬性），或改成連參數同名也收 | AC-QV-10d（`default_read` 例不紅，或參數轉手反例被計入） |
+| MU-QV-40 | `switchplan._wall` 對判決 `PARK` 不看 `credential`（回到 v1.1 close／wall 分支行為；R-06） | AC-QV-12b |
 | MU-AC-1 | reconcile 不比對 `account`（只看存在） | AC-AC-02a |
 | MU-AC-2 | 舊格式標記一律保留 | AC-AC-02b |
 | MU-AC-3 | 逐字稿觸發器不記 byte offset（每次全讀） | AC-AC-03b |
@@ -384,3 +385,14 @@
 | N-08 SI 檔案清單 | §0 既有改動列（已為五檔，本輪核對一致） |
 | N-04 詢問閘擋掉必填齊全的「是否繼續」且叫模型代決 | REQ-AP-ASK-01；AC-ASK-01g 改寫、AC-ASK-01j 改寫、AC-ASK-01k～l；MU-ASK-12～14；E2E-AP-ASK-01 合成正例補 `是否繼續` 題 |
 | N-06 `plan.cap` 不存在 | AC-QV-01g 改寫；MU-QV-26 |
+
+## 8. v1.2 → v1.3 處置索引（QA 第三輪 `qa_spec3_report.md` 發現 R-01～R-06；SD-3）
+
+| 發現 | 本檔落點 |
+|---|---|
+| R-01 鎖只收直接呼叫 | AC-QV-10d 加縫形三正例、兩反例（新 AT `test_seam_references_are_seen`）；AC-QV-10f 分類 `B1`…`B8`、`diag` 五處、白名單對 QVD〈預期命中站點清單〉逐列相等；MU-QV-38、39 |
+| R-02 `.env` 硬連結跨卷必敗、寫入會傳到主樹 | REQ-AP-MG-03 描述；AC-MG-03e 改寫；新 AC-MG-03g（跨卷 clone、去 `--local`）、AC-MG-03h（clone 內寫入不影響主樹）、AC-MG-03i（覆寫生效條件與層序）；AC-MG-03f 尾句改為基線鍵含 `.env` 雜湊；MU-MG-12 改寫、MU-MG-13～16；E2E-AP-MG-03 改寫（含 `same_volume`） |
+| R-03 `statuscmd.py` | §0 既有改動列 |
+| R-04 `sections_ctl.py` L321、`parkprobe.baseline` | §0 既有改動列；`baseline` 由 AC-QV-10f 白名單（B8）覆蓋 |
+| R-05 動作詞「舊視窗」收窄 | APD §19 記錄（AC-ASK-01j 的 13 詞後設鎖不變） |
+| R-06 credential 行為變更 | AC-QV-12b 加兩例；MU-QV-40 |
