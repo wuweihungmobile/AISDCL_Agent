@@ -1649,7 +1649,7 @@ def main(argv: list[str]) -> int:
             print(f"ℹ️  INV5 單一擁有者：session {data['session_id']} 已由其他排程巡邏/續跑，不重複武裝（擇一擁有，零重複探測）。")  # noqa: E501
             return 0
         # 🔴 DEF-200-231①：印出的與真註冊的共用同一個觸發時刻（`--at` 缺席 ⇒ 只取實測）。
-        at_expr, at, refusal = session_brief.schtasks_trigger(args.at, quota_gate, skew_seconds=RESET_SKEW_SECONDS)  # noqa: E501
+        at_expr, at, refusal = session_brief.schtasks_trigger(args.at, quota_gate, skew_seconds=RESET_SKEW_SECONDS, snapshot=lambda at: ruling_io.cached(data["session_id"], now=at))  # noqa: E501 — QVD C10：時刻取判決
         if at_expr is None: print(refusal, file=sys.stderr); return 1  # noqa: E701,E702
         if args.print_schtasks: print("\n" + schtasks_command(str(out), task, at_expr=at_expr, observed=args.at is None), end="")  # noqa: E701,E501
         if args.register_schtasks:

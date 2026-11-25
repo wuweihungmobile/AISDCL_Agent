@@ -50,6 +50,25 @@ def ctl_line(sid: str | None) -> str:
         return ""
 
 
+def ruling_snapshot(sid: str | None, transcript=None, model: str | None = None, now=None):
+    """SessionStart 額度行的判決（QVD C10；只讀快取、零網路）：判準與取數住 `sessionctl/ruling_io`，
+    簡報只呈現（`quota_ruling.brief_line`）。失敗往上拋，由 `session_brief.quota_line` 照實說。"""
+    _tools_on_path()
+    from lib.sessionctl import ruling_io  # noqa: PLC0415
+    return ruling_io.cached(sid or "", transcript, model=model, now=now)
+
+
+def dispatch_rule(state, decision, now, payload: dict, model=None):
+    """派工閘（QVD C1）的注入依賴：hook 把它交給 `quota_gate(rule=…)`（扁平 hub 不 import 套件）。
+    組判決失敗回 `None`＝派工閘退回既有 band 判讀（fail-open 不得帶走煞車：halt 帶照舊擋）。"""
+    try:
+        _tools_on_path()
+        from lib.sessionctl import ruling_io  # noqa: PLC0415
+        return ruling_io.rule_from_decision(state, decision, now, payload, model)
+    except Exception:  # noqa: BLE001 — 見 docstring
+        return None
+
+
 def extra(sid: str | None, openitems: Callable[[], str] | None = None,
           oldwin: Callable[[str | None], str] | None = None,
           ctl: Callable[[str | None], str] | None = None) -> str:

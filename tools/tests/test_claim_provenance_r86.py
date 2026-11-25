@@ -27,6 +27,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOK = _REPO_ROOT / ".claude" / "hooks" / "check_claim_provenance.py"
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 import quota_policy  # noqa: E402  # DEF-200-477：簡報夾具走真的 `quota_line()`（writer==reader）
+import quota_ruling  # noqa: E402  # QVD C10：簡報額度行呈現判決快照
 import session_brief  # noqa: E402
 
 
@@ -651,12 +652,16 @@ class TestTheSessionStartBriefIsAnAnchorForTheStaleReadingJudgement(unittest.Tes
 
     @staticmethod
     def _brief(note: str = "") -> str:
-        """真 `session_brief.quota_line()` 對 27% 新鮮讀數印的額度行（writer==reader）＋ `note`。"""
+        """真 `session_brief.quota_line()` 對 27% 新鮮讀數印的額度行（writer==reader）＋ `note`。
+        QVD C10：額度行改呈現注入的判決快照（判決行＋同一份快照的逐軸診斷段）；夾具以真
+        `decide()`＋真 `quota_ruling.ruling()` 組快照，不讀任何快取檔。"""
         axis = quota_policy.Axis("session", 27.0, (_NOW + timedelta(hours=2)).isoformat())
         state = quota_policy.QuotaState((axis,), _NOW.isoformat(), "cache", "ok")
-        gate = types.SimpleNamespace(quota_policy=quota_policy, policy_env=dict,
-                                     read_quota=lambda now, path=None: state)
-        return "[SDD-CTX-GUARD] 額度：" + session_brief.quota_line(gate, _NOW) + note
+        policy = quota_policy.load_policy({})[0]
+        dec = quota_policy.decide(state, _NOW, policy)
+        snap = types.SimpleNamespace(decision=dec, ruling=quota_ruling.ruling(
+            state, dec, model=None, policy=policy, now=_NOW))
+        return "[SDD-CTX-GUARD] 額度：" + session_brief.quota_line(lambda: snap) + note
 
     @staticmethod
     def _record(text: str, at: datetime = _NOW, event: str = "SessionStart") -> dict:

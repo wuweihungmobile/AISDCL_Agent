@@ -29,6 +29,7 @@ sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 import quota_gate  # noqa: E402
 import quota_messages as qm  # noqa: E402
 import quota_policy  # noqa: E402
+import quota_ruling as QR  # noqa: E402
 import session_brief as sb  # noqa: E402
 import unattended_authz  # noqa: E402
 
@@ -109,50 +110,68 @@ def _decided(active_model: str | None) -> tuple[str, ...]:
 
 #: 真函式的參照，趕在 `setUpModule` 換成替身之前存下：`SiStatusLineTest` 直接測它。
 _REAL_SI_STATUS_LINE = sb.si_status_line
+_UNAVAILABLE = QR.brief_line(None)
+
+
+def _snap(state, model: str | None = None, now: datetime = _NOW):
+    """簡報注入的判決快照（QVD C10）：真 `decide()`＋真 `quota_ruling.ruling()`，純函式、不讀任何
+    快取／標記檔（正式路徑由 `ruling_io.cached` 以派工閘同一條管線組；本檔只鎖呈現）。"""
+    policy = quota_policy.load_policy({})[0]
+    dec = quota_policy.decide(state, now, policy, active_model=model)
+    return types.SimpleNamespace(decision=dec, ruling=QR.ruling(
+        state, dec, model=model, policy=policy, now=now))
+
+
+def _snap_of(gate):
+    """舊式 `quota_gate` 替身（`read_quota`）→ 簡報的快照注入縫；`read_quota` 拋例外照樣拋。"""
+    return lambda sid=None, transcript=None, model=None, now=None: _snap(
+        gate.read_quota(now or _NOW), model, now or _NOW)
+
+
+def _line(gate, model: str | None = None) -> str:
+    return sb.quota_line(lambda: _snap_of(gate)(None, None, model, _NOW))
 
 
 def setUpModule() -> None:
     """既有各格只關心簡報的其他段落，而 `sessionstart_brief` 的預設會真的讀帳本、真的 spawn git：
     全檔換成固定替身，維持本檔的零 I/O 紀律，也免得兩次呼叫之間帳本被改而誤判不等（如
     `test_nothing_known_is_byte_identical_to_the_legacy_call`）。真函式只在 `SiStatusLineTest`
-    以注入的 `build` 與一格 hook 載具煙測跑。"""
-    patcher = mock.patch.object(sb, "si_status_line", return_value="（測試替身：未讀帳本）")
-    patcher.start()
-    unittest.addModuleCleanup(patcher.stop)
+    以注入的 `build` 與一格 hook 載具煙測跑。額度判決的預設取數（`session_brief_oi.
+    ruling_snapshot` → 真快取）同樣換成「取不到」：要額度數字的格一律以 `snapshot=` 注入。"""
+    for target, kw in ((sb, {"return_value": "（測試替身：未讀帳本）"}),
+                       (sb.session_brief_oi, {"side_effect": OSError("測試：預設不讀真快取")})):
+        name = "si_status_line" if target is sb else "ruling_snapshot"
+        patcher = mock.patch.object(target, name, **kw)
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
 
 
 class QuotaLineTest(unittest.TestCase):
-    """象限：額度〈有快取〉／〈無快取〉。零網路——`quota_gate` 全由呼叫端注入。"""
+    """象限：額度〈有快取〉／〈無快取〉。零網路——判決快照全由呼叫端注入（QVD C10）。"""
 
     def test_with_cache_describes_the_decision(self) -> None:
         state = _cache_hit_state()
-        gate = _fake_quota_gate(read_quota=lambda now, path=None: state)
-        got = sb.quota_line(gate, _NOW)
-        self.assertIn("kind=session", got, "有快取時應印出逐軸判讀，而不是回退訊息")
-        self.assertNotIn("額度快取不可用", got)
+        got = _line(_fake_quota_gate(read_quota=lambda now, path=None: state))
+        self.assertTrue(got.startswith("額度判決：QUOTA_VERDICT=CONTINUE "), got)
+        self.assertIn("kind=session", got, "有快取時應印出逐軸判讀（診斷段），而不是回退訊息")
+        self.assertNotIn("取不到", got)
 
     def test_without_cache_falls_back_to_a_human_sentence(self) -> None:
-        got = sb.quota_line(_cache_miss_gate(), _NOW)
-        self.assertIn("額度快取不可用", got)
-        self.assertIn("--pace", got, "回退訊息要帶得出查證指令")
+        got = _line(_cache_miss_gate())
+        self.assertEqual(got, _UNAVAILABLE)
+        self.assertIn("sessionctl.py quota", got, "回退訊息要帶得出查證指令")
 
     def test_load_policy_failure_also_falls_back(self) -> None:
-        """不只 `read_quota` 會壞；`load_policy` 出例外也要收斂成同一句人話。"""
-        gate = types.SimpleNamespace(
-            quota_policy=types.SimpleNamespace(
-                load_policy=lambda env: (_ for _ in ()).throw(ValueError("壞掉的 policy")),
-                decide=quota_policy.decide, describe=quota_policy.describe),
-            read_quota=lambda now, path=None: _cache_hit_state(),
-            policy_env=lambda: {},
-        )
-        got = sb.quota_line(gate, _NOW)
-        self.assertIn("額度快取不可用", got)
+        """不只取數會壞；組判決（`load_policy` 等）出例外也要收斂成同一句人話。"""
+        def _boom():
+            raise ValueError("壞掉的 policy")
+        self.assertEqual(sb.quota_line(_boom), _UNAVAILABLE)
+        self.assertEqual(sb.quota_line(None), _UNAVAILABLE, "未注入＝取不到，不得崩潰")
 
     def test_default_now_is_used_when_omitted(self) -> None:
-        """`now=None` 時走 `datetime.now().astimezone()`，不得拋例外（純粹是不崩潰的鑑別）。"""
-        gate = _fake_quota_gate(read_quota=lambda now, path=None: _cache_hit_state())
-        got = sb.quota_line(gate)
-        self.assertIn("kind=session", got)
+        """判決行先、診斷段後：診斷段逐軸讀數與判決同一份快照（不另讀第二次）。"""
+        got = _line(_fake_quota_gate(read_quota=lambda now, path=None: _cache_hit_state()))
+        self.assertLess(got.index("QUOTA_VERDICT="), got.index("讀數（診斷）"))
 
     def test_stale_cache_appends_the_fixed_caveat(self) -> None:
         """G2：`describe()` 文字含 `stale-cache` 時（快取過期、`decide()` 退化到
@@ -161,7 +180,8 @@ class QuotaLineTest(unittest.TestCase):
         stale = quota_policy.QuotaState(
             (), "", "stale-cache", "stale-cache（測試：30280s > TTL 180s）")
         gate = _fake_quota_gate(read_quota=lambda now, path=None: stale)
-        got = sb.quota_line(gate, _NOW)
+        got = _line(gate)
+        self.assertIn("deg=unmeasured", got, "量不到＝判決帶降級欄（REQ-AP-QV-07）")
         self.assertIn("stale-cache", got, "stale-cache 判準本身沒觸發")
         self.assertIn("陳舊快取的退化政策值，不是量測值", got)
         self.assertIn("PreToolUse 會自動補量一次、零 token", got)
@@ -171,7 +191,7 @@ class QuotaLineTest(unittest.TestCase):
         """反向格：正常（非陳舊）快取不該被附加這句退化政策值警語——只在 `stale-cache`
         真的出現時才追加，不是每次都貼。"""
         gate = _fake_quota_gate(read_quota=lambda now, path=None: _cache_hit_state())
-        got = sb.quota_line(gate, _NOW)
+        got = _line(gate)
         self.assertNotIn("陳舊快取的退化政策值", got, "非陳舊快取卻被貼了 stale-cache 警語")
 
 
@@ -196,7 +216,7 @@ class UnmeasuredLineCaveatTest(unittest.TestCase):
             self.cache.write_text(json.dumps(body), encoding="utf-8")
         gate = _fake_quota_gate(read_quota=lambda now, path=None: quota_gate.read_quota(
             now, self.cache))
-        return sb.quota_line(gate, _NOW)
+        return _line(gate)
 
     def _fresh(self, **overrides: object) -> dict:
         resets = (_NOW + timedelta(hours=2)).isoformat()
@@ -230,7 +250,7 @@ class UnmeasuredLineCaveatTest(unittest.TestCase):
         """一個從未見過的 reason 字面照樣附註（改成逐字列舉 reason 必紅）。"""
         invented = quota_policy.QuotaState((), "", "future-source", "future-reason-xyz")
         gate = _fake_quota_gate(read_quota=lambda now, path=None: invented)
-        got = sb.quota_line(gate, _NOW)
+        got = _line(gate)
         self.assertIn("reason=future-reason-xyz", got)
         self.assertIn("退化政策值，不是量測值", got)
 
@@ -649,7 +669,7 @@ class SessionstartBriefTest(unittest.TestCase):
             scan_transcript=lambda p: (999, 999, "claude-test-double-3"),
             resolve_window=lambda *a, **k: (200_000, "指定值（測試）"),
             window_evidence=lambda *a, **k: {}, read_context_feed=lambda *a: {}, now=_NOW,
-            check_statusline=self._FAKE_INSTALLED)
+            check_statusline=self._FAKE_INSTALLED, snapshot=_snap_of(gate))
         self.assertIn("[SDD-CTX-GUARD]", got)
         self.assertIn("used=999", got)
         self.assertIn("kind=session", got)
@@ -661,7 +681,7 @@ class SessionstartBriefTest(unittest.TestCase):
             self._payload(None), gate,
             scan_transcript=None, resolve_window=None,
             window_evidence=None, read_context_feed=None, now=_NOW,
-            check_statusline=self._FAKE_INSTALLED)
+            check_statusline=self._FAKE_INSTALLED, snapshot=_snap_of(gate))
         self.assertIn(sb._NO_MEASURE, got)
         self.assertIn("kind=session", got)
         self._assert_common(got)
@@ -674,7 +694,7 @@ class SessionstartBriefTest(unittest.TestCase):
             window_evidence=lambda *a, **k: {}, read_context_feed=lambda *a: {}, now=_NOW,
             check_statusline=self._FAKE_INSTALLED)
         self.assertIn("used=1", got)
-        self.assertIn(sb._QUOTA_UNAVAILABLE, got)
+        self.assertIn(_UNAVAILABLE, got)
         self._assert_common(got)
 
     def test_cache_miss_and_usage_absent(self) -> None:
@@ -685,7 +705,7 @@ class SessionstartBriefTest(unittest.TestCase):
             window_evidence=None, read_context_feed=None, now=_NOW,
             check_statusline=self._FAKE_INSTALLED)
         self.assertIn(sb._NO_MEASURE, got)
-        self.assertIn(sb._QUOTA_UNAVAILABLE, got)
+        self.assertIn(_UNAVAILABLE, got)
         self._assert_common(got)
 
     def test_a_dependencys_stderr_noise_does_not_leak_to_the_caller(self) -> None:
@@ -990,50 +1010,51 @@ class QuotaLineActiveModelTest(unittest.TestCase):
         return _fake_quota_gate(read_quota=lambda now, path=None: _scoped_state())
 
     def test_active_model_reaches_decide(self) -> None:
+        """模型經 `sessionstart_brief` 交給判決快照注入縫（C10；判決在 `ruling_io`，本檔不 decide）。"""
         seen: list[object] = []
-        real = quota_policy.decide
 
-        def _spy(*args, **kwargs):
-            seen.append(kwargs.get("active_model", "<未傳>"))
-            return real(*args, **kwargs)
+        def _spy(sid, transcript, model, now):
+            seen.append(model)
+            return _snap(_scoped_state(), model, now)
 
-        gate = types.SimpleNamespace(
-            quota_policy=types.SimpleNamespace(
-                load_policy=quota_policy.load_policy, decide=_spy,
-                describe=quota_policy.describe),
-            read_quota=lambda now, path=None: _scoped_state(), policy_env=lambda: {})
-        sb.quota_line(gate, _NOW, "fable")
-        sb.quota_line(gate, _NOW)
-        self.assertEqual(seen, ["fable", None], "active_model 沒傳進 decide()（或缺席時不是 None）")
+        for payload_model in ("claude-fable-5-1", None):
+            payload = {"model": payload_model} if payload_model else {}
+            sb.sessionstart_brief(
+                payload, _fake_quota_gate(), scan_transcript=None, resolve_window=None,
+                window_evidence=None, read_context_feed=None, now=_NOW,
+                check_statusline=lambda: {"installed": True}, snapshot=_spy,
+                guard=types.SimpleNamespace(model_family=lambda m: "fable" if m else None))
+        self.assertEqual(seen, ["fable", None], "active_model 沒傳進判決（或缺席時不是 None）")
 
     def test_the_fable_line_speaks_the_verdict_decide_gives_and_differs_from_blind(self) -> None:
-        blind = _verdict(sb.quota_line(self._gate(), _NOW))
-        fable = _verdict(sb.quota_line(self._gate(), _NOW, "fable"))
+        blind = _verdict(_line(self._gate()))
+        fable = _verdict(_line(self._gate(), "fable"))
         self.assertEqual(fable, _decided("fable"), "簡報的判定與真的 decide(fable) 不同")
         self.assertEqual(blind, _decided(None))
         self.assertNotEqual(fable, blind, "夾具對模型沒有鑑別力：帶不帶 fable 判定相同")
         self.assertEqual(fable[3], "weekly_scoped", "Fable 軸沒成為 binding ⇒ 沒進 cap 聚合")
 
     def test_another_model_keeps_the_scoped_axis_out(self) -> None:
-        self.assertEqual(_verdict(sb.quota_line(self._gate(), _NOW, "sonnet")),
-                         _verdict(sb.quota_line(self._gate(), _NOW)))
+        self.assertEqual(_verdict(_line(self._gate(), "sonnet")),
+                         _verdict(_line(self._gate())))
 
     def test_the_line_says_which_model_it_was_computed_for(self) -> None:
-        with_model = sb.quota_line(self._gate(), _NOW, "fable")
-        self.assertIn("active_model=fable", with_model)
+        with_model = _line(self._gate(), "fable")
+        self.assertIn(" mdl=fable", with_model, "判決行的模型欄（R-4.1.6-2 附加欄）")
         self.assertIn("model=Fable", with_model, "軸自己的 scope_model 字面（與 --pace 同）不見了")
-        self.assertNotIn("active_model=", sb.quota_line(self._gate(), _NOW))
+        self.assertIn(" mdl=none", _line(self._gate()))
 
     def test_no_model_is_byte_identical_to_the_legacy_call(self) -> None:
-        legacy = sb.quota_line(self._gate(), _NOW)
-        self.assertEqual(sb.quota_line(self._gate(), _NOW, None), legacy)
+        legacy = _line(self._gate())
+        self.assertEqual(_line(self._gate(), None), legacy)
 
     def test_an_unmeasured_line_carries_no_model_marker(self) -> None:
-        """快取量不到（`axes == ()`）時模型沒有作用，不附標記（免得退化政策值旁多一句假精確）。"""
+        """快取量不到（`axes == ()`）時判決為降級續跑；舊版 `active_model=` 尾註不再出現（模型改在判決行
+        `mdl=` 欄，QVD §3.3）。"""
         stale = quota_policy.QuotaState((), "", "stale-cache", "stale-cache（測試）")
-        got = sb.quota_line(_fake_quota_gate(read_quota=lambda now, path=None: stale),
-                            _NOW, "fable")
+        got = _line(_fake_quota_gate(read_quota=lambda now, path=None: stale), "fable")
         self.assertIn("stale-cache", got)
+        self.assertIn("deg=unmeasured", got)
         self.assertNotIn("active_model=", got)
 
 
@@ -1068,7 +1089,7 @@ class SessionstartBriefActiveModelTest(unittest.TestCase):
             payload, self.gate, scan_transcript=lambda p: (None, 0, None),
             resolve_window=lambda *a, **k: (1_000_000, "測試"), window_evidence=lambda *a, **k: {},
             read_context_feed=lambda *a: {}, now=_NOW,
-            check_statusline=lambda: {"installed": True}, **extra)
+            check_statusline=lambda: {"installed": True}, snapshot=_snap_of(self.gate), **extra)
 
     def _payload(self, **extra: object) -> dict:
         return {"transcript_path": str(self.transcript), **extra}
@@ -1077,7 +1098,7 @@ class SessionstartBriefActiveModelTest(unittest.TestCase):
         got = self._brief(self._payload(model="claude-fable-5-1"), guard=self.guard)
         self.assertEqual(_verdict(got), _decided("fable"))
         self.assertNotEqual(_verdict(got), _decided(None), "夾具對模型沒有鑑別力")
-        self.assertIn("active_model=fable", got)
+        self.assertIn(" mdl=fable", got)
 
     def test_without_a_payload_model_a_fresh_feed_supplies_it(self) -> None:
         self._write_feed("claude-fable-5-1")
@@ -1088,18 +1109,18 @@ class SessionstartBriefActiveModelTest(unittest.TestCase):
         self._write_feed("claude-fable-5-1")
         got = self._brief(self._payload(model="claude-sonnet-5-5"), guard=self.guard)
         self.assertEqual(_verdict(got), _decided(None), "feed 說 fable 卻壓過了 payload 的 sonnet")
-        self.assertIn("active_model=sonnet", got)
+        self.assertIn(" mdl=sonnet", got)
 
     def test_a_feed_that_says_sonnet_keeps_the_fable_axis_out(self) -> None:
         self._write_feed("claude-sonnet-5-5")
         got = self._brief(self._payload(), guard=self.guard)
         self.assertEqual(_verdict(got), _decided(None))
-        self.assertIn("active_model=sonnet", got)
+        self.assertIn(" mdl=sonnet", got)
 
     def test_nothing_known_is_byte_identical_to_the_legacy_call(self) -> None:
         legacy = self._brief(self._payload())
         self.assertEqual(self._brief(self._payload(), guard=self.guard), legacy)
-        self.assertNotIn("active_model", legacy)
+        self.assertIn(" mdl=none", legacy)
 
     def test_a_foreign_feed_is_not_believed(self) -> None:
         self._write_feed("claude-fable-5-1", sid="sess-brief")
@@ -1108,13 +1129,13 @@ class SessionstartBriefActiveModelTest(unittest.TestCase):
             "context_window": {"context_window_size": 1_000_000}}), encoding="utf-8")
         got = self._brief(self._payload(), guard=self.guard)
         self.assertEqual(_verdict(got), _decided(None))
-        self.assertNotIn("active_model=", got)
+        self.assertIn(" mdl=none", got)
 
     def test_without_a_guard_the_payload_model_cannot_be_resolved(self) -> None:
         """既有的六位置引數呼叫（沒傳 `guard`）逐字相容：即使 payload 帶了模型也照舊。"""
         got = self._brief(self._payload(model="claude-fable-5-1"))
         self.assertEqual(_verdict(got), _decided(None))
-        self.assertNotIn("active_model", got)
+        self.assertIn(" mdl=none", got)
 
     def test_a_broken_guard_fails_open_to_the_legacy_line(self) -> None:
         def _boom(_model: object) -> str:

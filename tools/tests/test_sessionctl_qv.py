@@ -487,21 +487,17 @@ RULING_INPUT_SITES: dict[tuple[str, str, str], tuple[str, str]] = {
     (_RI, "compose", "plan"): ("ruling", _RULING),
     (_RI, "compose", "read_halt_marker"): ("ruling", _RULING),
     (_RI, "gather", "pace_state"): ("ruling", _RULING),
+    (_RI, "cached", "read_quota"): ("ruling", "只讀快取的判決（C10 簡報、手動排程時刻；零網路）"),
     (_RI, "pace_report", "decide"): ("ruling", "引擎配速契約（pace 尺；診斷段，判斷看首行）"),
     (_RI, "pace_report", "read_halt_marker"): ("ruling", "halted 行（只在 HALT_WEEKLY 同帳號）"),
     (_RI, "sentinel_halt", "read_halt_marker"): ("ruling", "C11 哨兵 halt 輸入"),
     (_RI, "sentinel_halt_verdict", "halt_verdict"): ("ruling", "C11 哨兵 halt 判讀"),
     (_RI, "check_halted_line", "read_halt_marker"): ("ruling", "C3 --check halted 行"),
 }
-#: 尚未改接（WP-QV 交卷照實列出；改接後本表必須縮、相等比對保證不得漏刪）：QVD C10 SessionStart
-#: 簡報需 SessionStart hook 注入判決（守衛面，WP-HOOK 親套；本包產 diff），簡報函式與其 25 支測試
-#: 同 commit 改。白名單之外另列，`test_allowlist_entries_have_category_and_why` 對 QVD 表逐列比對時排除。
-PENDING_REWIRE: dict[tuple[str, str, str], str] = {
-    ("tools/lib/session_brief.py", "quota_line", "read_quota"): "C10：待 WP-HOOK 注入判決",
-    ("tools/lib/session_brief.py", "quota_line", "decide"): "C10：待 WP-HOOK 注入判決",
-    ("tools/lib/session_brief.py", "schtasks_trigger", "read_quota"): "C10：待同批改接",
-    ("tools/lib/session_brief.py", "schtasks_trigger", "decide"): "C10：待同批改接",
-}
+#: 尚未改接（改接後本表必須縮、相等比對保證不得漏刪）。WP-QV 第三棒：C10 SessionStart 簡報與手動
+#: 排程時刻已改接（判決經 `session_brief_oi.ruling_of` 注入，hook 不需改），本表清空、常數保留作
+#: 「日後分段改接」的唯一登記處。白名單之外另列，`test_allowlist_entries_have_category_and_why` 排除。
+PENDING_REWIRE: dict[tuple[str, str, str], str] = {}
 #: QVD §3.5.3〈預期命中站點清單〉「改接後白名單＝是」的（檔::函式）；dispatch_decision 為 §3.5.2 B1。
 QVD_EXPECTED = frozenset({
     "tools/lib/quota_burndown.py::issue", "tools/lib/quota_burndown.py::status",

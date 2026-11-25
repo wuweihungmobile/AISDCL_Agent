@@ -21,13 +21,12 @@ ctx5 輪兩個缺口（掌舵者五問 Q1／Q4 的機制面補強）：
       安裝狀態那一句（重用 `tools/install_statusline.py::status()`，不重寫判準）；
       `_harness_reason_note()` 把 `feed["reason"]` 非空時的那句接進 context 行（比照
       `tools/lib/harness_feed.py::check_lines()` 的既有措辭）。
-  G2. `quota_line()` 在快取陳舊（`describe()` 文字含 `stale-cache`）時印出的
-      `cap=2 recommended=2 band=unmeasured` 是退化政策值、不是量測值，容易被模型誤讀
-      成硬限制；含 `stale-cache` 時追加固定文案，講清楚「PreToolUse 會自動補量、
-      零 token」，不含時不動。
-  DEF-200-432：`quota_line()` 的 `decide()` 此前沒帶 `active_model` ⇒ 新鮮快取下簡報的
-      cap 比 `--pace`／守衛寬（模型分軌軸被排除）；`_active_model()` 補上（payload `model`
-      → 逐字稿 → feed，判準本體住 `harness_feed.start_model_of()`），缺席時行為逐字不變。
+  G2. 額度量不到時（判決 `deg=unmeasured`）追加固定文案，講清楚「不是量測值、PreToolUse 會
+      自動補量、零 token」。
+  QVD C10（WP-QV）：`quota_line()` 不再自行 `decide()`——只呈現注入的**判決**
+      （`quota_ruling.brief_line`；判決取數住 `sessionctl/ruling_io.cached`，經
+      `session_brief_oi.ruling_of` 注入，本檔不 import sessionctl）。DEF-200-432 的 active
+      model 照舊由 `_active_model()` 解出後交判決（模型分軌週軸進第 2 列）。
 
 DEF-200-411：`statusline_line()` 的安裝提示改給**可直接貼上的絕對路徑指令**
 （`_install_command()`）。舊提示是裸 `python tools/…`，依賴 cwd 與 PATH 上排前面的
@@ -87,6 +86,11 @@ try:
     import quota_messages  # type: ignore[import-not-found]  # 同目錄 SSOT：收斂型工具清單句
 except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律；不可達就省略清單句，不在這裡抄一份
     quota_messages = None  # type: ignore[assignment]
+
+try:
+    import quota_ruling  # type: ignore[import-not-found]  # 同目錄 SSOT：判決行呈現（QVD C10）
+except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律；不可達就照實說取不到
+    quota_ruling = None  # type: ignore[assignment]
 
 try:
     import unattended_authz  # type: ignore[import-not-found]  # 同目錄 SSOT：UNATTENDED_ENV
@@ -216,38 +220,19 @@ _STALE_CACHE_NOTE = "（陳舊快取的退化政策值，" + _DEGRADED_TAIL
 _UNMEASURED_NOTE = "（退化政策值，" + _DEGRADED_TAIL
 
 
-def quota_line(quota_gate: object, now: datetime | None = None,
-               active_model: str | None = None) -> str:
-    """額度那一行。零網路、只讀快取；讀不到／判不出來一律 fail-open 成人話。
-
-    `quota_gate`＝呼叫端已 import 好的 `tools/lib/quota_gate` 模組（它內部持有
-    `quota_policy`），本函式不自己 import——理由同檔頭：不長出第二份「怎麼判額度」。
-
-    G2：`describe()` 文字含 `stale-cache` 時（快取過期，`decide()` 回退到
-    `degraded_cap`）追加 `_STALE_CACHE_NOTE`，避免模型把退化值誤讀成硬限制；其餘量不到的
-    原因（`band == unmeasured`）追加 `_UNMEASURED_NOTE`——此前只有 `stale-cache` 附註，
-    無快取／壞檔／schema 不符／視窗已翻頁時簡報只剩裸 `cap=2 band=unmeasured`。
-
-    DEF-200-432：`active_model`（家族字，如 `fable`）傳給 `decide()`，模型分軌軸（`weekly_scoped`
-    等）才會進 cap 聚合，簡報的 `⇒ cap=…` 才與 `--pace`／守衛同尺；此前缺席，新鮮快取下簡報
-    印 `cap=4 band=notice`、同一份快取數秒後 `--pace` 印 `cap=1 band=prepare`。快取有量到軸
-    時句尾附 ` active_model=<家族>`（讓人看得出這個 cap 是按哪個模型算的；`-p` 沒有 feed、
-    payload 也不帶模型時 `active_model=None`，行為與此前逐字相同）。
-    """
-    at = now or datetime.now().astimezone()
-    try:
-        policy, _problems = quota_gate.quota_policy.load_policy(quota_gate.policy_env())
-        decision = quota_gate.quota_policy.decide(
-            quota_gate.read_quota(at), at, policy, active_model=active_model)
-        text = quota_gate.quota_policy.describe(decision)
-        if active_model and decision.per_axis:
-            text += f"　active_model={active_model}"
-        unmeasured = decision.band == quota_gate.quota_policy.BAND_UNMEASURED
+def quota_line(snapshot_of: Callable[[], object] | None) -> str:
+    """額度那一行（QVD C10）：判決行在前（`quota_ruling.brief_line`），同一份快照的逐軸讀數降為
+    診斷段（`describe`；Stop 宣稱守衛 DEF-200-477 以它當錨點）。本檔不判讀：`snapshot_of()`＝呼叫端
+    注入（`ruling_io.cached`，零網路）；取不到照實說。`deg=unmeasured` ⇒ 追加退化附註（G2）。"""
+    try:  # 未注入（None）／取數或組判決拋例外 ⇒ 一律照實說取不到
+        snap = snapshot_of()  # type: ignore[misc]
+        r, diag = snap.ruling, "；讀數（診斷）：" + quota_ruling.quota_policy.describe(
+            snap.decision)
     except Exception:  # noqa: BLE001 — 簡報失敗不得反過來擋 SessionStart
-        return _QUOTA_UNAVAILABLE
-    if "stale-cache" in text:
-        return f"{text}{_STALE_CACHE_NOTE}"
-    return f"{text}{_UNMEASURED_NOTE}" if unmeasured else text
+        r, diag = None, ""
+    text = getattr(quota_ruling, "brief_line", lambda _r: _QUOTA_UNAVAILABLE)(r) + diag
+    note = _STALE_CACHE_NOTE if "stale-cache" in diag else _UNMEASURED_NOTE
+    return text + (note if getattr(r, "degraded", False) else "")
 
 
 def _active_model(payload: dict, transcript: Path | None, guard: object) -> str | None:
@@ -484,35 +469,33 @@ def trigger_basis(observed: bool) -> str:
 
 def schtasks_trigger(
     given: str | None, quota_gate: object, *, skew_seconds: int,
-    now: datetime | None = None,
+    now: datetime | None = None, snapshot: Callable[[datetime], object] | None = None,
 ) -> tuple[str | None, datetime | None, str]:
     """手動排程路徑的觸發時刻：回 `(at_expr, 結構化 at, 拒絕語)`。
 
-    顯式 `--at`（`given`）＝操作者宣稱的時刻，原樣下傳、結構化 at 為 `None`（同此前）；
-    空白字串不是時刻 ⇒ 回拒絕語。
-    缺席時只取**實測**：額度快取 → `decide()` → `halt_resets_at()`（≥halt 各軸中最早
-    可解析者，無則 binding）＋緩衝，且 `reset_branch()` 須判 arm（6 小時可等視界）。
-    量不到／太舊／太遠／已過一律 `(None, None, 拒絕語)`，**不得退回猜的時刻**
-    （ADR-XPLAT-014 的 L1＋L4 兩格；已撞線後的逐字稿觀測值是 `--arm-endurance` 那條
-    路）。字面格式同 `register_endurance`（本機時區、單引號）。`quota_gate` 由呼叫端
-    注入（同 `quota_line`）；`skew_seconds` 由呼叫端給——緩衝常數的唯一家是 planner
-    的 `RESET_SKEW_SECONDS`，這裡不抄第二份。"""
+    顯式 `--at`（`given`）＝操作者宣稱的時刻，原樣下傳、結構化 at 為 `None`；空白 ⇒ 拒絕語。
+    缺席時只取**實測**：注入的判決快照 `snapshot(now)`（QVD C10：`ruling_io.cached`，本檔不
+    判讀）→ `HALT_WEEKLY` 取 `wk`、其餘取短窗 `win`＋緩衝，且 `reset_branch()` 須判 arm；未注入 ⇒
+    拒絕。量不到／太舊／太遠／已過一律 `(None, None, 拒絕語)`，**不得退回猜的時刻**（ADR-XPLAT-014
+    L1＋L4；撞線後的逐字稿觀測值走 `--arm-endurance`）。字面格式同 `register_endurance`；
+    `skew_seconds` 由呼叫端給（唯一家是 planner 的 `RESET_SKEW_SECONDS`，這裡不抄第二份）。"""
     if given is not None:
         return (given, None, "") if given.strip() else (None, None, _EMPTY_AT)
     at_now = now or datetime.now().astimezone()
     try:
-        policy, _problems = quota_gate.quota_policy.load_policy(quota_gate.policy_env())
-        state = quota_gate.read_quota(at_now)
-        decision = quota_gate.quota_policy.decide(state, at_now, policy)
-        raw = quota_gate.halt_resets_at(decision)
+        if snapshot is None:
+            raise RuntimeError("未注入判決快照（呼叫端須傳 snapshot=ruling_io.cached 系）")
+        snap = snapshot(at_now)
+        state, r = snap.state, snap.ruling
+        raw = r.wk if r.action == "HALT_WEEKLY" else r.win  # spend 列 wk=none ⇒ 沒有 reset 可等
         branch = quota_gate.reset_branch(raw, at_now)
-        fire = None
-        if branch == quota_gate.QUOTA_BRANCH_ARM:
-            fire = datetime.fromisoformat(str(raw)).astimezone()
-            fire += timedelta(seconds=skew_seconds)
+        fire = (datetime.fromisoformat(str(raw)).astimezone() + timedelta(seconds=skew_seconds)
+                if branch == quota_gate.QUOTA_BRANCH_ARM else None)
         if fire is not None and fire > at_now:
             return f"'{fire:%Y-%m-%d %H:%M:%S}'", fire, ""
         why = (f"額度快取不可用：{state.reason}" if not state.usable() else
+               f"判決 {r.action}：沒有要等的重置（{r.reason}）"
+               if raw is None and r.action != "HALT_WEEKLY" else
                f"觸發時刻 {fire:%H:%M:%S} 已過（額度應已回來，請跑 --probe-quota 確認）"
                if fire is not None else
                quota_gate.reset_horizon_phrase(branch, raw, at_now, state.measured_at))
@@ -683,6 +666,7 @@ def sessionstart_brief(
     openitems: Callable[[], str] | None = None,
     oldwin: Callable[[str | None], str] | None = None,
     ctl: Callable[[str | None], str] | None = None,
+    snapshot: Callable[..., object] | None = None,
 ) -> str:
     """組出 SessionStart 要 `emit_to_model` 的那一整行簡報
     （額度＋context＋statusLine 安裝狀態＋查證指令＋唯讀退路；無人值守時另附治理檔唯讀一句；
@@ -711,7 +695,9 @@ def sessionstart_brief(
         ctx = context_line(
             transcript, scan_transcript=scan_transcript, resolve_window=resolve_window,
             window_evidence=window_evidence, read_context_feed=read_context_feed)
-        quota = quota_line(quota_gate, now, _active_model(payload, transcript, guard))
+        model = _active_model(payload, transcript, guard)
+        src = snapshot or (session_brief_oi.ruling_snapshot if session_brief_oi else None)
+        quota = quota_line(None if src is None else lambda: src(sid, transcript, model, now))
         statusline = statusline_line(check_statusline)
         si_line = (si_status or si_status_line)()  # 與上同一個 stderr 吞噬區（DEF-200-344）
         oi_win = session_brief_oi.extra(sid, openitems, oldwin, ctl) if session_brief_oi else ""

@@ -1137,13 +1137,18 @@ class RegisterSchtasksTimeIsObservedNotGuessedTest(unittest.TestCase):
         self.assertIn("--at 顯式指定", explicit)
 
     def test_the_halted_axis_reset_wins_over_a_far_binding_axis(self) -> None:
-        """沿用 `halt_resets_at`（≥halt 各軸中最早可解析者）而不是另造一套挑軸：session 96% 已停、一
-        小時後 reset；weekly 99%（binding，最緊的一軸）兩天後才 reset ⇒ 要等的是 session 那一個。若
-        改取 binding 的 reset，會排到兩天後（或被視界擋下而拒絕），而 5 小時窗一小時後就翻頁了。"""
-        now = self._cache(("session", 96.0, 3600.0), ("weekly_all", 99.0, 172800.0))
+        """QVD C10（WP-QV 改寫；舊版沿用 `halt_resets_at` 取「≥halt 各軸最早者」）：觸發時刻只取判決
+        要等的那個 reset——短窗判決（session 96%，一小時後 reset）⇒ 取短窗 `win`；同時週軸 99%
+        ≥halt ⇒ 判決第 2 列 `HALT_WEEKLY`（優先於短窗，QVD §3.2）⇒ 要等的是週 reset（兩天後），
+        超出 6 小時可等視界 ⇒ 拒絕。舊行為在週軸已停時排到一小時後醒來，醒來仍是週停止＝空醒。"""
+        now = self._cache(("session", 96.0, 3600.0))
         rc, out, err = self._main("--print-schtasks-command")
         self.assertEqual(rc, 0, err)
         self.assertIn(f"-At '{self._fire(3600.0, now):%Y-%m-%d %H:%M:%S}'", out)
+        self._cache(("session", 96.0, 3600.0), ("weekly_all", 99.0, 172800.0))
+        rc, out, err = self._main("--print-schtasks-command")
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("遠超 6 小時", err)
 
     def test_an_unobservable_reset_refuses_before_printing_anything(self) -> None:
         """憲法：解不出時刻一律拒絕——rc≠0、stderr 出聲「拒絕退回假設 5 小時」、stdout
@@ -1154,7 +1159,9 @@ class RegisterSchtasksTimeIsObservedNotGuessedTest(unittest.TestCase):
         cases = (
             ("沒有快取", None, 0.0, ()),
             ("快取過 TTL", ("session", 90.0, 5400.0), old, ("stale-cache", "--pace")),
-            ("週軸過遠", ("weekly_all", 30.0, 172800.0), 0.0, ("遠超 6 小時",)),
+            ("週軸過遠", ("weekly_all", 99.0, 172800.0), 0.0, ("遠超 6 小時",)),
+            ("判決 CONTINUE 無重置可等", ("weekly_all", 30.0, 172800.0), 0.0,
+             ("判決 CONTINUE：沒有要等的重置",)),
         )
         for label, axis, age, expected in cases:
             with self.subTest(label):
@@ -1216,7 +1223,8 @@ class RegisterSchtasksTimeIsObservedNotGuessedTest(unittest.TestCase):
         traceback。"""
         boom = OSError("合成：讀不到")
         with unittest.mock.patch.object(qg, "read_quota", side_effect=boom):
-            at_expr, at, why = session_brief.schtasks_trigger(None, qg, skew_seconds=120)
+            at_expr, at, why = session_brief.schtasks_trigger(
+                None, qg, skew_seconds=120, snapshot=lambda at: RIO.cached(now=at))
         self.assertEqual((at_expr, at), (None, None))
         self.assertIn("拒絕退回「假設 5 小時」", why)
         self.assertIn("合成：讀不到", why)

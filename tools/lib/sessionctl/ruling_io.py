@@ -103,6 +103,17 @@ def current(sid: str, transcript, env, now: datetime, *, read_quota=None, plan=N
                    plan=plan, plan_seams=plan_seams)
 
 
+def cached(sid: str = "", transcript=None, *, now: datetime | None = None,
+           model=None) -> Snapshot:
+    """只讀快取的判決（零網路、不補量）：SessionStart 簡報（C10）與手動排程時刻用——兩者的既有
+    契約都是「只讀快取」；快取逾 TTL ⇒ 量不到 ⇒ 判決照實帶 `deg=unmeasured`，不猜。"""
+    now = now or datetime.now().astimezone()
+    env = qg.policy_env()
+    state = qg.read_quota(now)
+    dec = qg.dispatch_decision(state, now, env, model, peek=True)
+    return compose(state, dec, now, sid=sid, transcript=transcript, env=env, model=model)
+
+
 def rule_from_decision(state, decision, now: datetime, payload: dict, model=None):
     """派工閘（C1）的注入依賴：hook 端把它交給 `quota_gate(rule=…)`；扁平 hub 不 import 本套件。"""
     raw = payload.get("transcript_path") if isinstance(payload, dict) else None
@@ -259,5 +270,5 @@ def cli(argv: list[str], env=None, *, now: datetime | None = None, out=None) -> 
     return 0
 
 
-__all__ = ["Snapshot", "gather", "compose", "rule_from_decision", "fresh_or_recompute",
+__all__ = ["Snapshot", "gather", "cached", "compose", "rule_from_decision", "fresh_or_recompute",
            "pace_report", "pace_block", "cli", "default_next_est", "USAGE_RC"]
