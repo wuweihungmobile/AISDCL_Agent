@@ -70,7 +70,7 @@ ADR-006 爭點 4 的三項事實逐條處置：
    **`.env` 路徑覆寫**（v1.2，R-02）：
    - **為什麼是路徑覆寫、不是把值注入子行程環境**（QA 建議 (b) 的兩個做法擇一）：env 鏈是「行程 env ＞ `AutoClaude/.env`（引擎三鍵）＞ 根 `.env` ＞ `env.shared` ＞ 出廠」（`tools/lib/quota_env_layers.py` 檔頭、`AutoClaude/autoclaude/utils/config.py` `_ENV_FILES`）。把 `.env` 的值灌進行程環境，等於把它從第三層抬到第一層：會蓋過 `AutoClaude/.env` 的引擎三鍵；`--env-doctor` 與讀 `os.environ` 的測試會看到來源變成 process；`.env` 裡的機密（API key、DB DSN）也會出現在每一個子行程的環境裡，而 `AutoClaude/autoclaude/execution/boot_self_check.py` 的 `permission_bypass_allowed_from_env()`（L360～L363）刻意只讀行程環境、不讀 `.env`（「這是安全閘，要由啟動方式明確注入」）——`.env` 若寫了那個旗標，注入會讓這道安全閘在 clone 內打開、在主樹不開，判定與主樹不同。路徑覆寫只換「第三層從哪個檔讀」，層序與來源標籤都不變。
    - **讀者**：根 `.env` 的讀者只有兩個家——harness 側 `quota_env_layers`（`merged_file_env()`、`diagnose()` 的本機層路徑）與引擎側 `config.py` 的 `_ENV_FILES` 第二項（根 `.env`）。兩者改為：`AUTOSDD_LOCAL_ENV_FILE` 有設，**且** `<repo 根>/.git/autopilot-clone` 標記存在（步驟 4.5 由載具寫入 clone 的 `.git/`，不在工作樹、不被追蹤），**且**呼叫端讀的是預設 repo 根（測試傳入的拋棄式 root 不受影響）⇒ 本機層改讀該路徑；三條件缺一 ⇒ 照舊讀 `<repo 根>/.env`。WHY 要標記：沒有它，任何行程設這個變數就能把本機層換成任意檔，等於多一條改額度門檻的路；只認 autopilot clone，主樹與一般 worktree 設了也無效。WP-MERGE 第一動作以 `git grep` 重查根 `.env` 的讀者，表外新讀者同 commit 納入。
-   - **唯讀**：讀者只以讀取模式開檔。會寫本機層的 `python tools/lib/quota_policy.py --env-doctor --fix` 與 `tools/git-hooks/post-merge`，在覆寫生效時一律拒寫（rc 2，印「本機層由 AUTOSDD_LOCAL_ENV_FILE 指向主樹、唯讀」）。
+   - **唯讀**：讀者只以讀取模式開檔。會寫本機層的 `python tools/lib/quota_policy.py --env-doctor --fix` 在覆寫生效時拒寫（rc 2，印「本機層由 AUTOSDD_LOCAL_ENV_FILE 指向主樹、唯讀」）；`tools/git-hooks/post-merge` 依其檔頭契約（advisory、一律 exit 0；既有鎖 `test_quota_env_layers.py::test_the_hook_is_tracked_executable_lf_and_only_ever_exits_zero` 不動）比照其 `AUTOSDD_UNATTENDED` 分支：覆寫生效時只體檢、不呼叫 `--fix`，印含「唯讀」的訊息後 exit 0（v1.3，QA 第四輪 R4-01）。
    - **驗證**（步驟 4.5，取代 v1.1 的「`.env` 存在且雜湊相等」）：主樹有 `.env` 時，①clone 根沒有 `.env`；②以 clone 的 `.venv` 直譯器、全套同一份環境，印出 harness 側本機層路徑與引擎側 `_ENV_FILES` 第二項，兩者都必須解析到主樹 `.env`；③載具讀主樹 `.env` 的內容雜湊入基線鍵。任一不符 ⇒ `carrier_divergence`（附哪一項），不跑全套。主樹沒有 `.env` ⇒ 不設覆寫、跳過並記痕跡（clone 同樣沒有，語意與主樹相同）。全套跑完若 clone 根出現 `.env`（某測試寫了它）⇒ 記痕跡 `clone_env_written`；它在覆寫下不被讀、隨 clone 刪除，主樹不受影響。
 
    WP-MERGE 第一動作以「同一 HEAD 的乾淨 clone 跑全套 vs 主樹 pre-push」逐 leg 對照，把普查中缺席會改變判定的項補進表（同一 commit 改本表）；之後新增 ignored 輸入檔＝改表。帶入後、跑全套前，**每筆白名單項在 clone 內必須存在且內容雜湊等於主樹**（主樹本身沒有該檔者跳過並記痕跡），否則 `MERGE_VERDICT=carrier_divergence`（附缺項），不跑全套。
@@ -91,7 +91,7 @@ ADR-006 爭點 4 的三項事實逐條處置：
 ## 4. 後果
 
 - 正面：合入閘測到的是合入樹，且這件事每次被驗；寫入者隔離與 main-only 原則並存；殘留分支有鎖；機器本地狀態的差異不會被算成代理的紅（D5 基線）。
-- 負面（D5）：主樹 HEAD 每變一次多付一次基線全套（同鍵重用）。（v1.1 的「`.env` 跨卷時無法帶入」已由 v1.2 的路徑覆寫消除；代價是根 `.env` 的兩個讀者家各多一個條件分支，以及 `--fix`／post-merge 在 clone 內拒寫。）
+- 負面（D5）：主樹 HEAD 每變一次多付一次基線全套（同鍵重用）。（v1.1 的「`.env` 跨卷時無法帶入」已由 v1.2 的路徑覆寫消除；代價是根 `.env` 的兩個讀者家各多一個條件分支，以及 `--fix` 在 clone 內拒寫、post-merge 在 clone 內只體檢不修。）
 - 負面（D1，v1.2）：暫存目錄與主樹不同卷時，物件庫整份複製一次（時間與空間），步驟 0 已加計。
 - 負面：Windows 每次合入一棵全額工作樹（數百 MB 等級，以 `df` 類工具量，不用 `du`，ADR-006 §2.3）；連結的建立與刪除是新的平台差異面（D2 已逐平台寫明）。
 - 誠實劃界：執行期自證只驗兩個頂層套件的解析；以 `importlib` 動態載入或子行程清空環境的路徑，只有測試期紅綠自證（三子樹各一突變）看得到，且只對植了突變的那幾條 leg 有鑑別力。
