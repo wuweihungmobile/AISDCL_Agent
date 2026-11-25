@@ -1009,6 +1009,10 @@ def sub_of(args: tuple) -> str | None:
     return None
 
 
+#: AT-749-9-2 砍樹前等觀測孫行程的上界（秒）；須小於 hook 的 `sleep 27.31`，否則孫行程自己結束
+SEEN_GATE_SECONDS = 20
+
+
 def sleeper_pids(tag: str) -> list[int]:
     """命令列含 `sleep <tag>` 的行程 PID（現查行程表，不看標記檔）；平台各一條。"""
     if sys.platform == "win32":
@@ -1350,22 +1354,46 @@ class TestLockAndWall(RunTestCase):
             self.assertLess(time.monotonic() - t1, 1 + runner.KILL_GRACE_SECONDS)
             # 可查字樣、不靜默
             self.assertEqual(res.note, want if sys.platform == "win32" else posix)
+        self.hook_tree_is_killed(rr2, sha2)
+        self.normal_completion_leaves_background_alone()  # (iii)
+
+    def test_DEF_200_651_kill_is_judged_even_when_the_hook_is_late_past_the_wall(self):
+        """回歸鎖（DEF-200-651）：負載把 hook 推遲到牆鐘之後才生出孫行程時，鑑別力仍成立。
+        hook 先睡過牆鐘才生出帶標記的孫行程＝把「並行全套下 hook 起得晚」做成確定性輸入；
+        舊載具（背景執行緒輪詢、砍樹不等觀測）在此必紅：砍樹時孫行程還沒出生，`seen` 恆空。
+        受測面：tools/lib/selfimproving/runner.py（逾時砍行程樹）。"""
+        rr = self.prr()
+        self.hook_tree_is_killed(rr, rr.patrol().sha, late=4.07)
+
+    def hook_tree_is_killed(self, rr2: p7x.PushRepo, sha2: str, late: float = 0.0) -> None:
+        """真 pre-push hook 生出孫行程（`sleep 27.31`）、牆鐘 3 秒逾時 ⇒ 整棵樹被收掉。
+        `late`＞0 時 hook 先睡 `late` 秒（不帶標記）才生孫行程。"""
         self.require_sleep_tool()
         tag, wall = "27.31", 3
         started = fx.new_dir("hookstarted")
         hook = rr2.R / ".git" / "hooks" / "pre-push"
         hook.parent.mkdir(parents=True, exist_ok=True)
-        hook.write_bytes(f"#!/bin/sh\necho s > '{started.as_posix()}'\nsleep {tag}\n".encode())
+        pre = f"sleep {late}\n" if late else ""
+        hook.write_bytes(
+            f"#!/bin/sh\necho s > '{started.as_posix()}'\n{pre}sleep {tag}\n".encode())
         hook.chmod(0o755)
+        # 鑑別力的證據＝砍樹「之前」親眼看到孫行程。DEF-200-651：原本是背景執行緒每 0.5 秒查一次
+        # 行程表，而孫行程只活在「hook 起來」到「牆鐘砍樹」之間（閒置約 2.5 秒）；並行全套下
+        # 守門的 git 呼叫把 hook 推遲、每次 CIM 查詢又變慢，查詢窗整個落在砍樹之後 ⇒ 看不到。
+        # 改成在逾時收尾的入口先等到看見孫行程（有上界）才放行真正的砍樹：觀測不再與砍樹賽跑。
         seen: set[int] = set()
-        stop = threading.Event()
+        gate_waits: list[float] = []  # 等觀測花掉的秒數（量 run_argv 耗時時要扣掉）
+        real_kill = runner._timeout_kill  # noqa: SLF001
+        idle = threading.Event()
 
-        def watch() -> None:
-            while not stop.is_set():
+        def kill_after_seen(*a, **kw):
+            t_in = time.monotonic()
+            while not seen and time.monotonic() - t_in < SEEN_GATE_SECONDS:
                 seen.update(sleeper_pids(tag))
-                stop.wait(0.5)
-        watcher = threading.Thread(target=watch, daemon=True)
-        watcher.start()
+                if not seen:
+                    idle.wait(0.2)
+            gate_waits.append(time.monotonic() - t_in)
+            return real_kill(*a, **kw)
         spans: list[float] = []  # 牆鐘那一次 `run_argv` 自己的耗時（不含守門的 git 呼叫與收尾）
         real_run = runner.run_argv
 
@@ -1376,13 +1404,10 @@ class TestLockAndWall(RunTestCase):
             finally:
                 if kw.get("timeout") == wall:
                     spans.append(time.monotonic() - t_in)
-        try:
-            with (mock.patch.object(patrolpush, "WALL_SECONDS_OVERRIDE", wall),
-                  mock.patch.object(runner, "run_argv", timed)):
-                rc, out = patrolpush.run(rr2.R, now=NOW)
-        finally:
-            stop.set()
-            watcher.join(5)
+        with (mock.patch.object(patrolpush, "WALL_SECONDS_OVERRIDE", wall),
+              mock.patch.object(runner, "run_argv", timed),
+              mock.patch.object(runner, "_timeout_kill", kill_after_seen)):
+            rc, out = patrolpush.run(rr2.R, now=NOW)
         survivors = sleeper_pids(tag)
         for pid in survivors:  # 先清掉再斷言，免得紅燈留下孤兒
             with contextlib.suppress(OSError):
@@ -1394,11 +1419,11 @@ class TestLockAndWall(RunTestCase):
         self.assertEqual(survivors, [], "逾時後孫行程仍在")  # (i) 整棵樹都被收掉
         grace = getattr(runner, "KILL_GRACE_SECONDS", 5)
         # (ii) 量 run_argv 自己：整段 patrolpush.run 還含守門的數十次 git 呼叫（共用 runner 上
-        # 這部分不受本實作控制）；砍樹沒生效時 run_argv 會再等滿 grace，必 ≥ wall + grace
-        self.assertEqual(len(spans), 1, spans)
-        self.assertLess(spans[0], wall + grace, "run_argv 沒在逾時＋寬限內返回")
+        # 這部分不受本實作控制）；砍樹沒生效時 run_argv 會再等滿 grace，必 ≥ wall + grace。
+        # 等觀測的那段是測試自己插進去的，扣掉後才是產品的耗時
+        self.assertEqual((len(spans), len(gate_waits)), (1, 1), (spans, gate_waits))
+        self.assertLess(spans[0] - gate_waits[0], wall + grace, "run_argv 沒在逾時＋寬限內返回")
         self.assertNotEqual(self.remote_main(rr2), sha2)
-        self.normal_completion_leaves_background_alone()  # (iii)
 
     def normal_completion_leaves_background_alone(self) -> None:
         """(iii) 正常路徑不變：沒逾時時，子行程留下的背景行程不被殺（Job 只在逾時才終止）。"""

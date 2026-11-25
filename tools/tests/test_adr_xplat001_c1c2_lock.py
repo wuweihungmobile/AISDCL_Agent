@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9724,
+    "test_adr_xplat001_c1c2_lock.py": 9737,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -736,7 +736,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_selfimproving_p2_meta.py": 515,
     "test_selfimproving_p3_meta.py": 429,
     "test_selfimproving_p7_memory.py": 403,
-    "test_selfimproving_p7_push.py": 4700,
+    "test_selfimproving_p7_push.py": 4725,
     "test_selfimproving_p7_report.py": 1364,
     "test_selfimproving_promote.py": 724,
     "test_selfimproving_props.py": 1556,
@@ -775,7 +775,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sessionctl_seal.py": 394,
     "test_sessionctl_supervise.py": 316,
     "test_sessionctl_switch.py": 592,
-    "test_sessionctl_switchplan.py": 724,
+    "test_sessionctl_switchplan.py": 730,
     "test_sessionctl_visibility.py": 537,
     "test_sessionctl_watch.py": 819,
     "test_sessionctl_watchlock.py": 250,
@@ -3377,6 +3377,13 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "牆鐘預算而在並行全套間歇紅）：test_sessionctl_visibility.py +52（run_statusline 載具只換區段"
      "時限、慢機器回歸鎖一案）加本檔自身 +12。逐檔清單見 CrossPlatform_R145_Scan_Findings.md "
      "尾端 R214 標記行；證據＝docs/06_quality/CrossPlatform_R218_TestHygiene_Evidence.md。"),
+    ("R214", 189755, 189799, +44,  # round-label-ok r218close3
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE "
+     "的R214 名冊列承接] 同標籤第七十一列（CLOSE3：DEF-200-651 砍樹前先等到觀測孫行程、"
+     "DEF-200-652 switch-plan smoke 設定目錄圍到 tmp）：test_selfimproving_p7_push.py +25、"
+     "test_sessionctl_switchplan.py +6 加本檔自身 +13。逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
+     "證據＝docs/06_quality/CrossPlatform_R218_TestHygiene_Evidence.md。"),
 )
 
 
@@ -3478,7 +3485,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (61243, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (61287, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3568,6 +3575,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "第六十八列（r218hyg1）+242＝61100。"
         "第六十九列（r218d649）+79＝61179。"
         "第七十列（r218flk1）+64＝61243。"
+        "第七十一列（r218close3）+44＝61287。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -4216,6 +4224,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "FLK1：statusline smoke 慢機器回歸鎖："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok r218close3
+     "CLOSE3：hook 晚於牆鐘的砍樹回歸鎖："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -4391,10 +4403,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 417
+_REPIN_LOG_FROZEN_PREFIX_LEN = 418
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "7d82357e696b71537d658cd3c30ba94451e93fbbd972071a4a0f1e3864075cdd")
+    "77a6d236ec9e8d86104a9b3c6bb33af5e9f9fbbfedcec8386093a2db62c6ee05")
 
 
 def repin_log_history_digest(
@@ -4653,6 +4665,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "6492c64c509f", "c6cbbb8084d2", "DEF-200-648"),  # round-label-ok r218hyg1ledger
     ("R214", "c6cbbb8084d2", "b5f0de457d91", "DEF-200-649"),  # round-label-ok r218d649ledger
     ("R214", "b5f0de457d91", "7d82357e696b", "DEF-200-650"),  # round-label-ok r218flk1ledger
+    ("R214", "7d82357e696b", "77a6d236ec9e", "DEF-200-651"),  # round-label-ok r218close3ledger
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

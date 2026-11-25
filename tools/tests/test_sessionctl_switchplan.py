@@ -564,14 +564,20 @@ class SwitchPlanCliTest(_GateFence):
         """真行程（E2E 形態）：`python tools/sessionctl.py switch-plan --json`
         在 tmp 圍籬下 rc 0。"""
         self.write_transcript(SMALL)
-        env = {**os.environ, "AUTOSDD_TRACE_DIR": str(self.tdir),
-               "AUTOSDD_HANDOFF_DIR": str(self.hdir), "CLAUDE_CODE_SESSION_ID": SID}
+        env = {**os.environ, "AUTOSDD_TRACE_DIR": str(self.tdir), "CLAUDE_CODE_SESSION_ID": SID,
+               "AUTOSDD_HANDOFF_DIR": str(self.hdir), "AUTOSDD_QUOTA_CACHE_DIR": str(self.tdir)}
         env.pop("AUTOSDD_UNATTENDED", None)
+        env.update(TEMP=str(self.tdir), TMP=str(self.tdir), TMPDIR=str(self.tdir))  # 真額度不入
+        # 空快取 ⇒ `quota_gate.pace_state` 會拿真憑證線上補量（DEF-200-652：實測讀到真短窗%）；
+        # 設定目錄圍到 tmp ⇒ 憑證讀不到、不連線，額度軸「量不到」
+        env["CLAUDE_CONFIG_DIR"] = str(self.tdir)
         done = subprocess.run([sys.executable, str(_REPO_ROOT / "tools" / "sessionctl.py"),
                                "switch-plan", "--json"], capture_output=True, text=True,
                               encoding="utf-8", env=env, timeout=120, cwd=str(self.tmp))
         self.assertEqual(done.returncode, 0, msg=done.stderr)
         body = json.loads(done.stdout.strip().splitlines()[-1])
+        quota = body["inputs"]["quota"]
+        self.assertEqual((quota["short_pct"], quota["weekly_pct"]), (None, None), quota)  # 密閉
         self.assertEqual(body["decision"]["action"], Action.STAY)
 
 

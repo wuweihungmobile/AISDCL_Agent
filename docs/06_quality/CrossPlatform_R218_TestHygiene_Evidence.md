@@ -43,3 +43,12 @@
 - **修法**：smoke 改經 `run_statusline`（`python -c` 開機碼以 runpy 跑真腳本 `__main__`，只把區段時限換成 60 秒，其餘 stdin→main→ctl_segment→真檔全照跑）。產品碼、預算、斷言都沒動。
 - **回歸鎖**：`test_flk1_smoke_carrier_survives_a_machine_slower_than_the_product_budget`：取數注入 450 ms 延遲，保留產品時限的同一載具必得 `ctx 11% 5/1.0m | Opus`（載具觸發得到病），換 smoke 時限則印 `ctl: 1 agent NO WATCH`。紅綠自證：把 `run_statusline` 預設時限改回產品值，該案以與真實紅逐字相同的訊息轉紅，還原後全綠。
 
+
+## F 項：CLOSE3（DEF-200-651、DEF-200-652）與帳本輪替後的列數斷言
+
+- **症狀**：2026-11-25 推送 `7b66ccd6`（缺陷帳本歸檔輪替 archive_69）時 pre-push 根層全套 3 紅：AT-749-9-2「測試載具沒看到 hook 的孫行程（sleep），鑑別力不成立」、`SwitchPlanCliTest.test_real_process_smoke` 得 `PARK_UNTIL`、`test_AT_IC_01_4_2` 主檔列數 82 不大於 100。
+- **列數斷言**：該斷言的目的是擋「讀到 0 列的假綠」；主檔會因歸檔輪替變小，門檻改為 `> 0`，目的不變。
+- **DEF-200-652 成因**：smoke 子行程的額度快取目錄是空的 ⇒ `quota_gate.pace_state` 取得補量名額，以真 `~/.claude/.credentials.json` 打 `/api/oauth/usage`，讀到當下真短窗%；推送當時短窗達準備門檻 ⇒ `PARK_UNTIL`。只圍快取目錄與 TEMP 擋不住這條線上補量（探針實測：圍完仍讀到 `short_pct=7.0`、`weekly_pct=42.0`）。**修法**：子行程 `CLAUDE_CONFIG_DIR` 指到測試暫存（`platform_utils.claude_home` 的 SSOT）⇒ 憑證讀不到、不連線、額度軸量不到。新增斷言 `short_pct`／`weekly_pct` 皆為 `None`：任何真額度滲入都會紅，不必等到真額度剛好高。紅綠自證：拿掉該行即紅（`(9.0, 42.0) != (None, None)`），還原即綠。
+- **DEF-200-651 成因**：舊載具用背景執行緒每 0.5 秒以 `Get-CimInstance` 查一次行程表；孫行程只活在「hook 起來」到「牆鐘 3 秒砍樹」之間。時間線探針（包住 `sleeper_pids` 記每次查詢起訖與命中）：閒置時活著的窗口約 2.3 秒、可命中 3～4 次；60 支燒機行程＋6 條 CIM 查詢迴圈下，單次查詢最長 2.53 秒、命中降到 1 次（4 次中 3 次只剩 1 次命中）。並行全套下守門 git 呼叫把 hook 推遲、查詢又更慢，查詢窗整個落在砍樹之後 ⇒ `seen` 為空。產品（`runner.run_argv` 逾時砍樹）沒有缺陷，缺陷在觀測與砍樹賽跑。
+- **修法（結構正解）**：測試把 `runner._timeout_kill` 包一層：逾時那一刻先查到孫行程（上界 `SEEN_GATE_SECONDS=20`，小於孫行程的 27.31 秒）才呼叫真的砍樹。觀測不再跟砍樹賽跑；hook 起得晚也能等到。量 `run_argv` 耗時時扣掉這段等待，(ii)「逾時＋寬限內返回」的鑑別力不變。產品碼、牆鐘、寬限、斷言門檻都沒動。
+- **回歸鎖**：`test_DEF_200_651_kill_is_judged_even_when_the_hook_is_late_past_the_wall`：hook 先睡 4.07 秒（超過牆鐘）才生出帶標記的孫行程，把「負載下 hook 起得晚」做成確定性輸入。紅綠自證：把 `SEEN_GATE_SECONDS` 改成 0（砍樹不等觀測，等同舊載具），該案以與真實紅逐字相同的訊息轉紅；還原後 `TestLockAndWall` 6 案全綠。

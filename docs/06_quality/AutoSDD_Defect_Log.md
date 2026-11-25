@@ -152,6 +152,8 @@
 | DEF-200-640 | 2026-11-23 | 2026-11-23 12:4x Stop 保溫閘推回（上下文 355,247；本欄刻意零輪號） | **Stop 保溫閘在 park 標記有效時仍推回要求掛 keepwarm**：與 DES「park 標記有效＝不掛」不一致；照做會使到點 fire 判 live_driver 而跳過換手（明細見同證據檔） | P2 | 對齊 DES 不掛情形並以有效標記的 Stop 重放確認 | open：待修，承接輪次：**R218** |
 | DEF-200-641 | 2026-11-17～23 | `waste_census --switch-metrics` M-K9 判出 e4f80b15（park spawn `28059aa2` 首回合晚 66 分；本欄刻意零輪號） | **宣稱已排程但未續上**：排程宣稱與實際續上之間 66 分落差，當時無偵測 | P2 | Q5（d4e95558）已量到；成因與即時偵測面交 Q6 | routed：Q6 承接；承接輪次：**R218** |
 | DEF-200-642 | 2026-11-23 | Q3 smoke 首跑 park 到點未起（原因未明；本欄刻意零輪號） | **park 到點未起且原因未明**：無法區分未到點／被讓路／失敗鏈終局 | P3 | Q6 偵測並分類 | routed：Q6 承接；承接輪次：**R218** |
+| DEF-200-651 | 2026-11-25 | pre-push 全套 AT-749-9-2 紅（本欄刻意零輪號） | **觀測孫行程與牆鐘砍樹賽跑**：負載下輪詢窗落在砍樹後 | P3 | 砍樹前先等到觀測 | fixed：CLOSE3；`test_selfimproving_p7_push.py` |
+| DEF-200-652 | 2026-11-25 | pre-push 全套 switch-plan smoke 得 PARK_UNTIL（本欄刻意零輪號） | **smoke 以真憑證線上補量額度** | P3 | 設定目錄圍到 tmp | fixed：CLOSE3；`test_sessionctl_switchplan.py` |
 
 > **R41「四方複審裁決總結」敘事段落已搬遷至 [`AutoSDD_Defect_Log_archive_17.md`](AutoSDD_Defect_Log_archive_17.md)（R43 帳本 housekeeping，逐字保全）。**
 
