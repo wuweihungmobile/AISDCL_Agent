@@ -331,6 +331,403 @@ class GatherTest(_Fenced):
         self.assertGreater(datetime.fromisoformat(r.expires_at), now + timedelta(seconds=590))
 
 
+SID = "11111111-2222-4333-8444-555555555555"
+
+
+def _live_state(pct, reset_min, now):
+    """以真實牆鐘為準的短窗讀數（派工閘、取數內部用 `datetime.now()`）。"""
+    return _state(_axis("five_hour", pct, reset_min, now=now), _axis("seven_day", 10, 6000, now=now),
+                  now=now)
+
+
+def _traces(root: Path) -> list[dict]:
+    rows = []
+    for path in root.rglob("*.jsonl"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                continue
+    return rows
+
+
+class ConsumerTest(_Fenced):
+    """消費端改接（QVD §3.5 C1、C3、C10、C13、C14、C21；§4 有效期）。"""
+
+    def _gate(self, state, tool="Agent"):
+        """真 `quota_gate.quota_gate()`＋hook 端要注入的 `session_brief_oi.dispatch_rule`（C1）。"""
+        import session_brief_oi  # noqa: PLC0415
+
+        seen = {}
+
+        def rule(*a):
+            seen["verdict"] = session_brief_oi.dispatch_rule(*a)
+            return seen["verdict"]
+
+        def floor(decision, _now):
+            seen["cap"] = decision.cap
+
+        payload = {"tool_name": tool, "hook_event_name": "PreToolUse", "session_id": SID,
+                   "transcript_path": str(self.tmp / f"{SID}.jsonl")}
+        err = __import__("io").StringIO()
+        with mock.patch.object(quota_gate, "read_quota", lambda *_a, **_k: state), \
+                mock.patch.object(quota_gate, "fanout_ledger_path", lambda: self.tmp / "fan"), \
+                mock.patch.object(quota_gate.quota_rush, "log_floor", floor), \
+                mock.patch("sys.stderr", err):
+            rc = quota_gate.quota_gate(
+                payload, blocking=("Agent", "Task", "Workflow"), latch_read=lambda _p: set(),
+                latch_write=lambda *_a: None, plan_writer=lambda *_a, **_k: None,
+                waker=lambda *_a, **_k: {}, event="PreToolUse", rule=rule)
+        return rc, err.getvalue(), seen
+
+    def test_gate_and_line_share_cap(self):
+        """AC-QV-01g 後半：PreToolUse 記派發帳所用的 cap＝同一時刻判決行 `cap=`（C1 經 hook 注入縫）。"""
+        now = datetime.now().astimezone()
+        rc, _err, seen = self._gate(_live_state(40, 150, now))
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen["verdict"].action, QR.CONTINUE)
+        self.assertEqual(seen["cap"], seen["verdict"].cap)
+        self.assertIn(f" cap={seen['cap']} ", QR.head(seen["verdict"]))
+
+    def test_gate_blocks_on_any_non_continue_verdict(self):
+        """C1：判決非 CONTINUE ⇒ 擋展開型派工（rc 2），訊息附判決行；致動器只此一處（C2 退役）。
+        注入縫組判決失敗 ⇒ `None` ⇒ 退回既有 band 判讀（不崩潰、halt 帶照舊擋）。"""
+        now = datetime.now().astimezone()
+        rc, err, seen = self._gate(_live_state(87, 14, now))
+        self.assertEqual((rc, seen["verdict"].action), (2, QR.WAIT_RESET))
+        self.assertIn("QUOTA_VERDICT=WAIT_RESET", err)
+        import session_brief_oi  # noqa: PLC0415
+        with mock.patch.object(ruling_io, "rule_from_decision", side_effect=RuntimeError("x")):
+            self.assertIsNone(session_brief_oi.dispatch_rule(None, None, now, {}, None))
+
+    def test_consumers_print_verdict_first(self):
+        """AC-QV-02b：交接包、watch、park、SessionStart 簡報、`--pace` 的第一個額度行皆為判決行。"""
+        import session_brief  # noqa: PLC0415
+
+        from lib.sessionctl import handoff_build, park_reset, watch_wake  # noqa: PLC0415
+        now = datetime.now().astimezone()
+        state = _live_state(87, 14, now)
+        first = handoff_build._quota_text(now, lambda _n: state, SID).splitlines()[0]  # noqa: SLF001
+        self.assertTrue(first.startswith(QR.PREFIX), first)
+        keys = watch_wake.quota_keys(SID, None, {}, now.timestamp(), read_quota=lambda _n: state)
+        self.assertTrue(keys and keys[0][5].startswith(QR.PREFIX), keys)
+        err = __import__("io").StringIO()
+        with mock.patch("sys.stderr", err):
+            park_reset.resolve(SimpleNamespace(next_est=None, at=None), SID,
+                               {"quota": lambda _n: state}, now)
+        self.assertTrue(err.getvalue().splitlines()[1].startswith(QR.PREFIX), err.getvalue())
+        snap = ruling_io.current(SID, None, {}, now, read_quota=lambda _n: state)
+        self.assertTrue(session_brief.quota_line(lambda: snap).startswith("額度判決：" + QR.PREFIX))
+        with mock.patch.object(quota_gate, "pace_state", lambda _n: state):
+            pace = ruling_io.pace_report(now=now)
+        self.assertTrue(pace.startswith(QR.PREFIX), pace[:120])
+
+    def test_stale_verdict_recomputed(self):
+        """AC-QV-02c／MU-QV-16：過期判決行（舊 vid 為 PARK）⇒ 重算為 CONTINUE、落
+        `stale_verdict_recomputed`；未過期 ⇒ 不重算。"""
+        now = datetime.now().astimezone()
+        old = _rule(_state(_short(95, 120)))
+        self.assertEqual(old.action, QR.PARK)
+        with mock.patch.object(quota_gate, "pace_state", lambda _n: _live_state(0, 200, now)):
+            fields, fresh = ruling_io.fresh_or_recompute(QR.line(old), now)
+        self.assertEqual((fields["action"], fresh.action), (QR.CONTINUE, QR.CONTINUE))
+        rows = [r for r in _traces(self.tmp / "traces")
+                if r.get("event") == "stale_verdict_recomputed"]
+        self.assertEqual([r.get("old_vid") for r in rows], [old.vid])
+        live = _rule(_state(_short(95, 120), now=now), now=now)
+        self.assertIsNone(ruling_io.fresh_or_recompute(QR.line(live), now)[1])
+
+    @staticmethod
+    def _plan_quota(r, **kw):
+        from lib.sessionctl import switchplan  # noqa: PLC0415
+        return switchplan.Quota(action=r.action, win=r.win, wk=r.wk, vid=r.vid, **kw)
+
+    def test_switchplan_wait_reset_never_parks(self):
+        """AC-QV-12a：E2 讀數（87%、D=14、stage free）⇒ WAIT_RESET ⇒ STAY wait_reset、keepwarm。"""
+        from lib.sessionctl import switchplan  # noqa: PLC0415
+        r = _rule(_state(_short(87, 14)), plan=qw_plan.Plan("free"))
+        got = switchplan.decide(switchplan.Inputs(quota=self._plan_quota(r, wait_min=14)))
+        self.assertEqual((got.action, got.flags.keepwarm), ("STAY", True))
+        self.assertIn("wait_reset", got.reason)
+
+    def test_switchplan_maps_ruling_actions(self):
+        """AC-QV-12b：PARK⇒PARK_UNTIL(win)／D>6h⇒PARK_POLL；HALT_WEEKLY⇒PARK_POLL(wk)；spend⇒STAY；
+        CONTINUE／NODISPATCH／None 不由額度列命中；credential 為真不重出 PARK（R-06）；判讀欄已退役。"""
+        from lib.sessionctl import switchplan  # noqa: PLC0415
+        A, inp = switchplan.Action, switchplan.Inputs
+
+        def d(q):
+            return switchplan.decide(inp(quota=q))
+        park_r = _rule(_state(_short(92, 90), _week(10)), plan=qw_plan.Plan("close"))
+        self.assertEqual(park_r.action, QR.PARK)
+        got = d(self._plan_quota(park_r, wait_min=90))
+        self.assertEqual((got.action, got.target), (A.PARK_UNTIL, park_r.win))
+        self.assertEqual(d(self._plan_quota(park_r, wait_min=7 * 60)).action, A.PARK_POLL)
+        self.assertEqual(d(self._plan_quota(park_r, wait_min=90, credential=True)).action, A.STAY)
+        wk = _rule(_state(_short(10), _week(100)))
+        got = d(self._plan_quota(wk))
+        self.assertEqual((got.action, got.target), (A.PARK_POLL, wk.wk))
+        self.assertEqual(d(self._plan_quota(wk, credential=True)).action, A.STAY)
+        spend = _rule(_state(_short(10), _axis("spend", 100, None)))
+        self.assertEqual(d(self._plan_quota(spend)).reason, "spend_limit")
+        for r in (_rule(_state(_short(10), _week(80))),
+                  _rule(_state(_short(40)), plan=qw_plan.Plan("nodispatch"))):
+            self.assertNotIn(d(self._plan_quota(r)).action, (A.PARK_UNTIL, A.PARK_POLL))
+        self.assertNotIn(d(switchplan.Quota(action=None)).action, (A.PARK_UNTIL, A.PARK_POLL))
+        names = {f.name for f in __import__("dataclasses").fields(switchplan.Quota)}
+        self.assertFalse(names & {"short_pct", "weekly_pct", "prepare_pct", "stage"})
+
+    def _early(self, state, ruling, marker=None):
+        from lib.sessionctl import parkearly, parkprobe  # noqa: PLC0415
+        marker = marker or {parkprobe.MK_PARKED_PCT: 92.0, "route": "H"}
+        fired = []
+        snap = SimpleNamespace(state=state, ruling=ruling)
+        with mock.patch.object(parkearly, "_sid", lambda _a: SID), \
+                mock.patch.object(parkearly.park, "read_marker", lambda _s: marker), \
+                mock.patch.object(parkearly, "_precheck", lambda *_a: ""), \
+                mock.patch.object(parkearly, "_primary_handles", lambda *_a: False), \
+                mock.patch.object(parkearly, "_live_driver", lambda *_a: False), \
+                mock.patch("lib.sessionctl.park_reset.ruling_for", lambda *_a, **_k: snap), \
+                mock.patch.object(parkearly, "fire_early",
+                                  lambda *_a: fired.append(1) or "fired"):
+            verdict = parkearly.tick(SimpleNamespace(), NOW, {}, env={})
+        return verdict, len(fired)
+
+    def test_parkearly_respects_park_ruling(self):
+        """AC-QV-13a／MU-QV-29：基準 92、當下 80（< prepare、低 12pp）但 stage close ⇒ 判決 PARK ⇒
+        不呼叫 `fire_early`（縫計數 0）、痕跡 `park_early_probe` 帶 `action=PARK`。"""
+        from lib.sessionctl import parkprobe  # noqa: PLC0415
+        state = _state(_short(80, 120))
+        r = _rule(state, plan=qw_plan.Plan("close"))
+        self.assertEqual(r.action, QR.PARK)
+        verdict, fired = self._early(state, r)
+        self.assertEqual((verdict["action"], verdict["recovered"], fired), (QR.PARK, False, 0))
+        rows = [x for x in _traces(self.tmp / "traces") if x.get("event") == parkprobe.EV_PROBE]
+        self.assertEqual(rows[-1]["action"], QR.PARK)
+        zero = _state(_short(0, 120))
+        self.assertEqual(self._early(zero, _rule(zero))[1], 1, "判決 CONTINUE 且大降 ⇒ 恰一次")
+
+    def test_parkearly_fires_only_on_continue_with_drop(self):
+        """AC-QV-13b／MU-QV-30：CONTINUE 且降 ≥5pp ⇒ recovered；只降 3pp ⇒ 否（遲滯閘保留）；
+        CONTINUE deg=unmeasured ⇒ 否；`parkprobe.evaluate` 原始碼不再引用 `prepare_pct`。"""
+        from lib.sessionctl import parkprobe  # noqa: PLC0415
+        marker = {parkprobe.MK_PARKED_PCT: 50.0}
+        for cur, want in ((44.0, True), (47.0, False)):
+            state = _state(_short(cur, 120))
+            r = _rule(state)
+            self.assertEqual(r.action, QR.CONTINUE)
+            self.assertIs(parkprobe.evaluate(marker, state, r, NOW)["recovered"], want, cur)
+        degraded = SimpleNamespace(action=QR.CONTINUE, degraded=True, vid="x")
+        self.assertFalse(parkprobe.evaluate(marker, _state(_short(10, 120)), degraded,
+                                            NOW)["recovered"])
+        src = Path(parkprobe.__file__).read_text(encoding="utf-8")
+        fn = next(n for n in ast.parse(src).body
+                  if isinstance(n, ast.FunctionDef) and n.name == "evaluate")
+        self.assertNotIn("prepare_pct", ast.get_source_segment(src, fn))
+
+
+class ParkTest(_Fenced):
+    """park 前置（QVD §3.5 C6、§5；REQ-AP-QV-04）。"""
+
+    def _resolve(self, state, *, next_est=None, plan=None):
+        from lib.sessionctl import park_reset  # noqa: PLC0415
+        S = {"quota": lambda _n: state}
+        if plan is not None:
+            S["plan"] = lambda *_a, **_k: plan
+        err = __import__("io").StringIO()
+        with mock.patch("sys.stderr", err):
+            got = park_reset.resolve(SimpleNamespace(next_est=next_est, at=None), SID, S, NOW)
+        return got, err.getvalue()
+
+    def test_continue_refuses_and_why_retired(self):
+        """AC-QV-04a／MU-QV-5：判決 CONTINUE ⇒ rc 4 並印判決行；傳 `--why` ⇒ 拒絕並指路 `--next-est`。"""
+        from lib.sessionctl import park_cli  # noqa: PLC0415
+        (_r, _a, _s, rc), err = self._resolve(_state(_short(40, 150)))
+        self.assertEqual(rc, 4)
+        self.assertIn("QUOTA_VERDICT=CONTINUE", err)
+        buf = __import__("io").StringIO()
+        with mock.patch("sys.stderr", buf):
+            rc = park_cli.run(["--session-id", SID, "--why", "下一棒放不下要先停工"], env={})
+        self.assertEqual(rc, 2)
+        self.assertIn("--next-est", buf.getvalue())
+
+    def test_next_est_drives_park_or_wait(self):
+        """AC-QV-04b／MU-QV-10：`--next-est` ≥ R−V 且 D>45 ⇒ PARK（回 reset＝win）；D≤45 ⇒
+        WAIT_RESET 不登記；`next_est` < R−V（且缺省下界也小於）⇒ CONTINUE。"""
+        plan = qw_plan.Plan("free", r=40.0, v=5.0, n_live=0)
+        (reset, _a, _s, rc), _err = self._resolve(_state(_short(60, 120)), next_est=36.0,
+                                                  plan=plan)
+        self.assertEqual(rc, 0)
+        self.assertEqual(reset, datetime.fromisoformat(_iso(NOW + timedelta(minutes=120))))
+        (_r, _a, _s, rc), err = self._resolve(_state(_short(60, 14)), next_est=36.0, plan=plan)
+        self.assertEqual(rc, 4)
+        self.assertIn("判決 WAIT_RESET", err)
+        (_r, _a, _s, rc), err = self._resolve(_state(_short(60, 120)), next_est=1.0, plan=plan)
+        self.assertEqual(rc, 4)
+        self.assertIn("判決 CONTINUE", err)
+
+    def test_park_messages_match_verdict(self):
+        """AC-QV-04c／MU-QV-11：拒絕文案的動作與判決行一致、不含 `--why`；短窗 reset 量不到 ⇒
+        NODISPATCH 而非 PARK。"""
+        cases = ((_state(_short(87, 14)), QR.WAIT_RESET), (_state(_short(40, 150)), QR.CONTINUE),
+                 (_state(_axis("five_hour", 92, None), _week(10)), QR.NODISPATCH))
+        for state, action in cases:
+            with self.subTest(action=action):
+                (_r, _a, _s, rc), err = self._resolve(state)
+                self.assertEqual(rc, 4)
+                self.assertIn(f"判決 {action}", err)
+                self.assertEqual(QR.parse(err)["action"], action)
+                self.assertNotIn("--why", err)
+
+    def test_next_est_default_and_floor(self):
+        """AC-QV-04d／MU-QV-18：缺省＝`cal_agent × max(1, n_plan)`；給的值低於缺省 ⇒ 取缺省。"""
+        from lib.sessionctl import qw_calc  # noqa: PLC0415
+        agent = qw_calc.AGENT_EST_DEFAULT_PP
+        self.assertEqual(ruling_io.default_next_est(SimpleNamespace(n_live=3), {}), agent * 3)
+        self.assertEqual(ruling_io.default_next_est(SimpleNamespace(n_live=0), {}), agent)
+        plan = qw_plan.Plan("free", r=agent * 2 + 5.0, v=5.0, n_live=2)  # R−V＝2×cal_agent
+        (_r, _a, _s, rc), _err = self._resolve(_state(_short(60, 120)), next_est=0.5, plan=plan)
+        self.assertEqual(rc, 0, "給的 0.5pp 低於缺省 2×cal_agent ⇒ 取缺省 ⇒ 放不下 ⇒ PARK")
+
+
+class WatchTest(_Fenced):
+    """watch 額度事件（QVD §3.5 C4／C5；REQ-AP-QV-05）。"""
+
+    def test_single_series_latch(self):
+        """AC-QV-05a／MU-QV-2：單一序列鍵 `(acct, ACTION, win)`；同鍵只觸發一次；末行欄位。"""
+        from lib.sessionctl import keepwarm, watch_wake  # noqa: PLC0415
+        now = datetime.now().astimezone()
+        state = _live_state(87, 14, now)
+        keys = watch_wake.quota_keys(SID, None, {}, now.timestamp(), read_quota=lambda _n: state)
+        self.assertEqual(len(keys), 1)
+        self.assertEqual((keys[0][0], keys[0][2]), (QR.WAIT_RESET, "eaf5241f6fe2"))
+        self.assertEqual(len(watch_wake.fire_hits(SID, keys, 0)), 1)
+        self.assertEqual(watch_wake.fire_hits(SID, keys, 0), [], "同鍵第二次不觸發")
+        tail = watch_wake.verdict_tail(keys)
+        self.assertRegex(tail, r"^ action=WAIT_RESET vid=[0-9a-f]{8} expires_at=\S+$")
+        self.assertFalse(hasattr(keepwarm, "SERIES"))
+
+    def test_wait_reset_disposition_has_no_park(self):
+        """AC-QV-05b：`WAIT_RESET` 處置列不含 park；`keepwarm.SERIES` 不存在。"""
+        from lib.sessionctl import keepwarm, watch_wake  # noqa: PLC0415
+        self.assertNotIn("park", watch_wake.quota_disposal(QR.WAIT_RESET).lower())
+        self.assertIn("park", watch_wake.quota_disposal(QR.PARK))
+        self.assertFalse(hasattr(keepwarm, "SERIES"))
+
+
+class RulingWaitResetTest(_Fenced):
+    """WAIT_RESET 叫醒載具（QVD §3.6；REQ-AP-QV-11）。"""
+
+    def _transcript(self, ctx=None) -> Path:
+        path = self.tmp / f"{SID}.jsonl"
+        rows = [{"type": "user", "timestamp": _iso(NOW), "message": {"content": "x"}}]
+        if ctx is not None:
+            rows.append({"type": "assistant", "timestamp": _iso(NOW), "message": {
+                "id": "m1", "usage": {"input_tokens": 1, "cache_read_input_tokens": ctx,
+                                      "cache_creation_input_tokens": 0, "output_tokens": 1}}})
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        return path
+
+    def _wait(self):
+        r = _rule(_state(_short(87, 14)), plan=qw_plan.Plan("free"))
+        self.assertEqual(r.action, QR.WAIT_RESET)
+        return r
+
+    def test_small_ctx_still_wakes_at_win(self):
+        """AC-QV-11a／MU-QV-22：判決 WAIT_RESET、ctx 小 ⇒ `wake_target` 回 `ruling_wait_reset`
+        （win＋skew）；small_ctx 只是軟原因，`kind_of` 為單跳。"""
+        from lib.sessionctl import keepwarm, kw_wake, qw_calc  # noqa: PLC0415
+        r = self._wait()
+        at, src, _ref = qw_plan.wake_target(SID, None, {}, NOW, marker=None,
+                                            plan_=qw_plan.Plan("free"), ruling=r)
+        win = datetime.fromisoformat(r.win).timestamp()
+        self.assertEqual((src, at), ("ruling_wait_reset", win + qw_calc.skew_min() * 60))
+        env = {"AUTOSDD_SESSION_SWITCH_MODE": "auto"}
+        self.assertEqual(keepwarm.skip_reason(SID, env, ctx=10), "small_ctx")
+        self.assertNotIn("small_ctx", kw_wake.HARD_SKIPS)
+        car = kw_wake.Carrier(SID, None, env, 45.0, 50.0, soft="small_ctx", target=at,
+                              source=src, plan=qw_plan.Plan("free", r=13.0))
+        self.assertEqual(kw_wake.kind_of(car, NOW.timestamp())[0], "single")
+
+    def test_cap_does_not_block_single_hop(self):
+        """AC-QV-11b／MU-QV-23：保溫帳已達 n* 也照單跳（`kind_of` 不看帳；`kw_run` 的 cap 只管
+        periodic 無目標者）。"""
+        from lib.sessionctl import kw_run, kw_wake  # noqa: PLC0415
+        car = kw_wake.Carrier(SID, None, {}, 45.0, 50.0, target=NOW.timestamp() + 900,
+                              source="ruling_wait_reset", plan=qw_plan.Plan("free", r=13.0))
+        self.assertFalse(car.periodic)
+        self.assertEqual(kw_wake.kind_of(car, NOW.timestamp()), ("single", 0, False))
+        src = Path(kw_run.__file__).read_text(encoding="utf-8")
+        self.assertIn('if car.periodic and row["pings"] >= star:', src)
+
+    def test_unattended_hands_to_sentinel(self):
+        """AC-QV-11c／MU-QV-24：無人窗口不掛 keepwarm（硬豁免）；哨兵對 WAIT_RESET 維持撞線等待、
+        reset＝win。"""
+        from lib.sessionctl import keepwarm  # noqa: PLC0415
+        self.assertEqual(keepwarm.skip_reason(SID, {"AUTOSDD_UNATTENDED": "1"}, ctx=10**6),
+                         "unattended")
+        self.assertIn(QR.WAIT_RESET, ruling_io.SENTINEL_WAIT_ACTIONS)
+        r = self._wait()
+        snap = SimpleNamespace(ruling=r)
+        with mock.patch.object(ruling_io, "gather", lambda *_a, **_k: snap):
+            halt = ruling_io.sentinel_halt(SID, None, NOW)
+        self.assertEqual((halt["reset_at"], halt["ruling"]), (r.win, QR.WAIT_RESET))
+
+    def test_no_carrier_is_said(self):
+        """AC-QV-11d 前半：模式非 auto 或 `AUTOSDD_KEEPWARM_OFF` ⇒ 理由句寫「不會在重置後自動叫醒」。"""
+        for env in ({"AUTOSDD_SESSION_SWITCH_MODE": "notify"}, {"AUTOSDD_KEEPWARM_OFF": "1"}):
+            with self.subTest(env=env):
+                self.assertTrue(ruling_io._no_carrier(env))  # noqa: SLF001
+        r = _rule(_state(_short(87, 14)), plan=qw_plan.Plan("free"), no_carrier=True)
+        self.assertIn("不會在重置後自動叫醒", r.reason)
+        self.assertNotIn(QR.NO_CARRIER_NOTE, self._wait().reason)
+
+    def _stop(self, tasks, *, ruling=None, env=None, ctx=None, **extra):
+        from lib.sessionctl import keepwarm  # noqa: PLC0415
+        payload = {"session_id": SID, "transcript_path": str(self._transcript(ctx)),
+                   "background_tasks": tasks, **extra}
+        r = ruling or self._wait()
+        return keepwarm.stop_verdict(payload, env or {"AUTOSDD_SESSION_SWITCH_MODE": "auto"},
+                                     NOW, ruling_fn=lambda _s, _t: r)
+
+    def test_stop_pushes_keepwarm_on_wait_reset_despite_small_ctx(self):
+        """AC-QV-11e／MU-QV-34～36：WAIT_RESET＋小上下文＋無 running ⇒ 推回（含 `keepwarm --sid`
+        與判決行）；no_usage、pings ≥ n*、只有 watch 在跑也推；有 running keepwarm ⇒ 不推；
+        `stop_hook_active` ⇒ 不推；`park.stop_verdict` 對同一讀數回空（C7）。"""
+        from lib.sessionctl import keepwarm, park  # noqa: PLC0415
+        why = self._stop([], ctx=5000)
+        self.assertIn("keepwarm --sid", why)
+        self.assertIn("QUOTA_VERDICT=WAIT_RESET", why)
+        self.assertTrue(self._stop([], ctx=None))
+        with mock.patch.object(keepwarm, "load_ledger", lambda *_a: {"pings": 999}):
+            self.assertTrue(self._stop([], ctx=5000))
+        watch_task = {"type": "shell", "status": "running",
+                      "command": f"python tools/sessionctl.py watch --sid {SID}"}
+        self.assertTrue(self._stop([watch_task], ctx=5000))
+        kw_task = {"type": "shell", "status": "running",
+                   "command": f"python tools/sessionctl.py keepwarm --sid {SID}"}
+        self.assertEqual(self._stop([kw_task], ctx=5000), "")
+        self.assertEqual(self._stop([], ctx=5000, stop_hook_active=True), "")
+        now = datetime.now().astimezone()
+        self.assertEqual(park.stop_verdict(
+            {"session_id": SID}, {"AUTOSDD_SESSION_SWITCH_MODE": "auto"}, now=now,
+            read_quota=lambda _n: _live_state(87, 14, now), carrier_fn=lambda: True,
+            spawned_fn=lambda _s, _e: False), "")
+
+    def test_stop_first_four_still_exempt(self):
+        """AC-QV-11f／MU-QV-37：前四項（無人／模式非 auto／保溫關閉／已交棒）仍豁免；判決非
+        WAIT_RESET ⇒ 回原判準（小上下文不推）。"""
+        from lib.sessionctl import keepwarm  # noqa: PLC0415
+        for env in ({"AUTOSDD_UNATTENDED": "1"}, {"AUTOSDD_SESSION_SWITCH_MODE": "notify"},
+                    {"AUTOSDD_SESSION_SWITCH_MODE": "auto", "AUTOSDD_KEEPWARM_OFF": "1"}):
+            with self.subTest(env=env):
+                self.assertEqual(self._stop([], env=env, ctx=5000), "")
+        with mock.patch.object(keepwarm.seal, "handed_over", lambda *_a: "x"):
+            self.assertEqual(self._stop([], ctx=5000), "")
+        cont = _rule(_state(_short(40, 150)))
+        self.assertEqual(self._stop([], ruling=cont, ctx=5000), "")
+
+
 class LocTest(unittest.TestCase):
     def test_pace_report_moved_out_of_hub(self):
         """AC-QV-08b：`pace_report` 不再存在於 `quota_gate`（hub 成員只縮不長）。"""
