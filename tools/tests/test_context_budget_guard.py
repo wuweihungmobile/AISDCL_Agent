@@ -2955,6 +2955,12 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = _tmpdir(self)
+        # DEF-200-652 圍籬（WP-QV）：relay 判準②改讀單一判決（QVD C12），判決取數逾 TTL 會經既有
+        # 單一站點補量；不圍憑證目錄就會拿真憑證線上量到真週軸 ⇒ 選路被真讀數帶去 FRESH。
+        self.enterContext(unittest.mock.patch.dict(os.environ, {
+            "AUTOSDD_QUOTA_CACHE_DIR": str(self.tmp / "qcache"),
+            "CLAUDE_CONFIG_DIR": str(self.tmp / "claude"),
+            "AUTOSDD_HANDBACK_DIR": str(self.tmp / "handback")}))
         # 🔴 R95：選路要求任務書與逐字稿**真的存在**（缺任一會走 REFUSE／FRESH 而不是
         # RESUME）。本類鎖的是 RESUME 那條路的 spawn 形狀，所以前置把兩者都建出來。
         (self.tmp / "p.md").write_text("# 任務書", encoding="utf-8")
@@ -3640,7 +3646,7 @@ class HandbackSessionStartAnnounceTest(unittest.TestCase):
         self.assertEqual(guard.main(), 0)
         briefs = [m for _, m in seen if "[SDD-CTX-GUARD]" in m]
         self.assertEqual(len(briefs), 1, "額度讀不到時簡報整條消失了")
-        self.assertIn("額度快取不可用", briefs[0])
+        self.assertIn("額度判決：取不到", briefs[0])  # QVD C10：讀不到判決照實說
         self.assertIn("python tools/session_resume_planner.py --pace", briefs[0])
         self.assertIn("本 session 尚無量測", briefs[0], "新視窗（無逐字稿）沒有回退成尚無量測")
 
@@ -8046,8 +8052,12 @@ class PatrolNoticeIsDesktopNotHookTest(unittest.TestCase):
                                    "reset_source": "operator", "reset_at": "",
                                    "task_name": task, "transcript": str(live)})
         notified: list[tuple[str, str]] = []
+        # QVD C15（WP-QV）：提醒改依單一判決（WAIT_RESET｜PARK）；reset 量不到的短窗讀數判
+        # NODISPATCH（F-07，不是「即將見底」通道）⇒ 夾具給真實形狀的 reset（2 小時後 ⇒ PARK）。
         state = quota_policy.QuotaState(
-            (quota_policy.Axis("session", 90.0, None),), datetime.now(UTC).isoformat(), "test")
+            (quota_policy.Axis("session", 90.0,
+                               (datetime.now(UTC) + timedelta(hours=2)).isoformat()),),
+            datetime.now(UTC).isoformat(), "test")
         with unittest.mock.patch.object(qg, "read_quota", return_value=state), \
              unittest.mock.patch.object(qg, "policy_env", return_value={}), \
              unittest.mock.patch.object(
@@ -15868,7 +15878,7 @@ class SessionStartBriefIsModelAwareTest(unittest.TestCase):
                          "簡報額度行沒按 Fable 算 ⇒ 仍比 --pace 寬")
         self.assertNotEqual(self._expect("fable"), self._expect(None), "夾具對模型沒有鑑別力")
         self.assertIn("model=Fable", got)
-        self.assertIn("active_model=fable", got)
+        self.assertIn(" mdl=fable", got)  # QVD C10：模型在判決行 mdl= 欄
 
     def test_the_payload_model_alone_is_enough(self) -> None:
         got = self._brief(model="claude-fable-5-1")
@@ -15878,7 +15888,7 @@ class SessionStartBriefIsModelAwareTest(unittest.TestCase):
         self._write_feed("claude-sonnet-5-5")
         got = self._brief()
         self.assertEqual(_brief_verdict(got), self._expect(None))
-        self.assertIn("active_model=sonnet", got)
+        self.assertIn(" mdl=sonnet", got)
 
     def test_nothing_known_is_the_legacy_brief(self) -> None:
         got = self._brief()
@@ -15912,7 +15922,7 @@ class SessionStartBriefIsModelAwareTest(unittest.TestCase):
         self.assertNotIn("binding=weekly_scoped", blind, "夾具對模型沒有鑑別力")
         self.assertIn("binding=weekly_scoped", aware,
                       "launcher 路徑沒把 guard 傳進 sessionstart_brief ⇒ 簡報仍不知道模型")
-        self.assertIn("active_model=fable", aware)
+        self.assertIn(" mdl=fable", aware)
 
 
 class ActiveModelFallsBackToFeedInTheGuardTest(unittest.TestCase):

@@ -59,8 +59,9 @@ def compose(state, decision, now: datetime, *, sid: str = "", transcript=None, e
             model=None, next_est: float | None = None, plan=None,
             plan_seams: dict | None = None) -> Snapshot:
     """同一份 `state`／`decision` 組判決（hook 端 C1 與 `gather` 共用；不再取數）。
-    `plan_seams`＝`qw_plan.plan` 的其餘縫（`ledger`／`live_fn`；測試用）。"""
-    env = os.environ if env is None else env
+    `plan_seams`＝`qw_plan.plan` 的其餘縫（`ledger`／`live_fn`；測試用）。缺 `env` ⇒ `policy_env()`
+    （檔案層＋真環境＋趕工戳記疊加，AT-QP-55：政策一律經它，不得只讀 `os.environ`）。"""
+    env = qg.policy_env() if env is None else env
     policy = quota_policy.load_policy(env)[0]
     if plan is None:
         plan = qw_plan.plan(sid or "", transcript, env, now, read_quota=lambda _n: state,
@@ -103,15 +104,26 @@ def current(sid: str, transcript, env, now: datetime, *, read_quota=None, plan=N
                    plan=plan, plan_seams=plan_seams)
 
 
+def _file_live(sid: str, transcript) -> tuple[int, bool]:
+    """在飛數只取名冊（純讀檔）、不列行程（零子行程）；第二值 False＝背景 claude 行程那半沒量。"""
+    try:
+        slug = Path(transcript).parent if transcript is not None else None
+        return len(roster.running(sid, projects_dir=slug)), False
+    except Exception:  # noqa: BLE001 — 量不到＝不加燒量（同 qw_plan.live_count）
+        return 0, False
+
+
 def cached(sid: str = "", transcript=None, *, now: datetime | None = None,
            model=None) -> Snapshot:
-    """只讀快取的判決（零網路、不補量）：SessionStart 簡報（C10）與手動排程時刻用——兩者的既有
-    契約都是「只讀快取」；快取逾 TTL ⇒ 量不到 ⇒ 判決照實帶 `deg=unmeasured`，不猜。"""
+    """只讀快取的判決（零網路、零子行程、不補量）：SessionStart 簡報（C10）、手動排程時刻、哨兵
+    巡邏（C11／C15：零 token 巡邏契約＝巡邏期間零 HTTP、零子行程）與 `--check` 用——這些站點的
+    既有契約都是「只讀快取」；快取逾 TTL ⇒ 量不到 ⇒ 判決照實帶 `deg=unmeasured`，不猜。"""
     now = now or datetime.now().astimezone()
     env = qg.policy_env()
     state = qg.read_quota(now)
     dec = qg.dispatch_decision(state, now, env, model, peek=True)
-    return compose(state, dec, now, sid=sid, transcript=transcript, env=env, model=model)
+    return compose(state, dec, now, sid=sid, transcript=transcript, env=env, model=model,
+                   plan_seams={"live_fn": _file_live})
 
 
 def rule_from_decision(state, decision, now: datetime, payload: dict, model=None):
@@ -126,19 +138,27 @@ def rule_from_decision(state, decision, now: datetime, payload: dict, model=None
 SENTINEL_WAIT_ACTIONS = ("HALT_WEEKLY", "PARK", "WAIT_RESET")
 
 
-def sentinel_halt(sid: str, transcript, now: datetime) -> dict | None:
-    """哨兵巡邏的 halt 輸入（C11）：讀**判決**——`HALT_WEEKLY｜PARK｜WAIT_RESET` 且 reset 已知
-    ⇒ 回 halt 標記形狀（同帳號或舊格式標記原樣帶 `at`，reset 一律取判決的 win／wk）；其餘 ⇒
-    None（不等）。帳號不符的標記不當輸入（交 §7 作廢流程）。"""
-    r = gather(sid, transcript, now=now).ruling
-    reset = r.wk if r.action == "HALT_WEEKLY" else r.win
-    if r.action not in SENTINEL_WAIT_ACTIONS or not reset:
-        return None
+def sentinel_halt(sid: str, transcript, now: datetime, env=None) -> dict | None:
+    """哨兵巡邏的 halt 輸入（C11）：以**判決**調整撞線等待——
+    · 有同帳號（或舊格式）halt 標記且判決仍要等（`HALT_WEEKLY｜PARK｜WAIT_RESET`、reset 已知）⇒
+      reset 取判決的 win／wk，維持撞線等待；
+    · 有標記但判決已不要等（reset 已過、讀數已回）⇒ 原標記交 `halt_verdict` 判 probe／patrol
+      （到點續跑的既有路徑；判決不得把它吞掉）；
+    · 無標記：只有無人窗口的 `WAIT_RESET` 交哨兵武裝（QVD §3.6 第二列）；其餘 None（不等）。
+    帳號不符的標記不當輸入（交 §7 作廢流程）。"""
+    env = os.environ if env is None else env
+    r = cached(sid, transcript, now=now).ruling  # 零 token 巡邏：只讀快取、零子行程
     marker = qg.read_halt_marker(sid) or {}
     if marker.get("account") and r.acct and marker["account"] != r.acct:
         marker = {}
-    return {**marker, "reset_at": reset, "at": marker.get("at") or now.isoformat(),
-            "ruling": r.action, "vid": r.vid}
+    reset = r.wk if r.action == "HALT_WEEKLY" else r.win
+    tag = {"ruling": r.action, "vid": r.vid}
+    waiting = r.action in SENTINEL_WAIT_ACTIONS and bool(reset)
+    if marker:
+        return {**marker, **({"reset_at": reset} if waiting else {}), **tag}
+    if waiting and r.action == QR.WAIT_RESET and env.get("AUTOSDD_UNATTENDED"):
+        return {"reset_at": reset, "at": now.isoformat(), **tag}
+    return None
 
 
 def sentinel_halt_verdict(halt, idle_seconds, now: datetime, superseded_by=None):
@@ -154,7 +174,7 @@ def check_halted_line(sid: str, now: datetime) -> str | None:
     if not quota_halt_marker.halt_marker_probe_path(sid).is_file():
         return None
     marker = qg.read_halt_marker(sid)
-    r = gather(sid, now=now).ruling
+    r = cached(sid, now=now).ruling  # `--check`：只讀、不補量
     same = marker and (not marker.get("account") or marker.get("account") == r.acct)
     return qg.halted_band_line(marker, now) if same and r.action == "HALT_WEEKLY" else None
 

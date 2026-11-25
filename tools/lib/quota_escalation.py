@@ -331,10 +331,13 @@ def _idle_prepare_watch(transcript: Path, now: datetime, idle_threshold: float, 
     if idle is None or idle < idle_threshold or rule is None:
         return {"controller_idle_seconds": idle}
     r = rule(now)
+    # quota_band＝判決的帶（痕跡相容：零 token 巡邏探針 (d) 與既有稽核讀它）
+    audit = {"controller_idle_seconds": idle, "quota_action": r.action,
+             "quota_band": getattr(r, "band", None)}
     if r.action not in ("WAIT_RESET", "PARK"):
-        return {"controller_idle_seconds": idle, "quota_action": r.action}
-    rc = notify("AutoSDD 額度即將見底", f"{r.reason}（{r.line().splitlines()[0]}）")
-    return {"controller_idle_seconds": idle, "quota_action": r.action, "prepare_notify_rc": rc}
+        return audit
+    return {**audit, "prepare_notify_rc": notify(
+        "AutoSDD 額度即將見底", f"{r.reason}（{r.line().splitlines()[0]}）")}
 
 # ══════════════════════════════════════════════════════════════════════════
 # PRD §4.5.8（v2.1.7）：哨兵武裝狀態漂移自癒

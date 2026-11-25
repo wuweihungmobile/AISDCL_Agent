@@ -30,8 +30,22 @@ sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 import quota_gate  # noqa: E402
 import quota_policy  # noqa: E402
 import quota_ruling as QR  # noqa: E402
+import sentinel_lifecycle as SL  # noqa: E402  # 模組級圍籬原語（判決取數會寫額度快取／痕跡）
 
 from lib.sessionctl import qw_plan, ruling_io  # noqa: E402
+
+_MODULE_FENCES: list[dict] = []
+
+
+def setUpModule() -> None:
+    """寫端模組圍籬（`test_run_root_unittests.TestWriterModulesDeclareTheModuleFence`）：本檔的判決
+    取數、park／watch／保溫測試會寫痕跡與額度快取；類別級 `_Fenced` 之外再兜一層模組級。"""
+    _MODULE_FENCES.append(SL.fence_enter())
+
+
+def tearDownModule() -> None:
+    SL.fence_exit(_MODULE_FENCES.pop())
+
 
 TPE = timezone(timedelta(hours=8))
 NOW = datetime(2026, 11, 25, 3, 46, 19, tzinfo=TPE)
@@ -670,7 +684,9 @@ class RulingWaitResetTest(_Fenced):
         r = self._wait()
         snap = SimpleNamespace(ruling=r)
         with mock.patch.object(ruling_io, "gather", lambda *_a, **_k: snap):
-            halt = ruling_io.sentinel_halt(SID, None, NOW)
+            halt = ruling_io.sentinel_halt(SID, None, NOW, {"AUTOSDD_UNATTENDED": "1"})
+            self.assertIsNone(ruling_io.sentinel_halt(SID, None, NOW, {}),
+                              "互動窗口的 WAIT_RESET 由 keepwarm 叫醒，不交哨兵")
         self.assertEqual((halt["reset_at"], halt["ruling"]), (r.win, QR.WAIT_RESET))
 
     def test_no_carrier_is_said(self):
@@ -810,7 +826,8 @@ class SingleHouseLockE2ETest(unittest.TestCase):
         root = Path(tempfile.mkdtemp(prefix="qv_e2e10_"))
         self.addCleanup(shutil.rmtree, root, True)
         ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
-        shutil.copytree(_REPO_ROOT / "tools" / "lib", root / "tools" / "lib", ignore=ignore)
+        sandbox_lib = root / "tools" / "lib"  # 只寫沙盒（tmp）；真樹只讀
+        shutil.copytree(src=_REPO_ROOT.joinpath("tools", "lib"), dst=sandbox_lib, ignore=ignore)
         for path in (_REPO_ROOT / "tools").glob("*.py"):
             shutil.copy2(path, root / "tools" / path.name)
         (root / "tools" / "tests").mkdir()

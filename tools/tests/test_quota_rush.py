@@ -423,15 +423,15 @@ class StaticLocksTest(unittest.TestCase):
         """戳記只經 `policy_env()` 進場；新站點若自建 env 就看不到戳記（同一件事兩個數）。
         只准縮不准長：新增站點即紅，必須先在這裡登記並說明為何不走 `policy_env()`。"""
         pinned = {  # path -> (policy_env 站點數, 直接餵 env 的站點數)；直接站點的 WHY 見行尾
-            "tools/lib/quota_gate.py": (3, 1),       # 1050：gate 已先取 env 變數＝policy_env()
-            "tools/lib/quota_escalation.py": (1, 0),
+            # WP-QV（QVD §9）：`pace_report` 搬出 hub（−1 via）；`dispatch_decision(env)` 的 env 由
+            # 呼叫端以 policy_env() 取得（+1 非字面）。escalation／relay／session_brief／park_reset
+            # 改讀判決（C15／C12／C10／C6），自身不再 load_policy ⇒ 站點移除。
+            "tools/lib/quota_gate.py": (2, 2),
             "tools/lib/quota_boot_check.py": (1, 0),
-            "tools/lib/relay_machine.py": (1, 0),
             "tools/lib/resume_route.py": (1, 0),
-            "tools/lib/session_brief.py": (2, 0),
             "tools/lib/sessionctl/park.py": (1, 0),
-            # R218 Q3：park 取 reset 的政策站點（自 park_cli 搬出）
-            "tools/lib/sessionctl/park_reset.py": (1, 0),
+            # WP-QV：判決家（compose 缺省 env＝policy_env()；pace_report 先取 policy_env()）
+            "tools/lib/sessionctl/ruling_io.py": (0, 2),
             # R218 Q1：只讀 prepare_pct（戳記只墊高水位、不動門檻值）
             "tools/lib/sessionctl/qw_plan.py": (0, 1),
             "tools/lib/wastecensus/resume.py": (1, 0),

@@ -722,7 +722,7 @@ class TestWriterModulesDeclareTheModuleFence(unittest.TestCase):
                 self.assertIs(_calls_pace_writer(source), is_writer)
 
     def test_every_writer_module_on_disk_declares_the_fence(self) -> None:
-        """現況：全部 `tools/tests` 模組。寫端清單另釘＝已知九支（不多不少）：認不出任何寫端
+        """現況：全部 `tools/tests` 模組。寫端清單另釘＝已知十支（不多不少）：認不出任何寫端
         （分母 0）時不得以「零問題」假綠，多認出的也要被看見而不是默默多一支。"""
         problems, writers = [], set()
         for path in sorted(Path(__file__).resolve().parent.glob("test_*.py")):
@@ -739,8 +739,9 @@ class TestWriterModulesDeclareTheModuleFence(unittest.TestCase):
                                    "test_sentinel_tick_e2e_r145.py", "test_quota_burndown.py",
                                    "test_sessionctl_watch.py",  # DEF-200-607：watch 預種額度快取
                                    "test_sched_isolation.py",  # R218-B：呼叫 planner.main，已接圍籬
-                                   "test_sessionctl_watchlock.py"},  # 已接模組級圍籬
-                         "偵測器認出的寫端不是已知九支（認不出＝分母 0 假綠；多認出＝先看是不是"
+                                   "test_sessionctl_watchlock.py",  # 已接模組級圍籬
+                                   "test_sessionctl_qv.py"},  # WP-QV：`pace_report` 寫配速契約，已接圍籬
+                         "偵測器認出的寫端不是已知十支（認不出＝分母 0 假綠；多認出＝先看是不是"
                          "誤判，真的新寫端接好圍籬後把檔名加進本集合）")
 
 

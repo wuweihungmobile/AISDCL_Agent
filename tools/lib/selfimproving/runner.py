@@ -395,15 +395,18 @@ def run_probe(argv: list[str], *, cwd: Path, sandbox_root: Path, timeout: float)
                        "sha256:" + hashlib.sha256(raw).hexdigest(), len(raw), _tail(raw))
 
 
-def ruling_json(now: datetime | None = None, *, run=None) -> dict | None:
+def ruling_json(now: datetime | None = None, *, env: dict | None = None,
+                run=None) -> dict | None:
     """QVD §3.5 C18：經子行程 `python tools/sessionctl.py quota --json` 取單一權威判決（SI 套件不得
     import sessionctl，SSOT §2；判決取數需要 sessionctl）。子行程失敗、逾時或輸出不可解析 ⇒
-    `None`（呼叫端跳過＝fail-closed）。`run(argv)->(rc, stdout)` 為注入縫；`now` 僅為簽名一致。"""
+    `None`（呼叫端跳過＝fail-closed）。`env`＝呼叫端明示的行程環境（同 `run_argv` 契約：本檔不讀
+    `os.environ`；判決要與其他消費端同一份政策環境，故由擁有行程環境的巡邏器整份交入）；
+    `run(argv)->(rc, stdout)` 為注入縫；`now` 僅為簽名一致。"""
     argv = [sys.executable, str(Path(__file__).resolve().parents[2] / "sessionctl.py"), "quota",
             "--json"]
     try:
         if run is None:
-            res = run_argv(argv, env=dict(os.environ), timeout=RULING_TIMEOUT_SECONDS)
+            res = run_argv(argv, env=dict(env or {}), timeout=RULING_TIMEOUT_SECONDS)
             rc, out = res.rc, res.out
         else:
             rc, out = run(argv)

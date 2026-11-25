@@ -195,8 +195,9 @@ class TestDueAndSkips(P4TestCase):
         ctx = types.SimpleNamespace(now=O, deps=types.SimpleNamespace(quota=None))
         seen = []
 
-        def fake(now):
+        def fake(now, **kw):
             seen.append(now)
+            self.assertIn("PATH", {k.upper() for k in kw["env"]}, "判決子行程須拿到明示的行程環境")
             return fx4.ruling_of("free")
 
         with mock.patch.object(patrol.runner, "ruling_json", side_effect=fake):

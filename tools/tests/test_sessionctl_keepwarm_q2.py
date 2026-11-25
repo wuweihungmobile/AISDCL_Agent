@@ -604,7 +604,7 @@ class WatchWallTest(unittest.TestCase):
 
     def test_bands_rank_prepare_below_nodispatch_below_close_below_halt(self) -> None:
         """WHY：同窗內只有「更嚴重」才再觸發一次（閂鎖看級別）。QVD C5（WP-QV）：級別改為判決動作
-        NODISPATCH＜WAIT_RESET＜PARK＜HALT_WEEKLY；舊帶級表 `_BANDS`／`SERIES` 退役。"""
+        NODISPATCH＜WAIT_RESET＜PARK＜HALT_WEEKLY；舊的帶級表與兩序列常數退役（不得再存在）。"""
         rank = keepwarm._ACTION_RANK
         self.assertEqual(sorted(rank, key=rank.get),
                          ["NODISPATCH", "WAIT_RESET", "PARK", "HALT_WEEKLY"])

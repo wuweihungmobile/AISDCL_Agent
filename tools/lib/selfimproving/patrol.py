@@ -97,7 +97,9 @@ def _quota(ctx) -> tuple[str, dict]:
     """QVD §3.5 C18：經 `sessionctl quota --json` 子行程取單一權威判決（`ctx.deps.quota` 為注入縫，
     回同形 dict）；回 `(附註值＝判決行, 跳過／降載判讀)`。任何失敗＝跳過（fail-closed）。"""
     try:
-        ruling = (ctx.deps.quota or runner.ruling_json)(ctx.now)
+        env = dict(getattr(ctx, "environ", os.environ))  # 判決子行程的明示環境
+        ruling = (ctx.deps.quota(ctx.now) if ctx.deps.quota
+                  else runner.ruling_json(ctx.now, env=env))
         return sched.ruling_note(ruling), sched.quota_verdict(ruling)
     except Exception:  # noqa: BLE001  # 量不到一律跳過（fail-closed）
         return "unmeasured", {"skip": True, "degrade": False}

@@ -1483,7 +1483,7 @@ def _sentinel_tick(args) -> int:
     # （`tools/session_resume_planner.py` 本檔 loc 預算餘裕為 0，見 `check_loc_budget.py`
     # 的 `guardrail_cli` tier——新邏輯放不進本檔，只能在既有呼叫點換一個更胖的被呼叫端）。
     event = guard.unhandled_limit_event(transcript) if transcript.is_file() else None
-    fan = escalation.patrol_housekeeping(transcript, event, now, state, SENTINEL_INTERVAL_SECONDS, SENTINEL_TICK, log, rule=lambda at: ruling_io.gather(now=at).ruling)  # noqa: E501 — QVD C15：判決注入
+    fan = escalation.patrol_housekeeping(transcript, event, now, state, SENTINEL_INTERVAL_SECONDS, SENTINEL_TICK, log, rule=lambda at: ruling_io.cached(now=at).ruling)  # noqa: E501 — QVD C15：判決注入（零 token 巡邏：只讀快取）
     idle, grace = transcript_activity.conversation_view(transcript, now); driver = transcript_activity.live_driver(transcript, now, event) if event else None  # noqa: E501,E702 — DEF-200-560／562；DEF-200-564：撞線事件之後另一駕駛（一個巡邏間隔內仍在動）
     halt = ruling_io.sentinel_halt(sid := state.get("session_id") or "", transcript, now)  # noqa: E501 — QVD C11：讀判決（HALT_WEEKLY／PARK／無人 WAIT_RESET 維持等待）
     decision = sentinel_decide(event, "", idle, now, halt=halt, superseded_by=sentinel_lifecycle.superseding_session(transcript.parent if transcript.is_file() else project_transcript_dir(_REPO_ROOT), sid, halt), grace=grace, driver=driver, stale=switch.stale_for(transcript, sid, now, project_transcript_dir(_REPO_ROOT)), park=sessionctl_park.read_marker(sid))  # noqa: E501
