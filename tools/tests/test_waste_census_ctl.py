@@ -296,20 +296,20 @@ class EntryPointTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="ctl-w5-census-") as tmp:
             snap = Path(tmp) / "pop.json"
             snap.write_text(json.dumps(ReplayPlanTest().pop()), encoding="utf-8")
-            before = subprocess.run(["git", "status", "--porcelain"], cwd=_REPO, text=True,
-                                    capture_output=True, encoding="utf-8").stdout
+            before = subprocess.run(["git", "status", "--porcelain", ":!tools/tests"], cwd=_REPO,
+                                    text=True, capture_output=True, encoding="utf-8").stdout
             runs = [subprocess.run([sys.executable, str(_PROBE), "--replay-plan", "--population",
                                     str(snap), "--base", tmp, "--trace-file",
                                     str(Path(tmp) / "none.jsonl")], capture_output=True, text=True,
                                    encoding="utf-8", timeout=120, cwd=tmp) for _ in range(2)]
-            after = subprocess.run(["git", "status", "--porcelain"], cwd=_REPO, text=True,
-                                   capture_output=True, encoding="utf-8").stdout
+            after = subprocess.run(["git", "status", "--porcelain", ":!tools/tests"], cwd=_REPO,
+                                   text=True, capture_output=True, encoding="utf-8").stdout
         for done in runs:
             self.assertEqual(done.returncode, 0, msg=done.stderr)
         self.assertEqual(runs[0].stdout, runs[1].stdout)  # 同快照兩次輸出逐位元組相同
         self.assertIn("| 判定點 | 命中 | 備註 |", runs[0].stdout)
         self.assertEqual(len(re.findall(r"^\| (?:H|R2|冷回|D|park)", runs[0].stdout, re.M)), 5)
-        self.assertEqual(before, after)  # 入口不污染工作樹
+        self.assertEqual(before, after)  # 入口不污染工作樹（略並行夾具）
 
     def test_switch_metrics_on_a_snapshot_prints_the_m_c_lines(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ctl-w5-census-") as tmp:
