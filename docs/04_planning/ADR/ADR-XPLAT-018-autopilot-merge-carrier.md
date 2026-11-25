@@ -1,6 +1,6 @@
 # ADR-XPLAT-018：自動合入的驗證載具——獨立 clone＋`.venv` 連結＋每次自證；寫入者可用 harness 內建隔離（`baseRef: head`）
 
-- **狀態**：**提案 v1.0**（SD-1，2026-11-25；隨 `docs/02_architecture/Autopilot_Pipeline_Design.md` v1.1 一併送 QA 複審，通過後由主控依〈凍結常態規則〉凍結為 Accepted）。本檔是設計文件，不含生產碼。
+- **狀態**：**提案 v1.1**（SD-1 起草，SD-2 依 QA 複審 N-03 加 D5，2026-11-25；隨 `docs/02_architecture/Autopilot_Pipeline_Design.md` v1.1 一併送 QA 複審，通過後由主控依〈凍結常態規則〉凍結為 Accepted）。本檔是設計文件，不含生產碼。
 - **平台**：平台中立（Windows 11＋PowerShell 為主控機；POSIX 差異逐項寫在 §2）。
 - **關聯**：`docs/02_architecture/Autopilot_Pipeline_Design.md` §3（合入管線）、`docs/03_testing/contracts/TCS-Autopilot-20261125.md`（REQ-AP-MG-01～03、REQ-AP-WT-01）、PRD `docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` 修訂表 v2.1.28 列（掌舵者 2026-11-25 立案原文）。
 - **修訂對象**：**部分取代** [ADR-XPLAT-006](ADR-XPLAT-006-parallel-agent-snapshot-fanout.md) §7「已拒絕的方案」中兩列——「直接開 harness 內建隔離」與「linked worktree 當驗證者載具」——以及爭點 4 的裁決「不可直接開啟」。ADR-006 的其他決策（快照式唯讀驗證樹、Stage 2 放棄、Stage 3 擱置、爭點 5 的 `.pth` 事實）**全部維持**。ADR-006 原文不改；CLOSE 窗口在其 §7 表後加一行指向本檔（只增不改）。
@@ -50,6 +50,26 @@ ADR-006 爭點 4 的三項事實逐條處置：
 
 驗證**不在**代理的 linked worktree 內做（D1）；代理自己在 worktree 內跑的單元測試只是開發迴圈，不是合入閘。
 
+### D5　機器本地狀態：白名單帶入＋基線對照（v1.1，QA 複審 N-03；接手 ADR-006 爭點 3「量測機器本地狀態的那一族另案處理」）
+
+獨立 clone 只帶已提交內容，主樹的 ignored 機器本地狀態不在裡面。SD-2 當回合唯讀普查主樹（`git ls-files --others --ignored --exclude-standard --directory`）的現存項：`.env`（四層 env 鏈第三層）、`.dev_env_state.json`（`tools/dev_start.py` L54 寫、`tools/lib/dev_platform_provenance.py` 與 `tools/git-hooks/prepare-commit-msg` 讀）、`AISDLC_SDD/AISDLC_SDD_v0.01/arch-fitness.json`、`AISDLC_SDD/AISDLC_SDD_v0.01/build/reports/**`、`.hypothesis/`、`.act-runs/`、`.vscode/`、`.claude/worktrees/`、`.venv/`。缺了它們，clone 內的全套可能出現主樹推送不會有的紅（假紅：merge 永遠 `red`、自動駕駛卡死），或因 `.env` 缺席讀到出廠值而假綠。兩道處置：
+
+1. **白名單帶入**（`autopilot/carrier.py` 單一常數 `CARRIER_LOCAL_STATE`，每筆附 WHY；**預設不帶**，只有「全套會讀它當判定輸入、缺席會改變判定」者才入表）。初始成員與處置：
+
+   | 項 | 處置 | WHY |
+   |---|---|---|
+   | `.env` | 帶入：同卷**硬連結**（不複製內容到別處；跨卷 ⇒ 不帶並以 `carrier_divergence` 記「無法帶入」，不跑全套） | 四層 env 鏈的本機層；缺席＝讀出廠值，可能假綠。硬連結使 clone 刪除時只刪目錄項、主樹檔不受影響；機密不出現第二份內容 |
+   | `.dev_env_state.json` | 帶入：複製（非機密、數百位元組） | 平台出處判準讀它；缺席會走「未跑 dev_start」分支而與主樹不同 |
+   | `.venv/` | D2（連結） | — |
+   | `arch-fitness.json`、`build/reports/**` | 不帶 | 全套的**產物**，不是輸入；clone 內重新產生 |
+   | `.hypothesis/` | 不帶 | 快取；缺席只影響速度與範例重播，不改判定（重播差異由基線吸收） |
+   | `.act-runs/`、`.vscode/`、`.claude/worktrees/` | 不帶 | 與全套無關 |
+
+   WP-MERGE 第一動作以「同一 HEAD 的乾淨 clone 跑全套 vs 主樹 pre-push」逐 leg 對照，把普查中缺席會改變判定的項補進表（同一 commit 改本表）；之後新增 ignored 輸入檔＝改表。帶入後、跑全套前，**每筆白名單項在 clone 內必須存在且內容雜湊等於主樹**（主樹本身沒有該檔者跳過並記痕跡），否則 `MERGE_VERDICT=carrier_divergence`（附缺項），不跑全套。
+2. **基線對照**：同一 clone、同一環境，在套上代理提交**之前**（主樹本地 HEAD）先跑一次同款全套作基線；以 `(主樹 HEAD sha, CARRIER_LOCAL_STATE 內容雜湊, 主樹 .venv 直譯器路徑)` 為鍵快取於 `~/.autosdd/autopilot/baseline.jsonl`，同鍵且結果為綠者重用、不重跑（主樹 HEAD 不變時連續合入只付一次基線）。判定：基線綠＋候選紅 ⇒ `red`（代理的）；基線紅 ⇒ 候選的紅 leg 集合 ⊆ 基線紅 leg 集合 ⇒ `MERGE_VERDICT=carrier_divergence legs=<基線紅 leg>`（載具或主樹本身的問題，不算到代理頭上；產修復任務書，主控派修載具／主樹，不 ff）；候選多出基線沒有的紅 leg ⇒ `red`（只列多出的 leg）。
+   - WHY 不用「最近一次主樹 pre-push 綠的痕跡」當基線：主樹 pre-push 跑在主樹、不跑在 clone，它證不出 clone 這個載具本身是否與主樹等價——正是要量的東西。
+   - 誠實劃界：基線只吸收「主樹 HEAD 在 clone 內就紅」的載具差異；代理提交**與**機器本地狀態互動才出現的差異（代理新增一個讀 ignored 檔的測試），基線看不見，由白名單普查與 `carrier_divergence` 的缺項檢查承接；假綠方向（缺檔讓某 leg 變寬鬆）只由白名單帶入防。
+
 ## 3. 被拒絕的替代
 
 | 方案 | 拒絕理由 |
@@ -62,12 +82,13 @@ ADR-006 爭點 4 的三項事實逐條處置：
 
 ## 4. 後果
 
-- 正面：合入閘測到的是合入樹，且這件事每次被驗；寫入者隔離與 main-only 原則並存；殘留分支有鎖。
+- 正面：合入閘測到的是合入樹，且這件事每次被驗；寫入者隔離與 main-only 原則並存；殘留分支有鎖；機器本地狀態的差異不會被算成代理的紅（D5 基線）。
+- 負面（D5）：主樹 HEAD 每變一次多付一次基線全套（同鍵重用）；`.env` 跨卷時無法帶入、該次合入改走 `carrier_divergence`。
 - 負面：Windows 每次合入一棵全額工作樹（數百 MB 等級，以 `df` 類工具量，不用 `du`，ADR-006 §2.3）；連結的建立與刪除是新的平台差異面（D2 已逐平台寫明）。
 - 誠實劃界：執行期自證只驗兩個頂層套件的解析；以 `importlib` 動態載入或子行程清空環境的路徑，只有測試期紅綠自證（三子樹各一突變）看得到，且只對植了突變的那幾條 leg 有鑑別力。
 
 ## 5. 三問
 
-1. 另一台機器會不會回來？junction／symlink 依平台分支、刪除前驗身分；`PYTHONPATH` 分隔符取 `os.pathsep`；自證每次執行。
+1. 另一台機器會不會回來？junction／symlink 依平台分支、刪除前驗身分；`PYTHONPATH` 分隔符取 `os.pathsep`；自證每次執行；每台機器不同的 `.env`／`.dev_env_state.json` 由 D5 白名單帶入該機器自己的那一份並逐筆驗雜湊，其餘機器本地差異由同機基線對照吸收（基線鍵含主樹 HEAD 與白名單雜湊，跨機器不共用）。
 2. 文件／座標是否一致？Autopilot 設計 §3、TCS、ADR-006 §7 後加的指向行（CLOSE）、根 CLAUDE.md 鐵律七檢查表第 4 條加註，同 commit 收齊。
-3. 有沒有「之後再看」？無；Windows 佔碟是已知成本，已由步驟 0 的空間檢查處置。
+3. 有沒有「之後再看」？無；Windows 佔碟是已知成本，已由步驟 0 的空間檢查處置；ADR-006 爭點 3 的機器本地狀態族由 D5 接手（白名單初始成員由 WP-MERGE 第一動作以逐 leg 對照補齊，屬實作步驟、不是延後）。

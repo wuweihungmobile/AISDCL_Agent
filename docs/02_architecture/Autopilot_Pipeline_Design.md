@@ -81,8 +81,9 @@ python tools/autopilot.py merge --branch <代理分支> [--base-at-dispatch <sha
 | 2 | 已被吸收的提交略過：`git patch-id --stable` 比對主樹本地 HEAD 至 merge-base 之間的提交 | — |
 | 3 | 帳本檔（`docs/06_quality/AutoSDD_Defect_Log*.md`、外部阻塞帳、結構性長債帳）的變更自各提交剝離，集中成**尾端單一提交**（§4.3） | 剝離後某提交為空 ⇒ 丟棄該提交並記痕跡 |
 | 4 | 補連動鎖（只套工具算出、在既有上限內的值）：`--print-guard-lines` 建議值、`_TREE_FILE_FLOORS`、E501 存量、skip 普查、`MIN_TESTS`＋ONBOARDING 同步；`repin_growth_problems()` 非空 ⇒ 停 | `repin_blocked`（不改上限常數） |
-| 4.5 | **載具組裝與自證**（ADR-XPLAT-018 §2；回應 ADR-XPLAT-006 爭點 5）：①clone 根建 `.venv` 連結指向主樹 `.venv`（Windows＝directory junction，POSIX＝symlink；pre-push 的 `pick_repo_python` 只認 `$TOPLEVEL/.venv`，DEF-200-315）；②全套的環境一律設 `PYTHONPATH=<clone>/AutoClaude<sep><clone>/tools`（`os.pathsep`），讓 clone 的原始碼排在 editable `.pth` 之前；③自證：以 clone 的 `.venv` 直譯器、同一份環境，在 clone 根執行 `import autoclaude, lib.quota_policy` 並印 `__file__`，兩者都必須位於 clone 之下 | 任一不在 clone 之下 ⇒ `carrier_leak`（附兩個實際路徑），不跑全套 |
-| 5 | 跑 pre-push 同款全套：以合成 stdin（`refs/heads/main <新 sha> refs/heads/main <origin/main sha>`）在 clone 內直接呼叫 `<clone>/tools/git-hooks/pre-push`，環境同 4.5；經 `sessionctl runlong`／`waitfor` 分段等待（子代理快取壽命） | `red`（附失敗 leg 與末段 40 行） |
+| 4.5 | **載具組裝與自證**（ADR-XPLAT-018 §2；回應 ADR-XPLAT-006 爭點 5）：①clone 根建 `.venv` 連結指向主樹 `.venv`（Windows＝directory junction，POSIX＝symlink；pre-push 的 `pick_repo_python` 只認 `$TOPLEVEL/.venv`，DEF-200-315）；②全套的環境一律設 `PYTHONPATH=<clone>/AutoClaude<sep><clone>/tools`（`os.pathsep`），讓 clone 的原始碼排在 editable `.pth` 之前；③自證：以 clone 的 `.venv` 直譯器、同一份環境，在 clone 根執行 `import autoclaude, lib.quota_policy` 並印 `__file__`，兩者都必須位於 clone 之下；④（v1.2，N-03；ADR-XPLAT-018 D5）依 `autopilot/carrier.py` 的 `CARRIER_LOCAL_STATE` 白名單帶入機器本地狀態（`.env` 同卷硬連結、`.dev_env_state.json` 複製；產物與快取不帶），並逐筆驗 clone 內存在且內容雜湊等於主樹 | 任一不在 clone 之下 ⇒ `carrier_leak`（附兩個實際路徑），不跑全套；白名單項缺、雜湊不等或 `.env` 跨卷無法硬連結 ⇒ `carrier_divergence`（附缺項），不跑全套 |
+| 4.7 | **基線**（v1.2，N-03；ADR-XPLAT-018 D5 第 2 點）：同一 clone、同一環境，在主樹本地 HEAD（未套代理提交）上跑一次步驟 5 的同款全套——clone 內 `git switch --detach <主樹 HEAD sha>` 跑、跑完 `git switch <拋棄式分支>` 切回（clone 工作樹乾淨，皆非鐵律五毀滅形態；同鍵命中快取時不切換）；以 `(主樹 HEAD sha, 白名單內容雜湊, 主樹 .venv 直譯器路徑)` 為鍵快取於 `~/.autosdd/autopilot/baseline.jsonl`，同鍵綠者重用 | 基線紅本身不中止：記下紅 leg 集合交步驟 5 判定 |
+| 5 | 跑 pre-push 同款全套：以合成 stdin（`refs/heads/main <新 sha> refs/heads/main <origin/main sha>`）在 clone 內直接呼叫 `<clone>/tools/git-hooks/pre-push`，環境同 4.5；經 `sessionctl runlong`／`waitfor` 分段等待（子代理快取壽命） | 與 4.7 基線對照：基線綠＋候選紅 ⇒ `red`（附失敗 leg 與末段 40 行）；候選紅 leg ⊆ 基線紅 leg ⇒ `carrier_divergence legs=<…>`（載具或主樹本身的問題，不算代理的；產修復任務書、不 ff）；候選多出基線沒有的紅 leg ⇒ `red`（只列多出者） |
 | 6 | 全綠 ⇒ 主樹 `git fetch <clone> <拋棄式分支>` 後 `git merge --ff-only FETCH_HEAD`；刪 clone 的 `.venv` **連結本身**（不得遞迴進目標；Windows 以 `os.rmdir` 刪 junction、POSIX 以 `os.unlink`，刪前驗 `is_junction()`／`is_symlink()`，驗不到即中止清理並記痕跡）；再刪 clone 目錄；代理 worktree `git worktree remove <路徑>`（**不帶 `--force`**）；`git branch -d <代理分支>` | `ff_refused`（主樹在步驟 0 後被動過） |
 | 7 | 末行 `MERGE_VERDICT=ok sha=<新 HEAD>` | — |
 
@@ -353,4 +354,5 @@ python tools/autopilot.py push [--dry-run]
 
 | 發現 | 本檔落點 |
 |---|---|
+| N-03 獨立 clone 缺主樹機器本地狀態 | §3.2 步 4.5 ④、新步 4.7 基線、步 5 判定；ADR-XPLAT-018 D5 |
 | N-04 詢問閘擋掉必填齊全的「是否繼續？」、阻斷訊息叫模型代決 | §7 判準 4（疑問詞之後 12 字元內的複合動作詞；單詞「繼續」不收）、阻斷訊息三分；PRD R-4.5.12-3【v2.1.29 勘誤（續）】 |

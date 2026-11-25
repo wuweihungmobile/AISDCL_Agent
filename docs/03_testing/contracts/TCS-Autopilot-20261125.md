@@ -49,7 +49,7 @@
 | REQ-AP-AC-04 | 被動觀測：真實 `/login` 後一個 TTL 內必有 `account_switch`；判決行與 `sessionctl status` 顯示帳號指紋；判決行附「已作廢 n 個」 | R-4.1.7-6 | 待實作 |
 | REQ-AP-MG-01 | `autopilot merge`：repo 外獨立 clone rebase、略過已吸收、帳本尾端提交、補連動鎖、全套、綠才 ff、清理；冪等、不留半套 | APD §3.2 | 待實作 |
 | REQ-AP-MG-02 | 合入期全套＝pre-push 同款（合成 stdin 呼叫，leg 集合相同） | APD §3.3 | 待實作 |
-| REQ-AP-MG-03 | 驗證載具測的是合入樹：`.venv` 連結＋`PYTHONPATH`＋每次執行期自證（`carrier_leak`）＋三子樹紅綠自證；連結清理只刪連結；空間不足 `no_space` | APD §3.2 步 0／4.5／6；ADR-018 D1～D3 | 待實作 |
+| REQ-AP-MG-03 | 驗證載具測的是合入樹：`.venv` 連結＋`PYTHONPATH`＋每次執行期自證（`carrier_leak`）＋三子樹紅綠自證；連結清理只刪連結；空間不足 `no_space`；機器本地狀態白名單帶入並逐筆驗雜湊、同 clone 基線對照（候選紅 ⊆ 基線紅 ⇒ `carrier_divergence`，不算代理的紅；v1.2） | APD §3.2 步 0／4.5／4.7／5／6；ADR-018 D1～D3、D5 | 待實作 |
 | REQ-AP-WT-01 | 代理 worktree 起點＝本地 HEAD（`worktree.baseRef: "head"`）；merge 記錄 `base_drift`；合入後殘留代理分支／worktree 普查 | APD §3.1；ADR-018 D4 | 待實作 |
 | REQ-AP-G1-01 | 帳本淨額棘輪：推送期逐 ref 比 pre-push stdin 的 `<local_sha>` 對 `<remote_sha>`（不讀工作樹）並阻斷；提交期只出聲 | APD §4.1 | 待實作 |
 | REQ-AP-G1-02 | 推送閘：淨額 > 0 ⇒ 產同輪修復任務書、前綴推送可達；判決非 `CONTINUE` 不推 | APD §4.2、§4.3 | 待實作 |
@@ -147,6 +147,8 @@
 | AC-MG-03b | 紅綠自證：只在 clone 的 `tools/`、`AutoClaude/`、`AISDLC_SDD/<LATEST>/` 各植一個讓對應 leg 轉紅的突變（主樹不植）⇒ 全套紅且三條 leg 各自紅；不植 ⇒ 綠 | `MG::CarrierTest::test_clone_only_mutations_turn_suite_red`（真全套，`runlong`／`waitfor`；E2E-AP-MG-03 同載具） |
 | AC-MG-03c | 清理：`.venv` 連結被刪、目標（主樹 `.venv`）完好；以注入縫讓連結身分驗不到 ⇒ 中止清理並記痕跡、不遞迴刪 | `MG::CarrierTest::test_link_removed_target_intact` |
 | AC-MG-03d | 可用空間 < 2×已追蹤檔總大小（縫：空間查詢）⇒ `no_space`、不建 clone | `MG::CarrierTest::test_no_space` |
+| AC-MG-03e | 白名單帶入（N-03）：拋棄式主樹放 `.env`、`.dev_env_state.json` ⇒ clone 內兩者存在、雜湊相等、`.env` 為硬連結（`os.stat` 的 `st_nlink ≥ 2` 且 inode／file id 相同）；從 clone 移除白名單任一項（縫：帶入步驟跳過該項）⇒ `MERGE_VERDICT=carrier_divergence` 附該項、全套未啟動（假 pre-push 呼叫計數 0）；主樹本身沒有該檔 ⇒ 跳過並記痕跡、不判 divergence；`arch-fitness.json`、`.hypothesis/` 不被帶入 | `MG::CarrierTest::test_local_state_allowlist_carried_and_verified` |
+| AC-MG-03f | 基線對照（N-03）：假 pre-push 以 sha 決定結果——主樹 HEAD 上 leg A 紅、候選上 leg A 紅 ⇒ `carrier_divergence legs=A`、主樹 HEAD 不動、產修復任務書；主樹 HEAD 綠、候選 leg A 紅 ⇒ `red`；主樹 HEAD leg A 紅、候選 leg A＋B 紅 ⇒ `red` 且只列 B；同鍵第二次合入 ⇒ 基線不重跑（假 pre-push 對主樹 HEAD sha 的呼叫計數 1）；`clone` 刪除後主樹 `.env` 內容與連結數還原 | `MG::CarrierTest::test_baseline_separates_carrier_from_agent` |
 | AC-WT-01a | `.claude/settings.json` 含 `worktree.baseRef == "head"` | `HK::SettingsTest::test_worktree_baseref_head` |
 | AC-WT-01b | `--base-at-dispatch` 與 merge-base 不等 ⇒ 落 `base_drift` 痕跡、仍完成 rebase | `MG::MergeTest::test_base_drift_recorded` |
 | AC-WT-01c | 殘留普查：合入痕跡已 ok／noop 的代理分支或 worktree 仍存在 ⇒ 普查回非空、`sessionctl status` 顯示殘留數 | `MG::MergeTest::test_residual_agent_branches_census` |
@@ -252,6 +254,10 @@
 | MU-MG-6 | 拿掉 `PYTHONPATH` 注入 | AC-MG-03b（全套變綠＝測到主樹） |
 | MU-MG-7 | 拿掉執行期自證 | AC-MG-03a |
 | MU-MG-8 | 清理以遞迴刪除處理 `.venv` 連結 | AC-MG-03c |
+| MU-MG-9 | 帶入後不驗白名單項存在與雜湊 | AC-MG-03e |
+| MU-MG-10 | 拿掉基線對照（候選紅一律 `red`） | AC-MG-03f |
+| MU-MG-11 | 基線紅時一律 `carrier_divergence`（不比 leg 集合，代理新增的紅被吸收） | AC-MG-03f |
+| MU-MG-12 | `.env` 改為複製內容（不是硬連結） | AC-MG-03e |
 | MU-WT-1 | 不比對 `--base-at-dispatch`（不記 `base_drift`） | AC-WT-01b |
 | MU-WT-2 | 殘留普查只看 worktree、不看分支 | AC-WT-01c |
 | MU-G1-1 | 推送期比較對象改回工作樹或 `HEAD` | AC-G1-01a、AC-G1-01d |
@@ -303,7 +309,7 @@
 | 被動觀測（AC-04） | E2E-AP-AC-04 | 觀測型：每次 SessionStart 掃痕跡與逐字稿 `/login` 記錄配對 | `RV-AP-AC04-OBS` | **不擋結案**（F-20）：觀測期 30 天；樣本 0 照實記「未觀測」；有樣本且不配對＝再開症狀 |
 | 合入管線（MG-01） | E2E-AP-MG-01 | 真 git：repo 外拋棄式 clone 重建 W6／W11b2 兩分支（含已吸收提交與三提交帳本），真跑 `autopilot merge` | `RV-AP-MG01` | 全套以真 pre-push 的縮小 leg（拋棄式 repo 內只含 MG 測試）代表；完整 leg 對等由 E2E-AP-MG-02、完整載具由 E2E-AP-MG-03 證 |
 | pre-push 對等（MG-02） | E2E-AP-MG-02 | 真 pre-push：合成 stdin 一次、對拋棄式 bare remote 真 `git push` 一次，比 leg 集合 | `RV-AP-MG02` | 無 |
-| 合入載具（MG-03） | E2E-AP-MG-03 | 真 `autopilot merge` 對本 repo 的真 local clone：clone 內三子樹各植一突變 ⇒ 真全套紅（三 leg 各紅）；再跑一次不植 ⇒ 綠；收尾驗主樹 `.venv` 完好、連結已刪 | `RV-AP-MG03` | Windows 全額佔碟：開跑前查空間；不足 ⇒ 案例記 `no_space` 並以 macOS（clonefile）機器補跑，未補跑前不算結 |
+| 合入載具（MG-03） | E2E-AP-MG-03 | 真 `autopilot merge` 對本 repo 的真 local clone：clone 內三子樹各植一突變 ⇒ 真全套紅（三 leg 各紅）；再跑一次不植 ⇒ 綠；收尾驗主樹 `.venv` 完好、連結已刪；基線段（v1.2，N-03）：同一 clone 先以主樹 HEAD 跑基線並入 `baseline.jsonl`，第二次合入同鍵 ⇒ 基線不重跑；暫時把主樹 `.env` 改名（測試後還原）⇒ 該次 `carrier_divergence` 且全套未啟動 | `RV-AP-MG03` | Windows 全額佔碟：開跑前查空間；不足 ⇒ 案例記 `no_space` 並以 macOS（clonefile）機器補跑，未補跑前不算結 |
 | worktree 起點（WT-01） | E2E-AP-WT-01 | 載具 C：真 `claude -p` 於拋棄式 repo（含一個未推送提交、`worktree.baseRef: "head"`）派 `isolation: "worktree"` 子代理執行 `git rev-parse HEAD`，斷言含該未推送提交；收尾以 `autopilot merge --dry-run` 的殘留普查驗回收 | `RV-AP-WT01` | 無 |
 | 推送範圍棘輪（G1-01） | E2E-AP-G1-01 | 拋棄式 bare remote＋真 `git push` 觸發真 pre-push：整段推（擋）與前綴推（放行）各一次，工作樹含尾端新列 | `RV-AP-G101` | 無 |
 | 推送閘與前綴推送（G1-02） | E2E-AP-G1-02 | 重建 HYG1 形狀（修 2＋登記 1）三提交，真 `autopilot push` 對 bare remote | `RV-AP-G102` | 無 |
@@ -365,5 +371,6 @@
 | N-09 白名單定義 | AC-QV-10f；MU-QV-33 |
 | N-10 `park --done` 上限 | QVD §3.5.2 B7（劃界文字；由 AC-QV-10f 的白名單形狀覆蓋） |
 | N-05 WAIT_RESET 掛載推動者 | REQ-AP-QV-11；AC-QV-11e～f；MU-QV-34～37；E2E-AP-QV-11 Stop 段 |
+| N-03 clone 缺主樹機器本地狀態 | REQ-AP-MG-03；AC-MG-03e～f；MU-MG-9～12；E2E-AP-MG-03 基線段 |
 | N-04 詢問閘擋掉必填齊全的「是否繼續」且叫模型代決 | REQ-AP-ASK-01；AC-ASK-01g 改寫、AC-ASK-01j 改寫、AC-ASK-01k～l；MU-ASK-12～14；E2E-AP-ASK-01 合成正例補 `是否繼續` 題 |
 | N-06 `plan.cap` 不存在 | AC-QV-01g 改寫；MU-QV-26 |
