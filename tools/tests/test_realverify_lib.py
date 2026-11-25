@@ -645,7 +645,7 @@ class TrustGateTest(unittest.TestCase):
             notes = sb.cleanup()
         self.assertFalse([n for n in notes if n.startswith("RESIDUE")], notes)
         self.assertFalse(sb.root.exists())
-        self.assertNotIn(sb.root.name.lower(), self._worktrees().lower())
+        self.assertEqual(self._worktrees().count("worktree "), 1, "沙盒 worktree 應已移除")
 
     def test_plain_sandbox_cannot_open_a_window(self):
         with self.assertRaises(interactive.NotTrusted):
