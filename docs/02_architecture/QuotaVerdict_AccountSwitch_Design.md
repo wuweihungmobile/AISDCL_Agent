@@ -88,6 +88,7 @@ QUOTA_VERDICT=<ACTION> acct=<12 碼|none> win=<短窗 reset ISO|none> wk=<週 re
 - `expires_at＝min(measured_at＋QUOTA_CACHE_TTL_SECONDS, 短窗 reset)`；`QUOTA_CACHE_TTL_SECONDS` 是 `quota_gate.py` 既有常數（180），不另設。
 - 換帳號後第一行判決的理由句附「已作廢 n 個舊帳號標記」（R-4.1.7-6）。
 - 時刻一律帶 offset 的 ISO（鐵律三 naive 時間戳列）。
+- `--json` 另帶 `billing` 欄（供 Autopilot 設計 §7 的 `[COST]` 類別判定；判決本身不吃它）：由快取 `posture` 推導——`credits_present=false` ⇒ `subscription_only`；`fallback_available=true` ⇒ `credits_fallback`；`source` 為 API key 模式 ⇒ `api_key`；欄位缺或形狀不對 ⇒ `unknown`。與 `quota_messages.posture_line()` 同一來源、同一判讀（推導函式由 `posture_line` 抽出共用，不另寫第二份）；換帳號後隨新快取重判。
 
 ### 3.4 取數（`qv_io.gather`）
 
