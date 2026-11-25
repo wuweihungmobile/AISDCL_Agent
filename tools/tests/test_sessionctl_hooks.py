@@ -484,7 +484,9 @@ class HookParkTest(unittest.TestCase):
         self.addCleanup(holder.cleanup)
         tmp = Path(holder.name)
         now = datetime.now(UTC)
-        axes = [{"kind": kind, "pct": 98.0, "resets_at": (now + timedelta(minutes=43)).isoformat()}
+        # QVD §3.2 第 3 列：98% 且 reset 在 45 分（出廠 QV_WAIT_RESET_MIN）之內是 WAIT_RESET（保溫等
+        # 重置、不推 park）；本格測 park 推回接線，故 reset 放在 90 分後（判決 PARK）
+        axes = [{"kind": kind, "pct": 98.0, "resets_at": (now + timedelta(minutes=90)).isoformat()}
                 for kind in ("five_hour", "session")]
         (tmp / "autosdd_quota.json").write_text(json.dumps({
             "schema": quota_meter.SCHEMA, "axes": axes, "source": "endpoint",

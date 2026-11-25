@@ -344,6 +344,9 @@ class StopVerdictTest(_Fence):
         不是先到先贏。各自單獨成立只出各自那一個。"""
         self.ready(HARD)
         parked = "額度停工守衛（Stop）：PARK-REASON"
+        # WP-QV（QVD C2／C7）：閒置側先看判決；判決 PARK 才落到 park 判準（不讀真額度）
+        snap = mock.Mock(plan=mock.Mock(stage="free"), ruling=mock.Mock(action="PARK"))
+        self.enterContext(mock.patch("lib.sessionctl.qw_verdict.snapshot", return_value=snap))
         with mock.patch("lib.sessionctl.park.stop_verdict", return_value=parked):
             both = converge.stop_verdict(self.stop(), self.env)
         self.assertIn("封存閘（Stop）", both)

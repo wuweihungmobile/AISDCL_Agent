@@ -138,10 +138,10 @@ class FakeRoster:
 
 
 def _quota(_now):
-    axis = types.SimpleNamespace(kind="five_hour", pct=42.0,
-                                 resets_at="2026-11-14T15:00:00+00:00")
-    return types.SimpleNamespace(axes=(axis,), measured_at="2026-11-14T11:59:00+00:00",
-                                 source="feed")
+    """QVD C14（WP-QV）：額度欄首行＝判決行，判決要真的 `QuotaState`（`usable()` 等）。"""
+    import quota_policy  # noqa: PLC0415
+    axis = quota_policy.Axis("five_hour", 42.0, "2026-11-14T15:00:00+00:00")
+    return quota_policy.QuotaState((axis,), "2026-11-14T11:59:00+00:00", "feed", "ok")
 
 
 class _Base(unittest.TestCase):

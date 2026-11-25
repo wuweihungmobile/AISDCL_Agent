@@ -603,20 +603,23 @@ class WatchWallTest(unittest.TestCase):
     """tools/lib/sessionctl/watch_wake.py：四級帶級與處置（REQ-QW-17／18；AT-QW-33）。"""
 
     def test_bands_rank_prepare_below_nodispatch_below_close_below_halt(self) -> None:
-        """WHY：同窗內只有「更嚴重」才再觸發一次（閂鎖看級別）。"""
-        rank = keepwarm._BANDS
-        self.assertEqual(sorted(rank, key=rank.get), ["prepare", "nodispatch", "close", "halt"])
+        """WHY：同窗內只有「更嚴重」才再觸發一次（閂鎖看級別）。QVD C5（WP-QV）：級別改為判決動作
+        NODISPATCH＜WAIT_RESET＜PARK＜HALT_WEEKLY；舊帶級表 `_BANDS`／`SERIES` 退役。"""
+        rank = keepwarm._ACTION_RANK
+        self.assertEqual(sorted(rank, key=rank.get),
+                         ["NODISPATCH", "WAIT_RESET", "PARK", "HALT_WEEKLY"])
+        self.assertFalse(hasattr(keepwarm, "_BANDS") or hasattr(keepwarm, "SERIES"))
 
     def test_dispositions_per_stage_never_say_wait_for_agents_to_finish(self) -> None:
         """REQ-QW-17。WHY：nodispatch／close 時「代理快完成 ⇒ 重掛」會把主控帶回舊流程（派不完、
         收不了尾）；close 必須列 TaskStop→封存→park→keepwarm，nodispatch 只說不派新代理。"""
         from lib.sessionctl import watch_wake  # noqa: PLC0415
-        for band in ("nodispatch", "close", "halt"):
-            self.assertNotIn("快完成", watch_wake.quota_disposal(band))
+        for action in ("NODISPATCH", "WAIT_RESET", "PARK", "HALT_WEEKLY"):
+            self.assertNotIn("快完成", watch_wake.quota_disposal(action))
         for word in ("TaskStop", "finalize", "park", "keepwarm"):
-            self.assertIn(word, watch_wake.quota_disposal("close"))
-        self.assertIn("不再派新代理", watch_wake.quota_disposal("nodispatch"))
-        self.assertIsNone(watch_wake.quota_disposal("prepare"))
+            self.assertIn(word, watch_wake.quota_disposal("PARK"))
+        self.assertIn("不再派新代理", watch_wake.quota_disposal("NODISPATCH"))
+        self.assertIsNone(watch_wake.quota_disposal("prepare"))  # 舊帶級名不再是處置鍵
 
 
 class WatchCarrierTest(_Base):
