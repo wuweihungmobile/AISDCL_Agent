@@ -521,7 +521,7 @@ class RegisterCliTest(_CliFence, unittest.TestCase):
 
     def test_at_qw_75_at_mode_is_recorded_as_primary_source_at(self) -> None:
         at = (NOW + timedelta(minutes=30)).isoformat()
-        rc, _out, _err = self.run_cli("--at", at, "--why", "週額度停工到時間再接手",
+        rc, _out, _err = self.run_cli("--at", at, "--note", "週額度停工到時間再接手",
                                       **self.sentinel_seams())
         self.assertEqual(rc, 0)
         self.assertEqual(qw_schema.marker_primary(park.read_marker(SID)).source, "at")

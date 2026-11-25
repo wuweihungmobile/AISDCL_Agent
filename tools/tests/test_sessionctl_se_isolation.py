@@ -419,12 +419,18 @@ class RegisterSiteTest(_SeFence):
 
     def park(self, repo: Path, pkg: Path, *argv: str, env: dict | None = None):
         at = (_now() + timedelta(minutes=10)).isoformat()
+        import quota_policy  # noqa: PLC0415
+        # WP-QV（QVD C6）：park 只在判決 PARK｜HALT_WEEKLY 時登記；讀數圍成「短窗 98%、90 分後
+        # reset」（判 PARK），不讀真額度快取；`--why` 已退役，`--at` 的說明改 `--note`。
+        reading = quota_policy.QuotaState((quota_policy.Axis(
+            "five_hour", 98.0, (_now() + timedelta(minutes=90)).isoformat()),),
+            _now().isoformat(), "test", "ok")
         seams = {"backend": self.backend, "arm": self.arm, "runner": FakeRunner(),
-                 "roster": FakeRoster()}
+                 "roster": FakeRoster(), "quota": lambda _n: reading}
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.object(park_cli, "_REPO", repo), contextlib.redirect_stdout(out), \
                 contextlib.redirect_stderr(err):
-            rc = park_cli.run(["--session-id", SID, "--at", at, "--why", "測試用的原因說明",
+            rc = park_cli.run(["--session-id", SID, "--at", at, "--note", "測試用的原因說明",
                                "--pkg", str(pkg), *argv], env=dict(env or {}), seams=seams)
         return rc, err.getvalue()
 
@@ -560,7 +566,7 @@ class RefusedReadEndTest(_SeFence):
         self.assertIn("sandbox_no_lease", out.getvalue())
         now = _now()
         self.assertFalse(park.yields(got, now))
-        reset = (now + timedelta(minutes=40)).isoformat()
+        reset = (now + timedelta(minutes=90)).isoformat()  # > 等待上限 45 分 ⇒ 判決 PARK（QVD C7）
         state = quota_policy.QuotaState((quota_policy.Axis("five_hour", 98.0, reset),),
                                         now.isoformat(), "test")
         policy = quota_policy_env.load_policy({"AUTOSDD_QUOTA_PREPARE_PCT": "85"})[0]

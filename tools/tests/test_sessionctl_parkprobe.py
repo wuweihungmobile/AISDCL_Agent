@@ -30,6 +30,7 @@ sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 
 import quota_escalation  # noqa: E402
 import quota_policy  # noqa: E402
+import quota_ruling as QR  # noqa: E402
 from test_sessionctl_park import (  # noqa: E402
     NOW,
     SID,
@@ -68,6 +69,12 @@ def _early_marker(pkg=None, **over) -> dict:
     return marker
 
 
+def _ruling(state, prepare: float = 85.0):
+    """QVD C21（WP-QV）：提前恢復的准許只看**判決**；以同一份讀數＋政策組真判決（純函式）。"""
+    pol = _policy(prepare)
+    return QR.ruling(state, quota_policy.decide(state, NOW, pol), model=None, policy=pol, now=NOW)
+
+
 def _keyed(state, key: str | None):
     return dataclasses.replace(state, account_key=key)
 
@@ -82,16 +89,19 @@ class EvaluateTest(_Fence, unittest.TestCase):
                 (80, 79, 85, False), (80, 80, 85, False)):
             with self.subTest(parked=parked, cur=cur, prepare=prepare):
                 marker = dict(_marker("H"), parked_pct=float(parked))
-                got = park.recovered(marker, _state(five=cur, week=cur), _policy(prepare), NOW)
+                state = _state(five=cur, week=cur)
+                got = park.recovered(marker, state, _ruling(state, prepare), NOW)
                 self.assertIs(got, want)
 
     def test_at_ctl_56_missing_baseline_never_recovers(self) -> None:
-        self.assertFalse(park.recovered(_marker("H"), _state(five=0, week=0), _policy(), NOW))
+        state = _state(five=0, week=0)
+        self.assertFalse(park.recovered(_marker("H"), state, _ruling(state), NOW))
 
     def test_the_drop_threshold_is_exactly_five_pp(self) -> None:
         marker = dict(_marker("H"), parked_pct=90.0)
-        self.assertTrue(park.recovered(marker, _state(five=85.0 - 0.1, week=0), _policy(86), NOW))
-        self.assertFalse(park.recovered(marker, _state(five=85.1, week=0), _policy(99), NOW))
+        hit, miss = _state(five=85.0 - 0.1, week=0), _state(five=85.1, week=0)
+        self.assertTrue(park.recovered(marker, hit, _ruling(hit, 86), NOW))
+        self.assertFalse(park.recovered(marker, miss, _ruling(miss, 99), NOW))
 
     def test_reading_ignores_model_scoped_and_fallback_axes(self) -> None:
         resets = (NOW + timedelta(hours=1)).isoformat()
@@ -108,7 +118,8 @@ class EvaluateTest(_Fence, unittest.TestCase):
         self.assertEqual(parkprobe.status_row(_marker("H")), "early_probe: absent(no_baseline)")
 
     def test_an_empty_axis_set_is_unmeasured_not_recovered(self) -> None:
-        verdict = parkprobe.evaluate(_early_marker(), _state(axes=()), _policy(), NOW)
+        empty = _state(axes=())
+        verdict = parkprobe.evaluate(_early_marker(), empty, _ruling(empty), NOW)
         self.assertEqual((verdict["reason"], verdict["recovered"]),
                          (parkprobe.REASON_UNMEASURED, False))
 
@@ -123,8 +134,8 @@ class EvaluateTest(_Fence, unittest.TestCase):
 
     def test_at_ctl_87_an_old_marker_without_parked_account_can_still_recover_by_drop(self) -> None:
         marker = {k: v for k, v in _early_marker().items() if k != parkprobe.MK_PARKED_ACCOUNT}
-        verdict = parkprobe.evaluate(marker, _keyed(_state(five=0, week=0), "acct-B"),
-                                     _policy(), NOW)
+        state = _keyed(_state(five=0, week=0), "acct-B")
+        verdict = parkprobe.evaluate(marker, state, _ruling(state), NOW)
         self.assertEqual((verdict["recovered"], verdict["account_changed"]), (True, False))
 
 
@@ -150,9 +161,10 @@ class BaselineAndMarkerTest(_CliFence, unittest.TestCase):
             raise OSError("端點 500")
         self.assertEqual(parkprobe.baseline({"quota": boom}, NOW), {})
         self.assertEqual(parkprobe.baseline({"quota": lambda _n: _state(axes=())}, NOW), {})
-        self.quota = lambda _n: _state(axes=())
-        rc, _out, _err = self.run_cli("--at", (NOW + timedelta(minutes=30)).isoformat(),
-                                      "--why", "週額度停工到時間再接手")
+        # WP-QV：登記須判決 PARK｜HALT_WEEKLY（QVD C6）⇒ 判決用預設讀數；只讓「基準讀數」量不到
+        with mock.patch.object(parkprobe, "reading", return_value=None):
+            rc, _out, _err = self.run_cli("--at", (NOW + timedelta(minutes=30)).isoformat(),
+                                          "--note", "週額度停工到時間再接手")
         self.assertEqual(rc, 0)
         self.assertNotIn(parkprobe.MK_PARKED_PCT, park.read_marker(SID))
 
@@ -628,7 +640,8 @@ class PlannerWiringTest(_Fence, unittest.TestCase):
 
     def test_a_probe_exception_never_kills_the_patrol(self) -> None:
         park.write_marker(_early_marker(self.package()))
-        with mock.patch.object(parkearly.park, "_pace_state", side_effect=RuntimeError("x")):
+        # WP-QV：提前恢復的取數改走判決（`park_reset.ruling_for`）；讓它拋例外
+        with mock.patch("lib.sessionctl.park_reset.ruling_for", side_effect=RuntimeError("x")):
             self.assertIsNone(parkearly.tick(
                 self.args, NOW, {"transcript": lambda _s: self.tmp / "none.jsonl"}, env=self.env))
         self.assertIn(parkearly.EV_ERROR, [t["event"] for t in self.traces()])

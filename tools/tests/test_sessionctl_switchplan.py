@@ -47,6 +47,8 @@ from lib.sessionctl.switchplan import Action, Inputs, Quota  # noqa: E402
 
 _MODULE_FENCES: list[dict] = []
 SID = "5a1b2c3d-aaaa-bbbb-cccc-dddddddddddd"
+#: QVD C13（WP-QV）：`Quota` 改帶判決欄；`W`＝任一帶 offset 的 reset 時刻（只當 PARK 目標字串）。
+W = "2026-11-25T05:00:00+08:00"
 OTHER = "9f9f9f9f-aaaa-bbbb-cccc-eeeeeeeeeeee"
 HARD = switch.threshold(switch.HARD_CTX_KEY, {})[0]
 R2 = switch.threshold(switch.R2_KEY, {})[0]
@@ -87,10 +89,12 @@ class DecideTableTest(unittest.TestCase):
             (_inp(unattended=True, ctx=HARD), Action.STAY, "gate"),
             (_inp(mode="off", ctx=HARD), Action.STAY, "gate"),
             (_inp(handed_over=True, ctx=HARD), Action.STAY, "handed_over"),
-            (_inp(quota=Quota(stage="close", wait_min=60)), Action.PARK_UNTIL, "wall"),
-            (_inp(quota=Quota(stage="wall", wait_min=60)), Action.PARK_UNTIL, "wall"),
-            (_inp(quota=Quota(short_pct=90, prepare_pct=85, wait_min=60)), Action.PARK_UNTIL,
-             "prepare_no_credential"),
+            (_inp(quota=Quota(action="PARK", win=W, wait_min=60)), Action.PARK_UNTIL, "park"),
+            (_inp(quota=Quota(action="HALT_WEEKLY", wk=W, wait_min=60)), Action.PARK_POLL,
+             "halt_weekly"),
+            (_inp(quota=Quota(action="WAIT_RESET", win=W, wait_min=14)), Action.STAY,
+             "wait_reset"),
+            (_inp(quota=Quota(action="HALT_WEEKLY", wk=None)), Action.STAY, "spend_limit"),
             (_inp(since_takeover_min=5), Action.STAY, "debounce"),
             (_inp(ctx=HARD, agents=0), Action.SWITCH_NOW, "hard"),
             (_inp(ctx=HARD, agents=2), Action.SWITCH_AFTER_DRAIN, "hard_drain"),
@@ -112,27 +116,28 @@ class DecideTableTest(unittest.TestCase):
         self.check(switchplan.decide(_inp(ctx=None, hard=None)), Action.STAY, "ok")
 
     def test_the_order_is_first_match_wins(self) -> None:
-        wall = Quota(stage="close", wait_min=30)
+        wall = Quota(action="PARK", win=W, wait_min=30)
         # G1 先於 H；W 先於 D 與 H；D 先於 H；W 先於 G1 之後的一切但不先於 G0／G1
         self.check(switchplan.decide(_inp(handed_over=True, ctx=HARD, quota=wall)),
                    Action.STAY, "handed_over")
         self.check(switchplan.decide(_inp(since_takeover_min=3, quota=wall)),
-                   Action.PARK_UNTIL, "wall")
+                   Action.PARK_UNTIL, "park")
         self.check(switchplan.decide(_inp(since_takeover_min=3, ctx=HARD)), Action.STAY, "debounce")
-        self.check(switchplan.decide(_inp(ctx=HARD, quota=wall)), Action.PARK_UNTIL, "wall")
+        self.check(switchplan.decide(_inp(ctx=HARD, quota=wall)), Action.PARK_UNTIL, "park")
         self.check(switchplan.decide(_inp(ctx=HARD, unattended=True, quota=wall)),
                    Action.STAY, "gate")
 
     def test_wall_target_and_taskstop_first(self) -> None:
-        weekly = _inp(quota=Quota(stage="close", target_axis="weekly", wait_min=60))
+        weekly = _inp(quota=Quota(action="PARK", win=W, target_axis="weekly", wait_min=60))
         self.assertEqual(switchplan.decide(weekly).action, Action.PARK_POLL)
-        far = _inp(quota=Quota(stage="close", wait_min=7 * 60))
+        far = _inp(quota=Quota(action="PARK", win=W, wait_min=7 * 60))
         self.assertEqual(switchplan.decide(far).action, Action.PARK_POLL)
-        busy = switchplan.decide(_inp(agents=2, quota=Quota(stage="close", wait_min=60)))
+        busy = switchplan.decide(_inp(agents=2, quota=Quota(action="PARK", win=W, wait_min=60)))
         self.assertIn("taskstop_first", busy.reason)
-        covered = Quota(short_pct=99, prepare_pct=85, credential=True, wait_min=60)
+        covered = Quota(action="PARK", win=W, credential=True, wait_min=60)
         self.check(switchplan.decide(_inp(quota=covered)), Action.STAY, "ok")  # 已有續航憑證
-        notify = switchplan.decide(_inp(mode="notify", quota=Quota(stage="close", wait_min=60)))
+        notify = switchplan.decide(_inp(mode="notify", quota=Quota(action="PARK", win=W,
+                                                                   wait_min=60)))
         self.assertIn("(notify)", notify.reason)  # notify 只出聲，判準不變
 
     def test_debounce_boundary_and_non_takeover(self) -> None:
@@ -269,23 +274,24 @@ class ConsistencyWithTheCurrentGatesTest(_GateFence):
     def test_w_row_never_misses_a_push_of_the_park_gate(self) -> None:
         now = datetime.now().astimezone()
         reset = (now + timedelta(hours=2)).isoformat()
-        policy = SimpleNamespace(prepare_pct=85.0, halt_pct=100.0)
+        import quota_policy  # noqa: PLC0415
         n = pushes = 0
         for pct, cred, mode, unattended, agents in itertools.product(
                 (10.0, 90.0, 99.0), (False, True), ("auto", "notify", "off"), (False, True),
                 (0, 2)):
-            axes = (SimpleNamespace(kind="five_hour", pct=pct, resets_at=reset),)
-            state = SimpleNamespace(axes=axes, source="t", reason="")
+            state = quota_policy.QuotaState((quota_policy.Axis("five_hour", pct, reset),),
+                                            now.isoformat(), "t", "ok")
             env = {"AUTOSDD_SESSION_SWITCH_MODE": mode,
                    **({"AUTOSDD_UNATTENDED": "1"} if unattended else {})}
             with mock.patch("lib.sessionctl.park.credential_ok", return_value=(cred, "x")):
                 pushed = bool(park.stop_verdict(
                     {"session_id": SID}, env, now=now, read_quota=lambda _n, s=state: s,
-                    policy_fn=lambda: policy, carrier_fn=lambda: True,
-                    spawned_fn=lambda _s, _e: False))
+                    carrier_fn=lambda: True, spawned_fn=lambda _s, _e: False))
+            # QVD C13：換手計畫吃同一份讀數組出的判決（不再自比門檻）
+            r = park._stop_ruling(SID, now, lambda _n, s=state: s, env)  # noqa: SLF001
             got = switchplan.decide(Inputs(
                 agents=agents, mode=mode, unattended=unattended, env=env,
-                quota=Quota(short_pct=pct, prepare_pct=85.0, credential=cred, wait_min=120)))
+                quota=Quota(action=r.action, win=r.win, wk=r.wk, credential=cred, wait_min=120)))
             n += 1
             if pushed:
                 pushes += 1
@@ -577,7 +583,9 @@ class SwitchPlanCliTest(_GateFence):
         self.assertEqual(done.returncode, 0, msg=done.stderr)
         body = json.loads(done.stdout.strip().splitlines()[-1])
         quota = body["inputs"]["quota"]
-        self.assertEqual((quota["short_pct"], quota["weekly_pct"]), (None, None), quota)  # 密閉
+        # 密閉：額度量不到 ⇒ 判決 CONTINUE（降級）或取數失敗 None；判讀欄已退役（QVD C13）
+        self.assertIn(quota["action"], ("CONTINUE", None), quota)
+        self.assertNotIn("short_pct", quota)
         self.assertEqual(body["decision"]["action"], Action.STAY)
 
 

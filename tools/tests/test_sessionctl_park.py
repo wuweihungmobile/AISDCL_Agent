@@ -203,7 +203,10 @@ class _Fence(unittest.TestCase):
         # 另由 `StopVerdictTest.test_qv_wait_reset_is_not_pushed_to_park` 釘住。
         patch = mock.patch.dict(os.environ, {
             "AUTOSDD_TRACE_DIR": str(self.tdir), "AUTOSDD_HANDOFF_DIR": str(self.hdir),
-            "AUTOSDD_HANDBACK_DIR": str(self.bdir), "AUTOSDD_KEEPWARM_MINUTES": "15"})
+            "AUTOSDD_HANDBACK_DIR": str(self.bdir), "AUTOSDD_KEEPWARM_MINUTES": "15",
+            # DEF-200-652 圍籬：判決取數（`ruling_io.gather`）不得讀真快取、不得拿真憑證線上補量
+            "AUTOSDD_QUOTA_CACHE_DIR": str(self.tmp / "qcache"),
+            "CLAUDE_CONFIG_DIR": str(self.tmp / "claude")})
         patch.start()
         self.addCleanup(patch.stop)
 

@@ -189,7 +189,7 @@ def ruling(state, decision, *, model, policy, now: datetime, markers=(), plan=No
         why = "週額度已達停止門檻（或同帳號週軸 halt 標記未過期）：等週重置"
     elif s_hits or m_short or stage in ("close", "wall"):
         win = (_latest([_aware(a.resets_at) for a in s_hits]) if s_hits
-               else max(m_short) if m_short else plan_win)
+               else max(m_short) if m_short else plan_win or win_any)  # stage 列：計畫或軸的 reset
         action = _three_way(win, now, wait_min)
         top = max((a.pct for a in s_hits), default=None)
         src = (f"短窗 {top:.0f}%" if top is not None else
