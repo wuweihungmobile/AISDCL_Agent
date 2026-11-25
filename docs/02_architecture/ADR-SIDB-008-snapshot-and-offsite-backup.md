@@ -28,6 +28,7 @@ Accepted（2026-10-31；決定者＝掌舵者 2026-10-27 對 OQ-1 的裁決〔PR
 **舊檔永遠保留**（凍結檔不刪，P4 只退役寫入它們的程式，PRD §6），並採 **(b)＋(c)**（OQ-1 裁決；即選項 (c)，其中含 (b)）：
 
 - **(b)**：快照放固定單一目錄 `docs/06_quality/SelfImproving_Snapshots/`（覆寫；舊版在 git 歷史；標頭宣告為衍生物並含鏈頭）。pre-commit 在「DB 可達且 DB 鏈頭≠快照鏈頭」或「匯出失敗（rc≠0）」時擋 commit 並印匯出指令；DB 不可達只出聲不擋（D-17）；逃生口為環境變數 `AUTOSDD_SNAPSHOT_GATE_OFF=1`，須在 commit 前設置、commit 訊息寫明理由，**不接受 `--no-verify`**。
+  - 〔2026-11-25 註記〕逃生口 `AUTOSDD_SNAPSHOT_GATE_OFF` 在 `CLAUDECODE` 或 `AUTOSDD_UNATTENDED` 存在時無效並出聲，判準經 `tools/lib/human_escape.py` 的 `honored()`（`docs/02_architecture/Autopilot_Pipeline_Design.md` §5 v1.1；主控代決 ②）。本決定其餘文字與變數名不變。
 - **(c)**：再加每日 `pg_dump -n si` 的離機備份；演練＝還原到拋棄式庫後 `si check` 全綠，指令與 rc 入證據檔（AC-LD-12-3）。
 - 否決 (a)（RPO 過長）、(d)（拿掉唯一錨點與 CI 內容閘輸入）。
 - 快照是 `si db snapshot` 動詞的產物（寫檔，閉包含 `dal_snapshot.py`），**不是** `export` 的 kind；`FileStore` 可直接讀快照目錄（AC-LD-12-1、12-2）。
