@@ -138,7 +138,8 @@ class ReadingTest(unittest.TestCase):
         self.assertEqual(datetime.fromisoformat(r.win), datetime.fromisoformat(later))
 
     def test_at_pk_16_bad_readings_are_not_hits(self) -> None:
-        """NaN／inf／bool／naive／過去／None 的軸不命中第 3 列；NaN 不得沿用 pct_band 的 fail-closed。"""
+        """NaN／inf／bool／naive／過去／None 的軸不命中第 3 列；
+        NaN 不得沿用 pct_band 的 fail-closed。"""
         past = (NOW - timedelta(minutes=1)).isoformat()
         for pct, resets in ((float("nan"), RESET.isoformat()), (float("inf"), RESET.isoformat()),
                             (True, RESET.isoformat()), (95.0, "2026-11-15T20:00:00"),
@@ -296,7 +297,8 @@ class StopVerdictTest(_Fence):
 
     def test_qv_wait_reset_is_not_pushed_to_park(self) -> None:
         """QVD C7（AC-QV-11e 末句）：出廠等待上限 45 分下，事故讀數（98%、43 分後 reset）判
-        `WAIT_RESET` ⇒ park 閘不推（推主控掛保溫是 `keepwarm.stop_verdict` 的事），也不落推回痕跡。"""
+        `WAIT_RESET` ⇒ park 閘不推（推主控掛保溫是 `keepwarm.stop_verdict` 的事），也不落推回痕跡。
+        """
         self.assertEqual(self.verdict(env={"AUTOSDD_KEEPWARM_MINUTES": "45"}), "")
         self.assertNotIn("park_stop_block", [t["event"] for t in self.traces()])
 
@@ -688,7 +690,8 @@ class ParkCliTest(_CliFence):
     def test_at_pk_46_weekly_only_needs_explicit_at(self) -> None:
         """park_cli.py（WP-QV 改寫，QVD C6／§5）：週軸未達停止門檻（99% < halt）⇒ 判決 CONTINUE ⇒
         即使帶 `--at` 也 rc 4（`--at` 須判決 HALT_WEEKLY 或 PARK）；週軸達 halt ⇒ `HALT_WEEKLY` ⇒
-        `--at` 過去／超過 8 天 rc 2、`--at` 帶已退役的 `--why` rc 2；合格的 `--at`（說明改 `--note`）
+        `--at` 過去／超過 8 天 rc 2、`--at` 帶已退役的 `--why` rc 2；
+        合格的 `--at`（說明改 `--note`）
         走 H，觸發時刻＝`--at`。"""
         below = lambda _n: _state(five=10.0, week=99.0)  # noqa: E731
         at = (NOW + timedelta(days=2)).isoformat()

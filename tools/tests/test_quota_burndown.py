@@ -282,7 +282,8 @@ class TestCarrierAndEffectiveness(unittest.TestCase):
         ident = B.read_directive()["id"]
         report = RIO.pace_report(now=now)
         self.assertEqual(report.count("清倉模式生效中"), 1, "全文清倉段整份輸出只印一次")
-        self.assertIn(f"🔥清倉 {ident}：", report.splitlines()[2])  # 標題行（判決行兩行之後）只帶短標記
+        # 標題行（判決行兩行之後）只帶短標記
+        self.assertIn(f"🔥清倉 {ident}：", report.splitlines()[2])
         for name, key, want in ((QG.BURN_LEDGER_NAME, "bd", ident),
                                 (B.EVENTS_NAME, "effect", "relaxed")):
             last = (self.tmp / name).read_text(encoding="utf-8").splitlines()[-1]

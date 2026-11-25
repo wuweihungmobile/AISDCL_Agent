@@ -1,6 +1,7 @@
 """單一權威額度判決（TCS-Autopilot-20261125 REQ-AP-QV-01～11；QVD v1.3）。
 
-`QV::VerdictTest`／`RenderTest`：純函式 `quota_ruling.ruling()` 決策表七列、判決行、有效期、計費姿態。
+`QV::VerdictTest`／`RenderTest`：純函式 `quota_ruling.ruling()` 決策表七列、判決行、有效期、
+計費姿態。
 `GatherTest`：`sessionctl/ruling_io.gather()` 取數（halt 標記不壓補量、429 降級）。
 `ConsumerTest`／`ParkTest`／`WatchTest`：消費端改接（C1、C4～C7、C13、C21）。
 `SingleHouseTest`：單一判讀家機械鎖（QVD §3.5.3；白名單 `RULING_INPUT_SITES` 相等比對）。
@@ -51,12 +52,43 @@ TPE = timezone(timedelta(hours=8))
 NOW = datetime(2026, 11, 25, 3, 46, 19, tzinfo=TPE)
 POLICY = quota_policy.DEFAULT_POLICY
 #: 真實 `~/.autosdd/traces/quota_burn.jsonl` 2026-11-24～25 的四列（逐字複製；AC-QV-01d 夾具）。
-BURN_ROWS = r"""
-{"bd": null, "fp": ["account=34cd3507237f", "five_hour", "session", "seven_day", "spend", "weekly_all"], "live": 0, "pct": {"five_hour": 2.0, "session": 2.0, "seven_day": 96.0, "spend": 0.0, "weekly_all": 96.0}, "resets_at": {"five_hour": "2026-11-24T15:00:00.156880+00:00", "session": "2026-11-24T15:00:00.156880+00:00", "seven_day": "2026-11-27T22:00:00.156903+00:00", "spend": null, "weekly_all": "2026-11-27T22:00:00.156903+00:00"}, "ts": "2026-11-24T20:50:10+08:00"}
-{"bd": null, "fp": ["account=eaf5241f6fe2", "extra_usage", "five_hour", "session", "seven_day", "spend", "weekly_all"], "live": 0, "pct": {"extra_usage": 0.0, "five_hour": 77.0, "session": 77.0, "seven_day": 14.0, "spend": 0.0, "weekly_all": 14.0}, "resets_at": {"extra_usage": null, "five_hour": "2026-11-24T19:59:59.589030+00:00", "session": "2026-11-24T19:59:59.589030+00:00", "seven_day": "2026-12-01T10:59:59.589056+00:00", "spend": null, "weekly_all": "2026-12-01T10:59:59.589056+00:00"}, "ts": "2026-11-25T03:43:19+08:00"}
-{"bd": null, "fp": ["account=eaf5241f6fe2", "extra_usage", "five_hour", "session", "seven_day", "spend", "weekly_all"], "live": 2, "pct": {"extra_usage": 0.0, "five_hour": 87.0, "session": 87.0, "seven_day": 15.0, "spend": 0.0, "weekly_all": 15.0}, "resets_at": {"extra_usage": null, "five_hour": "2026-11-24T20:00:00.546902+00:00", "session": "2026-11-24T20:00:00.546902+00:00", "seven_day": "2026-12-01T11:00:00.546927+00:00", "spend": null, "weekly_all": "2026-12-01T11:00:00.546927+00:00"}, "ts": "2026-11-25T03:46:19+08:00"}
-{"bd": null, "fp": ["account=eaf5241f6fe2", "extra_usage", "five_hour", "session", "seven_day", "spend", "weekly_all"], "live": 0, "pct": {"extra_usage": 0.0, "five_hour": 0.0, "session": 0.0, "seven_day": 16.0, "spend": 0.0, "weekly_all": 16.0}, "resets_at": {"extra_usage": null, "five_hour": "2026-11-25T01:00:00.683250+00:00", "session": "2026-11-25T01:00:00.683250+00:00", "seven_day": "2026-12-01T11:00:00.683273+00:00", "spend": null, "weekly_all": "2026-12-01T11:00:00.683273+00:00"}, "ts": "2026-11-25T04:00:32+08:00"}
-""".strip()  # noqa: E501
+BURN_ROWS = "\n".join([  # 逐字複製（各列以字串相接，值與原檔逐位元組相同）
+    '{"bd": null, "fp": ["account=34cd3507237f", "five_hour", "session", "seven_day", '
+    '"spend", "weekly_all"], "live": 0, "pct": {"five_hour": 2.0, "session": 2.0, '
+    '"seven_day": 96.0, "spend": 0.0, "weekly_all": 96.0}, '
+    '"resets_at": {"five_hour": "2026-11-24T15:00:00.156880+00:00", '
+    '"session": "2026-11-24T15:00:00.156880+00:00", '
+    '"seven_day": "2026-11-27T22:00:00.156903+00:00", "spend": null, '
+    '"weekly_all": "2026-11-27T22:00:00.156903+00:00"}, '
+    '"ts": "2026-11-24T20:50:10+08:00"}',
+    '{"bd": null, "fp": ["account=eaf5241f6fe2", "extra_usage", "five_hour", "session", '
+    '"seven_day", "spend", "weekly_all"], "live": 0, "pct": {"extra_usage": 0.0, '
+    '"five_hour": 77.0, "session": 77.0, "seven_day": 14.0, "spend": 0.0, '
+    '"weekly_all": 14.0}, "resets_at": {"extra_usage": null, '
+    '"five_hour": "2026-11-24T19:59:59.589030+00:00", '
+    '"session": "2026-11-24T19:59:59.589030+00:00", '
+    '"seven_day": "2026-12-01T10:59:59.589056+00:00", "spend": null, '
+    '"weekly_all": "2026-12-01T10:59:59.589056+00:00"}, '
+    '"ts": "2026-11-25T03:43:19+08:00"}',
+    '{"bd": null, "fp": ["account=eaf5241f6fe2", "extra_usage", "five_hour", "session", '
+    '"seven_day", "spend", "weekly_all"], "live": 2, "pct": {"extra_usage": 0.0, '
+    '"five_hour": 87.0, "session": 87.0, "seven_day": 15.0, "spend": 0.0, '
+    '"weekly_all": 15.0}, "resets_at": {"extra_usage": null, '
+    '"five_hour": "2026-11-24T20:00:00.546902+00:00", '
+    '"session": "2026-11-24T20:00:00.546902+00:00", '
+    '"seven_day": "2026-12-01T11:00:00.546927+00:00", "spend": null, '
+    '"weekly_all": "2026-12-01T11:00:00.546927+00:00"}, '
+    '"ts": "2026-11-25T03:46:19+08:00"}',
+    '{"bd": null, "fp": ["account=eaf5241f6fe2", "extra_usage", "five_hour", "session", '
+    '"seven_day", "spend", "weekly_all"], "live": 0, "pct": {"extra_usage": 0.0, '
+    '"five_hour": 0.0, "session": 0.0, "seven_day": 16.0, "spend": 0.0, '
+    '"weekly_all": 16.0}, "resets_at": {"extra_usage": null, '
+    '"five_hour": "2026-11-25T01:00:00.683250+00:00", '
+    '"session": "2026-11-25T01:00:00.683250+00:00", '
+    '"seven_day": "2026-12-01T11:00:00.683273+00:00", "spend": null, '
+    '"weekly_all": "2026-12-01T11:00:00.683273+00:00"}, '
+    '"ts": "2026-11-25T04:00:32+08:00"}',
+])
 
 
 def _iso(when: datetime) -> str:
@@ -324,7 +356,8 @@ class GatherTest(_Fenced):
                                            "reset_at": _iso(datetime.now().astimezone()
                                                             + timedelta(minutes=30))})
         calls = []
-        meter = SimpleNamespace(SCHEMA=quota_gate.quota_schema(), measure_detail=lambda _t: calls.append(1) or (None, "http-429"),
+        meter = SimpleNamespace(SCHEMA=quota_gate.quota_schema(),
+                                measure_detail=lambda _t: calls.append(1) or (None, "http-429"),
                                 write_cache=lambda *_a: True,
                                 read_retry_hint=lambda _p: "600")
         self.enterContext(mock.patch.object(quota_gate, "quota_meter", meter))
@@ -335,7 +368,8 @@ class GatherTest(_Fenced):
     def test_429_degrades_to_capped_continue(self):
         """AC-QV-03b：429（帶 retry-after）⇒ CONTINUE deg=unmeasured、1 ≤ cap ≤ cap_prepare。"""
         self._cache(30, age=900)
-        meter = SimpleNamespace(SCHEMA=quota_gate.quota_schema(), measure_detail=lambda _t: (None, "http-429"),
+        meter = SimpleNamespace(SCHEMA=quota_gate.quota_schema(),
+                                measure_detail=lambda _t: (None, "http-429"),
                                 write_cache=lambda *_a: True, read_retry_hint=lambda _p: "600")
         self.enterContext(mock.patch.object(quota_gate, "quota_meter", meter))
         now = datetime.now().astimezone()
@@ -350,8 +384,8 @@ SID = "11111111-2222-4333-8444-555555555555"
 
 def _live_state(pct, reset_min, now):
     """以真實牆鐘為準的短窗讀數（派工閘、取數內部用 `datetime.now()`）。"""
-    return _state(_axis("five_hour", pct, reset_min, now=now), _axis("seven_day", 10, 6000, now=now),
-                  now=now)
+    return _state(_axis("five_hour", pct, reset_min, now=now),
+                  _axis("seven_day", 10, 6000, now=now), now=now)
 
 
 def _traces(root: Path) -> list[dict]:
@@ -395,7 +429,8 @@ class ConsumerTest(_Fenced):
         return rc, err.getvalue(), seen
 
     def test_gate_and_line_share_cap(self):
-        """AC-QV-01g 後半：PreToolUse 記派發帳所用的 cap＝同一時刻判決行 `cap=`（C1 經 hook 注入縫）。"""
+        """AC-QV-01g 後半：
+        PreToolUse 記派發帳所用的 cap＝同一時刻判決行 `cap=`（C1 經 hook 注入縫）。"""
         now = datetime.now().astimezone()
         rc, _err, seen = self._gate(_live_state(40, 150, now))
         self.assertEqual(rc, 0)
@@ -421,7 +456,8 @@ class ConsumerTest(_Fenced):
         from lib.sessionctl import handoff_build, park_reset, watch_wake  # noqa: PLC0415
         now = datetime.now().astimezone()
         state = _live_state(87, 14, now)
-        first = handoff_build._quota_text(now, lambda _n: state, SID).splitlines()[0]  # noqa: SLF001
+        text = handoff_build._quota_text(now, lambda _n: state, SID)  # noqa: SLF001
+        first = text.splitlines()[0]
         self.assertTrue(first.startswith(QR.PREFIX), first)
         keys = watch_wake.quota_keys(SID, None, {}, now.timestamp(), read_quota=lambda _n: state)
         self.assertTrue(keys and keys[0][5].startswith(QR.PREFIX), keys)
@@ -466,7 +502,8 @@ class ConsumerTest(_Fenced):
 
     def test_switchplan_maps_ruling_actions(self):
         """AC-QV-12b：PARK⇒PARK_UNTIL(win)／D>6h⇒PARK_POLL；HALT_WEEKLY⇒PARK_POLL(wk)；spend⇒STAY；
-        CONTINUE／NODISPATCH／None 不由額度列命中；credential 為真不重出 PARK（R-06）；判讀欄已退役。"""
+        CONTINUE／NODISPATCH／None 不由額度列命中；credential 為真不重出 PARK（R-06）；
+        判讀欄已退役。"""
         from lib.sessionctl import switchplan  # noqa: PLC0415
         A, inp = switchplan.Action, switchplan.Inputs
 
@@ -554,7 +591,8 @@ class ParkTest(_Fenced):
         return got, err.getvalue()
 
     def test_continue_refuses_and_why_retired(self):
-        """AC-QV-04a／MU-QV-5：判決 CONTINUE ⇒ rc 4 並印判決行；傳 `--why` ⇒ 拒絕並指路 `--next-est`。"""
+        """AC-QV-04a／MU-QV-5：判決 CONTINUE ⇒ rc 4 並印判決行；
+        傳 `--why` ⇒ 拒絕並指路 `--next-est`。"""
         from lib.sessionctl import park_cli  # noqa: PLC0415
         (_r, _a, _s, rc), err = self._resolve(_state(_short(40, 150)))
         self.assertEqual(rc, 4)
@@ -690,7 +728,8 @@ class RulingWaitResetTest(_Fenced):
         self.assertEqual((halt["reset_at"], halt["ruling"]), (r.win, QR.WAIT_RESET))
 
     def test_no_carrier_is_said(self):
-        """AC-QV-11d 前半：模式非 auto 或 `AUTOSDD_KEEPWARM_OFF` ⇒ 理由句寫「不會在重置後自動叫醒」。"""
+        """AC-QV-11d 前半：模式非 auto 或 `AUTOSDD_KEEPWARM_OFF` ⇒ 理由句寫「不會在重置後自動叫醒」
+        。"""
         for env in ({"AUTOSDD_SESSION_SWITCH_MODE": "notify"}, {"AUTOSDD_KEEPWARM_OFF": "1"}):
             with self.subTest(env=env):
                 self.assertTrue(ruling_io._no_carrier(env))  # noqa: SLF001
@@ -745,8 +784,10 @@ class RulingWaitResetTest(_Fenced):
 
 
 class QuotaCliE2ETest(_Fenced):
-    """E2E-AP-QV-01／07（真行程 `python tools/sessionctl.py quota`；sid 406454ea 03:46 錄製讀數以時間平移
-    重放：短窗 87%、reset＝now＋14 分；舊帳號 `34cd3507237f` 的 halt 標記原樣放進沙盒）。子行程繼承本類
+    """E2E-AP-QV-01／07（真行程 `python tools/sessionctl.py quota`；
+    sid 406454ea 03:46 錄製讀數以時間平移
+    重放：短窗 87%、reset＝now＋14 分；舊帳號 `34cd3507237f` 的 halt 標記原樣放進沙盒）。
+    子行程繼承本類
     圍籬（快取／痕跡／TEMP／`CLAUDE_CONFIG_DIR` 皆在 tmp），不讀真快取、不拿真憑證線上補量。"""
 
     OLD, NEW = "34cd3507237f", "eaf5241f6fe2"
@@ -773,7 +814,8 @@ class QuotaCliE2ETest(_Fenced):
         return done.returncode, done.stdout + done.stderr
 
     def test_e2e_ap_qv_01_time_shifted_replay(self):
-        """E2E-AP-QV-01：平移到「reset＝now＋14 分」⇒ `WAIT_RESET acct=eaf5241f6fe2`；平移到「reset 已過、
+        """E2E-AP-QV-01：平移到「reset＝now＋14 分」⇒ `WAIT_RESET acct=eaf5241f6fe2`；
+        平移到「reset 已過、
         0%」⇒ `CONTINUE acct=eaf5241f6fe2`；舊帳號 halt 標記不當輸入、兩次皆無 halted 行。"""
         now = datetime.now().astimezone()
         quota_gate.write_halt_marker(SID, {"sid": SID, "binding": "five_hour", "at": _iso(now),
@@ -794,8 +836,10 @@ class QuotaCliE2ETest(_Fenced):
         self.assertNotIn("halted", out)
 
     def test_e2e_ap_qv_07_billing_and_unmeasured(self):
-        """E2E-AP-QV-07：三種錄製快取（缺 posture、無 credits、credits 可用）的 `billing`；快取缺席且
-        憑證量不到（`CLAUDE_CONFIG_DIR` 圍在 tmp）⇒ `CONTINUE deg=unmeasured`、`1 ≤ cap ≤ cap_prepare`、
+        """E2E-AP-QV-07：三種錄製快取（缺 posture、無 credits、credits 可用）的 `billing`；
+        快取缺席且
+        憑證量不到（`CLAUDE_CONFIG_DIR` 圍在 tmp）⇒ `CONTINUE deg=unmeasured`、
+        `1 ≤ cap ≤ cap_prepare`、
         `expires_at > now`（不是 cap 0、也不是不設限）。"""
         axes = [("five_hour", 30.0, 200), ("seven_day", 10.0, 9000)]
         for posture, want in ((None, "unknown"), ({"credits_present": False}, "subscription_only"),
@@ -817,7 +861,8 @@ class QuotaCliE2ETest(_Fenced):
 
 
 class SingleHouseLockE2ETest(unittest.TestCase):
-    """E2E-AP-QV-10：沙盒 repo 副本（`tools/lib`、`tools/*.py`、本測試檔）植入一個私有判讀站點，真子行程
+    """E2E-AP-QV-10：沙盒 repo 副本（`tools/lib`、`tools/*.py`、本測試檔）植入一個私有判讀站點，
+    真子行程
     跑 `SingleHouseTest.test_sites_equal_allowlist` ⇒ rc≠0 且訊息列出該站點；移除後 rc 0。"""
 
     def test_e2e_ap_qv_10_planted_site_turns_the_real_lock_red(self):
@@ -896,7 +941,8 @@ def _bindings(tree: ast.Module) -> tuple[dict, dict]:
 
 
 def scan_source(text: str, rel: str) -> set[tuple[str, str, str]]:
-    """(i) 引用站點三元組 `(檔, 最外層 def｜<module>, 引用名稱)`。參數／區域同名不收（QVD 不算條）。"""
+    """(i) 引用站點三元組 `(檔, 最外層 def｜<module>, 引用名稱)`。參數／區域同名不收（QVD 不算條）
+    。"""
     tree = ast.parse(text)
     bind, alias = _bindings(tree)
     hits: set[tuple[str, str, str]] = set()
@@ -923,7 +969,8 @@ def scan_source(text: str, rel: str) -> set[tuple[str, str, str]]:
 
 
 def compare_source(text: str, rel: str) -> set[tuple[str, str, str]]:
-    """(ii) 門檻比較站點 `(檔, 最外層 def, "<compare>")`；`quota_policy*.py`／`quota_ruling.py` 不計。"""
+    """(ii) 門檻比較站點 `(檔, 最外層 def, "<compare>")`；
+    `quota_policy*.py`／`quota_ruling.py` 不計。"""
     name = rel.rsplit("/", 1)[-1]
     if name.startswith("quota_policy") or name == "quota_ruling.py":
         return set()
@@ -1018,9 +1065,11 @@ RULING_INPUT_SITES: dict[tuple[str, str, str], tuple[str, str]] = {
 }
 #: 尚未改接（改接後本表必須縮、相等比對保證不得漏刪）。WP-QV 第三棒：C10 SessionStart 簡報與手動
 #: 排程時刻已改接（判決經 `session_brief_oi.ruling_of` 注入，hook 不需改），本表清空、常數保留作
-#: 「日後分段改接」的唯一登記處。白名單之外另列，`test_allowlist_entries_have_category_and_why` 排除。
+#: 「日後分段改接」的唯一登記處。白名單之外另列，
+#: `test_allowlist_entries_have_category_and_why` 排除。
 PENDING_REWIRE: dict[tuple[str, str, str], str] = {}
-#: QVD §3.5.3〈預期命中站點清單〉「改接後白名單＝是」的（檔::函式）；dispatch_decision 為 §3.5.2 B1。
+#: QVD §3.5.3〈預期命中站點清單〉「改接後白名單＝是」的（檔::函式）；
+#: dispatch_decision 為 §3.5.2 B1。
 QVD_EXPECTED = frozenset({
     "tools/lib/quota_burndown.py::issue", "tools/lib/quota_burndown.py::status",
     "tools/lib/quota_burndown.py::_eligible", "tools/lib/quota_burndown.py::_why",
@@ -1033,7 +1082,8 @@ QVD_EXPECTED = frozenset({
     "tools/lib/sessionctl/park_cli.py::_cmd_done", "tools/lib/sessionctl/parkprobe.py::baseline",
     "tools/lib/sessionctl/qw_cli.py::cli", "tools/lib/sessionctl/qw_cli.py::pace_line",
     f"{_QW}::default_read", f"{_QW}::default_refresh", f"{_QW}::fresh_reading",
-    f"{_QW}::wall_state", f"{_QW}::_quota_reset", "tools/lib/sessionctl/switchfacts.py::quota_facts",
+    f"{_QW}::wall_state", f"{_QW}::_quota_reset",
+    "tools/lib/sessionctl/switchfacts.py::quota_facts",
     "tools/lib/sessionctl/switchfacts.py::account_changed", "tools/lib/sessionctl/watch.py::run",
     "tools/lib/sessionctl/watch_wake.py::start"})
 _FLAT_LIB = _REPO_ROOT / "tools" / "lib"
@@ -1084,7 +1134,8 @@ class SingleHouseTest(unittest.TestCase):
         seam = scan_source('def f(S, now):\n    return (S.get("quota") or park._pace_state)(now)\n',
                            "a.py")
         self.assertEqual(seam, {("a.py", "f", "_pace_state")})
-        ref = scan_source("def g(now):\n    fn = quota_gate.pace_state\n    return fn(now)\n", "a.py")
+        ref = scan_source("def g(now):\n    fn = quota_gate.pace_state\n    return fn(now)\n",
+                          "a.py")
         self.assertEqual(ref, {("a.py", "g", "pace_state")})
         bound = scan_source("from lib.sessionctl.qw_wall import default_read\n\n"
                             "def f(read_quota=None, now=None):\n"
@@ -1102,7 +1153,8 @@ class SingleHouseTest(unittest.TestCase):
                          "同名稱多處引用不新增站點；新名稱＝新三元組")
 
     def test_threshold_compare_sites_are_seen(self):
-        """AC-QV-10e：`if axis.pct >= policy.prepare_pct:` 紅；寫在 quota_policy*／quota_ruling 不計。"""
+        """AC-QV-10e：`if axis.pct >= policy.prepare_pct:` 紅；
+        寫在 quota_policy*／quota_ruling 不計。"""
         src = "def f(axis, policy):\n    if axis.pct >= policy.prepare_pct:\n        return 1\n"
         self.assertEqual(compare_source(src, "tools/lib/z.py"), {("tools/lib/z.py", "f",
                                                                   "<compare>")})
@@ -1112,7 +1164,8 @@ class SingleHouseTest(unittest.TestCase):
     def test_flat_files_do_not_import_sessionctl(self):
         """AC-QV-10c：判讀相關扁平檔（QVD §8 點名的四支＋`quota_*` 族）不 import `lib.sessionctl`
         （AST）。誠實劃界：`sentinel_lifecycle.py`／`session_brief_oi.py` 在 WP-QV 之前即以函式內
-        lazy import 取 sessionctl（非判讀用途），不在本鎖射程，已交主控裁示（交卷報告〈規格偏離〉）。"""
+        lazy import 取 sessionctl（非判讀用途），不在本鎖射程，已交主控裁示（交卷報告〈規格偏離〉）
+        。"""
         bad = []
         names = {"quota_gate.py", "session_brief.py", "quota_escalation.py", "relay_machine.py"}
         for path in sorted(_FLAT_LIB.glob("*.py")):

@@ -424,7 +424,8 @@ class VerdictTest(_Base):
         self.assertEqual(self.verdict(93, payload=ok, env={"AUTOSDD_UNATTENDED": "1"}), (0, ""))
 
     def test_block_text_carries_facts_and_steps(self):
-        """擋派訊息的家（`block_text`）隨退役刪除（不留死碼）；Stop 收尾訊息仍帶計畫事實與判決行。"""
+        """擋派訊息的家（`block_text`）隨退役刪除（不留死碼）；Stop 收尾訊息仍帶計畫事實與判決行。
+        """
         self.assertFalse(hasattr(quotawall, "block_text"))
         idle = quotawall.stop_verdict(self.payload(), {}, NOW, inflight=False,
                                       read_quota=_reader(_state(93)), ledger={})
@@ -498,8 +499,10 @@ class WakeTargetTest(_Base):
         self.assertEqual(self.target(40, None), (None, "none", (None, None, None)))
 
     def test_wall_with_known_reset_targets_reset_plus_s(self):
-        """牆中（100%、40 分後 reset）：判決 WAIT_RESET（D ≤ 45）⇒ 來源 `ruling_wait_reset`（QVD §3.6
-        優先序：park → 判決 WAIT_RESET → stage close／wall），目標同為 reset＋s；D > 45 才落 `reset`。"""
+        """牆中（100%、40 分後 reset）：判決 WAIT_RESET（D ≤ 45）
+        ⇒ 來源 `ruling_wait_reset`（QVD §3.6
+        優先序：park → 判決 WAIT_RESET → stage close／wall），目標同為 reset＋s；
+        D > 45 才落 `reset`。"""
         at, src, _ref = self.target(100, None, reset_min=40)
         self.assertEqual((src, at), ("ruling_wait_reset", NOW.timestamp() + 40 * 60
                                      + qw_calc.skew_min() * 60))

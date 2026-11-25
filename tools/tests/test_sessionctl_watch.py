@@ -447,11 +447,13 @@ class QuotaLatchTests(_Fence):
 
     def test_at_ss_21_band_upgrade_fires_again(self) -> None:
         """WHY（MU-10 閂鎖鍵漏帶級）：prepare→halt 是更嚴重的事，被前一次的閂鎖吞掉＝盲區。"""
-        self.assertEqual(self._two_rounds(("WAIT_RESET", "R"), ("HALT_WEEKLY", "R")), ("quota", "quota"))
+        self.assertEqual(self._two_rounds(("WAIT_RESET", "R"), ("HALT_WEEKLY", "R")),
+                         ("quota", "quota"))
 
     def test_a_lower_band_in_the_same_window_stays_latched(self) -> None:
         """WHY：同窗內 halt 已提醒過，讀數抖回 prepare 不該再吵一次（閂鎖記的是該窗最高帶）。"""
-        self.assertEqual(self._two_rounds(("HALT_WEEKLY", "R"), ("WAIT_RESET", "R")), ("quota", "keepwarm"))
+        self.assertEqual(self._two_rounds(("HALT_WEEKLY", "R"), ("WAIT_RESET", "R")),
+                         ("quota", "keepwarm"))
 
     def test_at_ss_22_new_reset_window_fires_again(self) -> None:
         """WHY（MU-11 閂鎖鍵漏 reset）：閂鎖作用域＝一個 reset 窗；新窗是新的額度週期。"""
@@ -462,7 +464,8 @@ class QuotaLatchTests(_Fence):
         """WHY（2026-11-19 00:48／00:54 主控真機）：端點 reset 落在 :59:59.99 一帶，取分鐘後在 03:59
         與 04:00 間跳；字串比對把同窗當新窗，重掛又 rc 5——閂鎖修了等於沒修。"""
         a, b = "2026-11-19T04:00:00+08:00", "2026-11-19T03:59:00+08:00"
-        self.assertEqual(self._two_rounds(("WAIT_RESET", a), ("WAIT_RESET", b)), ("quota", "keepwarm"))
+        self.assertEqual(self._two_rounds(("WAIT_RESET", a), ("WAIT_RESET", b)),
+                         ("quota", "keepwarm"))
         far = "2026-11-19T09:00:00+08:00"  # 反向：真的新窗（差數小時）仍要再觸發
         self.assertEqual(self._two_rounds(("WAIT_RESET", b), ("WAIT_RESET", far))[1], "quota")
 

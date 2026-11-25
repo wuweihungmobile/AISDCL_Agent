@@ -235,10 +235,12 @@ class TestSkipJudging(P4TestCase):
         self.assertIsNone(runner.ruling_json(O, run=lambda _a: (0, "{not json")))
 
     def test_AT_436_2_3c_quota_check_without_injected_read_is_fail_closed(self):
-        """sched 是 ro 類（不跑子行程）：沒注入取數＝跳過；注入的判決照判（取數住 exec 類 runner）。"""
+        """sched 是 ro 類（不跑子行程）：沒注入取數＝跳過；注入的判決照判（取數住 exec 類 runner）
+        。"""
         self.assertEqual(sched.quota_check(O), {"skip": True, "degrade": False})
         seen = []
-        self.assertEqual(sched.quota_check(O, read=lambda n: seen.append(n) or fx4.ruling_of("free")),
+        got = sched.quota_check(O, read=lambda n: seen.append(n) or fx4.ruling_of("free"))
+        self.assertEqual(got,
                          {"skip": False, "degrade": False})
         self.assertEqual(seen, [O])
     def test_AT_436_2_4_other_driver_by_conversation_record_not_mtime(self):

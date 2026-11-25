@@ -1010,7 +1010,8 @@ class QuotaLineActiveModelTest(unittest.TestCase):
         return _fake_quota_gate(read_quota=lambda now, path=None: _scoped_state())
 
     def test_active_model_reaches_decide(self) -> None:
-        """模型經 `sessionstart_brief` 交給判決快照注入縫（C10；判決在 `ruling_io`，本檔不 decide）。"""
+        """模型經 `sessionstart_brief` 交給判決快照注入縫（C10；判決在 `ruling_io`，本檔不 decide）
+        。"""
         seen: list[object] = []
 
         def _spy(sid, transcript, model, now):
@@ -1049,7 +1050,8 @@ class QuotaLineActiveModelTest(unittest.TestCase):
         self.assertEqual(_line(self._gate(), None), legacy)
 
     def test_an_unmeasured_line_carries_no_model_marker(self) -> None:
-        """快取量不到（`axes == ()`）時判決為降級續跑；舊版 `active_model=` 尾註不再出現（模型改在判決行
+        """快取量不到（`axes == ()`）時判決為降級續跑；
+        舊版 `active_model=` 尾註不再出現（模型改在判決行
         `mdl=` 欄，QVD §3.3）。"""
         stale = quota_policy.QuotaState((), "", "stale-cache", "stale-cache（測試）")
         got = _line(_fake_quota_gate(read_quota=lambda now, path=None: stale), "fable")

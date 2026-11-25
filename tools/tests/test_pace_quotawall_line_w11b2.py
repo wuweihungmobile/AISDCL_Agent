@@ -68,7 +68,8 @@ class TestPaceLineSeam(unittest.TestCase):
         self.assertEqual(hits, [])
 
     def test_planner_calls_pace_line_in_the_pace_branch(self) -> None:
-        """MU-QW-62 前半：`--pace` 分支必須呼叫 `qw_cli.pace_line`（缺席即紅）。QVD §9／C3（WP-QV）：
+        """MU-QW-62 前半：`--pace` 分支必須呼叫 `qw_cli.pace_line`（缺席即紅）。QVD §9／C3（WP-QV）
+        ：
         區塊整段抽到 `sessionctl/ruling_io.pace_block`（planner 只留委派），鎖跟著移到抽出處。"""
         src = PLANNER.read_text(encoding="utf-8")
         branch = src[src.index("    if args.pace:"):src.index("# 這三個模式不需要逐字稿")]

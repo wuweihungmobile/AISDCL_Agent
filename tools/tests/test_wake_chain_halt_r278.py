@@ -590,7 +590,8 @@ class HaltedBandLineTest(unittest.TestCase):
 
 
 class PaceReportShortCircuitsDuringHaltTest(unittest.TestCase):
-    """D23（SD-07；INV-H3）→ QVD §6（v2.1.28 R-4.1.6-6 取代）：halt 有效不再短路取數。原詳見 docs/06_quality/
+    """D23（SD-07；INV-H3）→ QVD §6（v2.1.28 R-4.1.6-6 取代）：halt 有效不再短路取數。
+    原詳見 docs/06_quality/
     CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
 
     def setUp(self) -> None:
@@ -648,7 +649,7 @@ class PaceReportSaysTheEscapeHatchesTest(unittest.TestCase):
         self.enterContext(unittest.mock.patch.object(qg, "quota_cache_path", lambda: cache))
         qg.write_halt_marker("sid-def561-halted", {"sid": "sid-def561-halted", "reset_at": later,
                                                    "at": self.now.isoformat(), "band": "halt",
-                                                   "binding": "seven_day"})  # QVD C3：halted 行只在 HALT_WEEKLY
+                                                   "binding": "seven_day"})  # QVD C3
 
     def test_both_return_paths_say_it_only_when_a_flag_is_set(self) -> None:
         for label, env, says in (("RESUME_OFF", {"AUTOSDD_RESUME_OFF": "1"}, "只探測"),

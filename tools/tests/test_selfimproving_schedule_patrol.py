@@ -191,7 +191,8 @@ class TestDueAndSkips(P4TestCase):
     """受測模組 tools/lib/selfimproving/patrol.py：到期判定、七種跳過的接線與每格至多一個運轉。"""
 
     def test_AT_436_2_E_0_patrol_real_quota_path_goes_through_ruling_json(self):
-        """QVD C18：巡邏器不注入 deps.quota 時經 `runner.ruling_json`（子行程取判決），附註值＝判決行。"""
+        """QVD C18：巡邏器不注入 deps.quota 時經 `runner.ruling_json`（子行程取判決），
+        附註值＝判決行。"""
         ctx = types.SimpleNamespace(now=O, deps=types.SimpleNamespace(quota=None))
         seen = []
 
@@ -783,7 +784,8 @@ class QuotaVerdictConsumptionTest(P4TestCase):
         self.assertFalse(evspec.band_note_ok("free"))
 
     def test_no_cross_package_import(self):
-        """AC-QV-09c：`tools/lib/selfimproving/` 不 import `sessionctl` 也不 import `quota_gate`（AST）。"""
+        """AC-QV-09c：
+        `tools/lib/selfimproving/` 不 import `sessionctl` 也不 import `quota_gate`（AST）。"""
         import ast  # noqa: PLC0415
 
         root = Path(sched.__file__).resolve().parent

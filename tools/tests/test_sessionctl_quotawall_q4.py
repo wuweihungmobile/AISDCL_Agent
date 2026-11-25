@@ -128,7 +128,8 @@ class PreToolWiringTest(_Base):
     def test_at_qw_83_block_text_and_boundaries(self) -> None:
         """QVD §3.5 C2（WP-QV 改寫；AT-QW-83／15／16／14／17、MU-QW-52 被取代）：額度牆的 PreToolUse
         擋派分支**退役**——判決第 3、4 列已涵蓋 stage close／wall／nodispatch，致動器只留派工閘 C1
-        （`quota_gate(rule=…)`，見 `test_sessionctl_qv.ConsumerTest`）。本接線對任何讀數、工具、模式、
+        （`quota_gate(rule=…)`，見 `test_sessionctl_qv.ConsumerTest`）。
+        本接線對任何讀數、工具、模式、
         逃生語一律不擋、不出「額度牆（PreToolUse）」字樣、不記 override。"""
         for r in (13, 12.5, 7.5):
             for tool in ("Agent", "Task", "Workflow", "Read"):
@@ -144,7 +145,8 @@ class PreToolWiringTest(_Base):
         self.assertNotIn("quotawall_override", self.events())
 
     def test_at_qw_17_convergence_gate_wins_with_one_line_summary(self) -> None:
-        """收斂閘照舊（與額度判決無關）：上下文達硬線 ⇒ rc 2「收斂閘」；額度牆摘要隨擋派分支退役。"""
+        """收斂閘照舊（與額度判決無關）：上下文達硬線 ⇒ rc 2「收斂閘」；額度牆摘要隨擋派分支退役。
+        """
         self.transcript = _write_transcript(self.tmp / f"{SID}.jsonl", HARD)
         rc, msg = self.verdict(99)
         self.assertEqual(rc, 2)

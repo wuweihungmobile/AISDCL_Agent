@@ -740,7 +740,7 @@ class TestWriterModulesDeclareTheModuleFence(unittest.TestCase):
                                    "test_sessionctl_watch.py",  # DEF-200-607：watch 預種額度快取
                                    "test_sched_isolation.py",  # R218-B：呼叫 planner.main，已接圍籬
                                    "test_sessionctl_watchlock.py",  # 已接模組級圍籬
-                                   "test_sessionctl_qv.py"},  # WP-QV：`pace_report` 寫配速契約，已接圍籬
+                                   "test_sessionctl_qv.py"},  # WP-QV：寫配速契約，已接圍籬
                          "偵測器認出的寫端不是已知十支（認不出＝分母 0 假綠；多認出＝先看是不是"
                          "誤判，真的新寫端接好圍籬後把檔名加進本集合）")
 

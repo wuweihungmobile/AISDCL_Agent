@@ -12920,7 +12920,8 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
         now = datetime.now(UTC).astimezone()
         sid = "sid-halted-pace"
         reset_at = (now + timedelta(days=2)).isoformat()
-        # QVD C3：halted 行只在判決 HALT_WEEKLY（同帳號週軸標記）時出現；短窗標記改判 WAIT_RESET／PARK。
+        # QVD C3：halted 行只在判決 HALT_WEEKLY（同帳號週軸標記）時出現；
+        # 短窗標記改判 WAIT_RESET／PARK。
         qg.write_halt_marker(sid, {"sid": sid, "reset_at": reset_at, "at": now.isoformat(),
                                    "band": "halt", "binding": "seven_day"})
         _quota_cache(self.tmp, 96.0)
