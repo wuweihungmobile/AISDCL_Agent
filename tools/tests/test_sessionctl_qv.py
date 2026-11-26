@@ -806,14 +806,38 @@ class QuotaCliE2ETest(_Fenced):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(body), encoding="utf-8")
 
-    def _cli(self, *argv) -> tuple[int, str]:
+    def _cli(self, *argv, extra_env: dict | None = None) -> tuple[int, str]:
+        """回 `(rc, stdout＋stderr)`；`--json` 的判決行只從 stdout 取（`self.stdout`）。
+        FLK4（DEF-200-657）：macOS 上 `gather` 經 `acctswitch.tick` 在 stderr 印「T① 缺席」
+        資訊行（QVD §7.1，設計如此），合併輸出的末行因此不是 JSON。"""
         import subprocess  # noqa: PLC0415
         env = {k: v for k, v in os.environ.items()
                if k not in ("AUTOSDD_UNATTENDED", "CLAUDE_CODE_SESSION_ID")}
+        env.update(extra_env or {})
         done = subprocess.run([sys.executable, str(_REPO_ROOT / "tools" / "sessionctl.py"),
                                "quota", *argv], capture_output=True, text=True, encoding="utf-8",
                               env=env, timeout=120, cwd=str(self.tmp))
+        self.stdout = done.stdout
         return done.returncode, done.stdout + done.stderr
+
+    def _json(self) -> dict:
+        return json.loads(self.stdout.strip().splitlines()[-1])
+
+    def test_json_verdict_survives_trailing_stderr(self):
+        """FLK4 回歸鎖（DEF-200-657）：子行程結束時 stderr 多印一行（模擬 macOS 的 T① 缺席
+        資訊行；以 sitecustomize 的 atexit 注入，三平台皆可重現）⇒ `--json` 判決仍可解析。"""
+        site = self.tmp / "flk4_site"
+        site.mkdir()
+        (site / "sitecustomize.py").write_text(
+            "import atexit, sys\n"
+            "atexit.register(lambda: sys.stderr.write('ℹ️ 換帳號觸發器 T① 在 macOS 缺席\\n'))\n",
+            encoding="utf-8")
+        pp = os.pathsep.join(p for p in (str(site), os.environ.get("PYTHONPATH", "")) if p)
+        self._cache([("five_hour", 30.0, 200), ("seven_day", 10.0, 9000)])
+        rc, out = self._cli("--json", extra_env={"PYTHONPATH": pp, "PYTHONIOENCODING": "utf-8"})
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(out.rstrip().endswith("macOS 缺席"), "注入的 stderr 尾行沒出現＝載具失效")
+        self.assertEqual(self._json()["billing"], "unknown")
 
     def test_e2e_ap_qv_01_time_shifted_replay(self):
         """E2E-AP-QV-01：平移到「reset＝now＋14 分」⇒ `WAIT_RESET acct=eaf5241f6fe2`；
@@ -833,7 +857,7 @@ class QuotaCliE2ETest(_Fenced):
         self._cache([("five_hour", 0.0, 300), ("session", 0.0, 300), ("seven_day", 16.0, 9000)])
         rc, out = self._cli("--json", "--sid", SID)
         self.assertEqual(rc, 0, out)
-        got = json.loads(out.strip().splitlines()[-1])
+        got = self._json()
         self.assertEqual((got["action"], got["acct"], got["deg"]), (QR.CONTINUE, self.NEW, None))
         self.assertNotIn("halted", out)
 
@@ -851,12 +875,12 @@ class QuotaCliE2ETest(_Fenced):
                 self._cache(axes, posture=posture)
                 rc, out = self._cli("--json")
                 self.assertEqual(rc, 0, out)
-                self.assertEqual(json.loads(out.strip().splitlines()[-1])["billing"], want)
+                self.assertEqual(self._json()["billing"], want)
         quota_gate.quota_cache_path().unlink()
         before = datetime.now().astimezone()
         rc, out = self._cli("--json")
         self.assertEqual(rc, 0, out)
-        got = json.loads(out.strip().splitlines()[-1])
+        got = self._json()
         self.assertEqual((got["action"], got["deg"]), (QR.CONTINUE, QR.DEG_UNMEASURED), out)
         self.assertTrue(1 <= got["cap"] <= POLICY.cap_prepare, got)
         self.assertGreater(datetime.fromisoformat(got["expires_at"]), before)
@@ -1373,16 +1397,24 @@ class AcctSwitchTest(_Fenced):
         self.assertTrue(parkprobe.account_changed({"parked_account": OLD}, NEW))
 
     def test_trigger_credentials_file(self):
-        """AC-AC-03a：憑證檔 (mtime,size) 變 ⇒ T1；不變 ⇒ 不觸發；macOS ⇒ T① 缺席並出聲。"""
+        """AC-AC-03a：憑證檔 (mtime,size) 變 ⇒ T1；不變 ⇒ 不觸發；macOS ⇒ T① 缺席並出聲。
+
+        FLK4（DEF-200-657）：T① 分支一律顯式帶 `platform`——不帶時跟著宿主 `sys.platform`，
+        macOS runner 上走 QVD §7.1 的「T① 缺席」分支（設計如此），本測試曾因此在 mac 紅。
+        宿主平台以 mock 釘成 darwin：三平台跑的都是同一條路徑（顯式參數覆蓋宿主），
+        宿主預設落 darwin 缺席分支另列一條斷言。"""
         cred = self.tmp / "claude" / ".credentials.json"
         cred.parent.mkdir(parents=True, exist_ok=True)
         cred.write_text('{"a": 1}', encoding="utf-8")
-        self.assertEqual(acctswitch.tick("", None)[1], [], "首見只記基準")
-        self.assertEqual(acctswitch.tick("", None)[1], [])
-        cred.write_text('{"a": 12345}', encoding="utf-8")
-        pending, fired = acctswitch.tick("", None)
-        self.assertEqual(fired, ["T1"])
-        self.assertIsNotNone(pending)
+        with mock.patch.object(acctswitch.sys, "platform", "darwin"):
+            self.assertEqual(acctswitch.tick("", None, platform="linux")[1], [], "首見只記基準")
+            self.assertEqual(acctswitch.tick("", None, platform="win32")[1], [])
+            cred.write_text('{"a": 12345}', encoding="utf-8")
+            pending, fired = acctswitch.tick("", None, platform="linux")
+            self.assertEqual(fired, ["T1"])
+            self.assertIsNotNone(pending)
+            cred.write_text('{"a": 1234567}', encoding="utf-8")
+            self.assertEqual(acctswitch.tick("", None)[1], [], "宿主 darwin 預設應走 T① 缺席")
         self.assertEqual(acctswitch.tick("", None, platform="darwin")[1], [])
         acctswitch.tick("", None, platform="darwin")
         self.assertEqual(self.err.getvalue().count("macOS 缺席"), 1)

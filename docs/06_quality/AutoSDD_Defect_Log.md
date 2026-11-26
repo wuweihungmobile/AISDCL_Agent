@@ -158,6 +158,7 @@
 | DEF-200-654 | 2026-11-26 | 整檔直跑 `test_context_budget_guard` 兩支 `_run_resume` 類紅、單跑綠（本欄刻意零輪號） | **FRESH 選路產交接包時以真憑證補量並跑真排程查詢，真週軸讀數污染模組共用快取** | P3 | 模組圍籬罩住交接包兩縫＋兩類宣告專屬空快取 | fixed：FLK2；`test_context_budget_guard.py` |
 | DEF-200-655 | 2026-11-26 | 換帳號後舊帳號 halt 標記仍生效，唯一判決誤判 `HALT_WEEKLY` cap=0、派工全擋（本欄刻意零輪號；證據＝主控 11:39 實發、`~/.autosdd/traces/halt_<sid>.json.stale-oldacct-20261124`，無帳號欄） | **halt／rush／保溫帳標記與額度快取不綁 account_key，換帳號無作廢程序** | P2 | 標記寫入帶 account；三觸發（憑證時刻／逐字稿 `/login`／標頭指紋）作廢舊標記並補量；無帳號舊標記依 R-4.1.7-5 | fixed：WP-AC；`test_sessionctl_qv.py::AcctSwitchTest` |
 | DEF-200-656 | 2026-11-26 | windows-compat-ci 分片 3/3 的 E2E-AP-QV-10 報 `red.stderr` 為 None（本欄刻意零輪號） | **子行程 stderr 依 locale 碼頁寫中文、父端以 utf-8 解碼**：CI 無 PYTHONUTF8，Windows 讀取執行緒解碼失敗即丟掉整段輸出 | P3 | 子行程環境強制 PYTHONUTF8＋PYTHONIOENCODING（後者優先序較高），父端補 `errors="replace"` | fixed：FLK3；`test_sessionctl_qv.py` |
+| DEF-200-657 | 2026-11-26 | macos-compat-ci 兩紅：`test_trigger_credentials_file` 的 `[] != ['T1']`、E2E-AP-QV-07（billing＝unknown）末行非 JSON（本欄刻意零輪號） | **測試假設宿主平台**：產品在 macOS 依 QVD §7.1 走「T① 缺席」並在 stderr 印一次資訊行（設計如此）；測試一支跟著宿主 `sys.platform`、一支從 stdout＋stderr 合併輸出取末行 | P3 | T① 分支顯式帶 `platform`、宿主以 mock 釘 darwin；`--json` 判決只從 stdout 取，另以 atexit 注入 stderr 尾行的回歸鎖三平台重現 | fixed：FLK4；`test_sessionctl_qv.py` |
 
 > **R41「四方複審裁決總結」敘事段落已搬遷至 [`AutoSDD_Defect_Log_archive_17.md`](AutoSDD_Defect_Log_archive_17.md)（R43 帳本 housekeeping，逐字保全）。**
 

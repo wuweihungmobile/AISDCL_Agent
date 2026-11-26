@@ -69,3 +69,11 @@
 - **重現**：同一台開發機移除這兩個變數後單跑該類 ⇒ 讀取執行緒印 `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa1`，測試以與 CI 逐字相同的 `TypeError` 失敗。
 - **修法（消除成因）**：子行程環境改由 `_utf8_child_env` 產生：清空 `PYTHONPATH`（原本的沙盒密閉）並強制 `PYTHONUTF8=1`＋`PYTHONIOENCODING=utf-8`。兩個都要：`PYTHONIOENCODING` 優先序高於 UTF-8 模式，只設 `PYTHONUTF8` 擋不住繼承來的值（探針：父環境 `PYTHONIOENCODING=cp950`、只補 `PYTHONUTF8=1` ⇒ 仍得 `None`；用 helper ⇒ 得原字串）。父端補 `errors="replace"`（倉庫慣例），解碼不一致時不再整段丟失。
 - **回歸鎖**：`test_child_env_forces_utf8_even_under_a_locale_encoded_parent`：父環境刻意拔掉 `PYTHONUTF8`、設 `PYTHONIOENCODING=cp950`，子行程寫中文到 stderr，父端以 utf-8 解碼（不帶 `errors`）必須逐字取回。紅綠自證見上一條探針；修後在無 UTF-8 模式的環境單跑該類兩案皆綠，E2E 的 `rc≠0` 斷言照常成立。
+
+## I 項：DEF-200-657 macos-compat-ci 兩支 macOS 專屬紅（FLK4）
+
+- **症狀**：GitHub macos-compat-ci run 45789188660（commit `96ff7665`）兩紅：`AcctSwitchTest.test_trigger_credentials_file` 的 `[] != ['T1']`；`QuotaCliE2ETest.test_e2e_ap_qv_07_billing_and_unmeasured`（billing＝unknown 子案）`json.loads` 得 `JSONDecodeError … char 0`。Windows／ubuntu 皆綠。
+- **成因（皆為測試假設宿主平台；產品照 QVD §7.1 正確）**：`acctswitch.tick` 的 `platform` 預設取 `sys.platform`，macOS 依 QVD 表列「T① 在 macOS 缺席（憑證在 Keychain）」走缺席分支，並在 stderr 印一次資訊行（閂鎖 `t1_absent_said`）。①T① 測試未帶 `platform`，mac 上走缺席分支 ⇒ 不觸發；②E2E 的 `_cli` 回傳 stdout＋stderr 合併字串、取末行解析 JSON，mac 上 `quota` 經 `gather`→`tick` 把資訊行印在 stderr 尾端 ⇒ 末行非 JSON；閂鎖只響第一次，所以三子案只紅第一個（billing＝unknown），與 CI 逐字相符。
+- **重現**：舊版測試在 Windows 以 `mock.patch.object(sys, "platform", "darwin")` 單跑 T① 測試 ⇒ `+ ['T1']` 同形紅；E2E 以 sitecustomize 的 atexit 在子行程 stderr 尾端注入一行、照舊合併解析 ⇒ `JSONDecodeError: Expecting value: line 1 column 1 (char 0)` 同形紅。
+- **修法（測試密閉，不 skip、不改產品）**：T① 案在宿主平台以 mock 釘成 darwin 的前提下顯式帶 `platform="linux"／"win32"`，另加一條「宿主 darwin、不帶參數 ⇒ 缺席」斷言；E2E `_cli` 記下 `self.stdout`，判決 JSON 一律經 `_json()` 只從 stdout 取，失敗訊息仍用合併輸出。
+- **回歸鎖**：`test_json_verdict_survives_trailing_stderr`（atexit 注入 stderr 尾行，三平台都能重現 mac 形態；先斷言注入確實出現，載具失效即紅）。紅綠自證：把 `_cli` 改回以合併輸出當判決來源 ⇒ 該案紅、還原綠；舊 T① 案在 mock darwin 下紅、新案在 mock darwin 與原生平台皆綠。
