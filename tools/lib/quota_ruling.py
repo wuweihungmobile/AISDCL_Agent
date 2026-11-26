@@ -139,6 +139,38 @@ def _marker_rows(markers, acct, now: datetime) -> tuple[list, list]:
     return weekly, short
 
 
+KEEP, VOID, BACKFILL = "keep", "void", "backfill"
+
+
+def marker_disposition(marker, acct, state, policy, now: datetime) -> str:
+    """QVD §7.2（PRD R-4.1.7-3～5）：持久標記對上**這一次量到**的帳號 ⇒ `keep｜void｜backfill`。
+
+    · 標記帶帳號：帳號量到且不同 ⇒ `void`；相同或帳號量不到 ⇒ `keep`（權威判定只看伺服器回應標頭
+      的指紋，量不到不判，R-4.1.7-3）。
+    · 標記不帶帳號（舊格式或寫入時量不到）：讀數不可用 ⇒ `keep`（補量失敗不作廢）；綁定軸讀數低於
+      標記門檻（`band` 對應的 `<band>_pct`，缺＝halt）且標記的 reset 仍在未來 ⇒ `void`（標記說「還
+      在撞線」而本帳號讀數說沒有＝標記不屬於本帳號）；否則帳號量到 ⇒ `backfill`、量不到 ⇒ `keep`。
+      reset 已過的低讀數由 reset 本身解釋（交 `halt_verdict` 既有的到點路徑），不作廢。
+    門檻比較只住本檔（單一判讀家，QVD §3.5.3）。純函式。"""
+    if not isinstance(marker, dict):
+        return KEEP
+    owner = marker.get("account")
+    if owner:
+        return VOID if acct and owner != acct else KEEP
+    kind = str(marker.get("binding") or "")
+    usable = bool(getattr(state, "axes", ())) and state.usable()
+    reads = [a.pct for a in getattr(state, "axes", ()) if a.kind == kind] if usable else []
+    reset = _aware(marker.get("reset_at"))
+    if not reads or reset is None or reset <= now:
+        return BACKFILL if acct and reads else KEEP
+    band = str(marker.get("band") or "halt")
+    limit = getattr(policy, f"{band}_pct", None)
+    limit = policy.halt_pct if not isinstance(limit, (int, float)) else limit
+    if max(reads) < limit:
+        return VOID
+    return BACKFILL if acct else KEEP
+
+
 def _retry_seconds(raw, now: datetime) -> float:
     if raw in (None, ""):
         return 0.0
@@ -313,4 +345,5 @@ def billing_from_posture(posture) -> str:
 
 __all__ = ["Ruling", "ruling", "line", "head", "parse", "expired", "as_json", "brief_line",
            "billing_from_posture", "classify", "wait_reset_min", "ACTIONS", "CONTINUE",
-           "NODISPATCH", "WAIT_RESET", "PARK", "HALT_WEEKLY", "PREFIX", "NO_CARRIER_NOTE"]
+           "NODISPATCH", "WAIT_RESET", "PARK", "HALT_WEEKLY", "PREFIX", "NO_CARRIER_NOTE",
+           "marker_disposition", "KEEP", "VOID", "BACKFILL"]

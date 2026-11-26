@@ -50,6 +50,23 @@ def halt_marker_probe_path(sid: str) -> Path:
     return root / f"halt_{sid}.json"
 
 
+def cache_account() -> str | None:
+    """額度快取最近一次量到的帳號指紋（`account_key`；PRD R-4.1.7-1 寫入端用）。只讀身分欄、不判新鮮度
+    （指紋是「最近一次伺服器回應的帳號」，不是讀數）；讀不到／缺鍵 ⇒ `None`。"""
+    try:
+        import quota_meter  # noqa: PLC0415 — 快取路徑 SSOT 在 meter（同 `quota_gate.quota_cache_path`）
+
+        key = json.loads(quota_meter.cache_path().read_text(encoding="utf-8")).get("account_key")
+    except Exception:  # noqa: BLE001 — 量不到＝None（呼叫端寫 null 並出聲）
+        return None
+    return key if isinstance(key, str) and key else None
+
+
+def unmeasured_account_note(what: str) -> str:
+    """R-4.1.7-1「量不到寫空值並出聲」的唯一文案。"""
+    return f"ℹ️ {what}帳號指紋量不到 ⇒ 寫入 account=null（下一次量到帳號時依 R-4.1.7-5 判歸屬）\n"
+
+
 def _aware(raw):
     import quota_messages  # noqa: PLC0415 — lazy：quota_messages 反向 re-export 本檔
 
@@ -150,8 +167,10 @@ HALT_MARKER_MAX_CLOCK_SKEW_SECONDS = 600
 
 def halt_marker_or_rejection(sid: str, decision: object, now: datetime,
                              transcript: object, source: str,
-                             real_now: datetime | None = None) -> tuple[dict | None, str | None]:
-    """回 `(標記, None)`＝可以落盤，或 `(None, 拒寫理由)`。
+                             real_now: datetime | None = None,
+                             account: str | None = None) -> tuple[dict | None, str | None]:
+    """回 `(標記, None)`＝可以落盤，或 `(None, 拒寫理由)`。`account`＝取數當下的帳號指紋（QVD §7.3；
+    `None` 寫 `null`，呼叫端出聲）。
 
     `real_now` 給測試注入；production 呼叫端不傳，落回真牆鐘——自檢不能拿被檢查的
     同一個 `now` 當基準，否則凍結的 `now` 會通過「自己與自己一致」的假陽性檢查。
@@ -177,4 +196,4 @@ def halt_marker_or_rejection(sid: str, decision: object, now: datetime,
             "binding": decision.binding.kind if decision.binding is not None else "",
             "reset_at": str(resets_at or ""), "at": now.isoformat(),
             "transcript": str(transcript) if transcript else "",
-            "resolved_source": source}, None
+            "resolved_source": source, "account": account or None}, None

@@ -97,6 +97,7 @@ import pace_contract  # noqa: E402,F401  # R86 配速契約寫入端（ruling_io
 import quota_availability  # noqa: E402  # R102／PRD §4.2.4(a)：可得性軸遲滯（內部已 fail-soft）  round-label-ok
 import quota_burndown  # noqa: E402  # DEF-200-528：清倉授權疊層（操作者落款；只改逐軸輸入）
 import quota_env_layers  # noqa: E402  # 檔案層載入鏈（env.shared → .env）的 SSOT
+import quota_halt_marker  # noqa: E402  # QVD §7.3：halt 標記帳號量不到的出聲文案
 import quota_messages  # noqa: E402  # DEF-200-435：新 helper 走模組屬性（from-import 每名佔一行，tier 餘裕僅 1 行）
 import quota_pace  # noqa: E402  # R86：窗長／燃燒率／跨窗攤提（同樣是判讀原語）
 import quota_pace_floor  # noqa: E402,F401  # ADR-XPLAT-004 §2.15：配速床說明行（純函式）
@@ -816,8 +817,8 @@ def resolve_halt_transcript(payload: dict) -> tuple[Path | None, str]:
 
 # halt 標記的路徑／寫／讀三支住 `quota_halt_marker`（為配速床接線騰 hub 餘裕而抽出；re-export）。
 def quota_halt_actions(payload: dict, decision: quota_policy.Decision, now: datetime, *,
-                       plan_writer, waker) -> dict:
-    """halt 閂鎖那一刻真的做的事。回稽核欄位（給訊息與測試讀）。
+                       plan_writer, waker, account: str | None = None) -> dict:
+    """halt 閂鎖那一刻真的做的事。回稽核欄位（給訊息與測試讀）。`account`＝取數帳號指紋（QVD §7.3）。
 
     `plan_writer(transcript) -> str` 與 `waker(transcript, plan) -> dict` 都由 hook 端
     注入：spawn 與平台判斷（`os.name`／哨兵逃生口）是 hook 行程的事，本檔只讀它們的回報。
@@ -845,9 +846,11 @@ def quota_halt_actions(payload: dict, decision: quota_policy.Decision, now: date
     # DEF-200-281／F-1：落盤前先過 `halt_marker_or_rejection()` 自檢——拒寫勝過落一份
     # 看起來合法、實則讓 `halt_verdict()` 永遠判過期的標記（本次事故的直接成因）。
     sid = transcript.stem if transcript else "unknown"
-    marker, rejected = halt_marker_or_rejection(sid, decision, now, transcript, source)
+    marker, rejected = halt_marker_or_rejection(sid, decision, now, transcript, source,
+                                                account=account)
     if marker is not None:
         write_halt_marker(sid, marker)
+        sys.stderr.write("" if account else quota_halt_marker.unmeasured_account_note("halt 標記"))
     else:
         sys.stderr.write(f"🔴 halt 標記拒寫（DEF-200-281）：{rejected}\n")
     # DEF-200-200 ③：`now` 帶進稽核欄，讓 `quota_halt_message()` 判得出「這個 reset 其實
@@ -1066,7 +1069,8 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
         # DEF-200-435：副作用拋例外不得帶走煞車與提醒（`halt_actions_guarded()` 的 docstring）；
         # 閂鎖刻意仍先寫——改成動作成功後才寫會讓平行的 hook 行程各自重跑一輪副作用。
         act = first and quota_messages.halt_actions_guarded(
-            quota_halt_actions, payload, decision, now, plan_writer=plan_writer, waker=waker)
+            quota_halt_actions, payload, decision, now, plan_writer=plan_writer, waker=waker,
+            account=state.account_key)  # QVD §7.3：標記綁帳號
         # 🔴 DEF-200-435：halt 帶只有 PreToolUse×扇出邊緣是「真的擋下」（rc=2，首則／重複兩版都
         # 如實說這次呼叫沒有執行）。PostToolUse 的工具早已跑完、沒有東西可擋，以前照樣 rc=2
         # ⇒ CC 把每一次 Read／PowerShell 標成 hook error，人與模型都讀成「工具被擋、不能用」。

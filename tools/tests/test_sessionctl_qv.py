@@ -1058,6 +1058,8 @@ RULING_INPUT_SITES: dict[tuple[str, str, str], tuple[str, str]] = {
     (_RI, "compose", "plan"): ("ruling", _RULING),
     (_RI, "compose", "read_halt_marker"): ("ruling", _RULING),
     (_RI, "gather", "pace_state"): ("ruling", _RULING),
+    (_RI, "gather", "refresh_quota_blocking"): ("ruling", "換帳號觸發後 TTL 名額內補量（QVD §7.1）"),
+    (_RI, "gather", "settled_quota"): ("ruling", "同上：補量後等贏家重讀（QVD §7.1）"),
     (_RI, "cached", "read_quota"): ("ruling", "只讀快取的判決（C10 簡報、手動排程時刻；零網路）"),
     (_RI, "pace_report", "decide"): ("ruling", "引擎配速契約（pace 尺；診斷段，判斷看首行）"),
     (_RI, "pace_report", "read_halt_marker"): ("ruling", "halted 行（只在 HALT_WEEKLY 同帳號）"),

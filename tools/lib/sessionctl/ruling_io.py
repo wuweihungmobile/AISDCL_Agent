@@ -19,7 +19,7 @@ import quota_gate as qg
 import quota_policy
 import quota_ruling as QR
 
-from . import keepwarm, qw_calc, qw_plan, roster, switch
+from . import acctswitch, keepwarm, qw_calc, qw_plan, roster, switch
 
 USAGE_RC = 2
 
@@ -66,8 +66,12 @@ def compose(state, decision, now: datetime, *, sid: str = "", transcript=None, e
     if plan is None:
         plan = qw_plan.plan(sid or "", transcript, env, now, read_quota=lambda _n: state,
                             refresh=lambda _n: state, **(plan_seams or {}))
+    # QVD §7.2：先以本次讀數的帳號指紋作廢不屬於本帳號的標記，再把剩下的當判決輸入。
+    voided = acctswitch.reconcile(sid, state, policy, now,
+                                  halt_marker=qg.read_halt_marker(sid) if sid else None)
     markers = [m for m in (qg.read_halt_marker(sid),) if m] if sid else []
     r = QR.ruling(state, decision, model=model, policy=policy, now=now, markers=markers,
+                  voided=voided,
                   plan=plan, next_est=next_est, wait_min=QR.wait_reset_min(env),
                   ttl=qg.QUOTA_CACHE_TTL_SECONDS,
                   billing=QR.billing_from_posture(_posture(qg.quota_cache_path())),
@@ -82,7 +86,11 @@ def gather(sid: str = "", transcript=None, *, env=None, now: datetime | None = N
     量不到且有 payload ⇒ L3 地板。halt 標記**不**壓住補量。"""
     env = qg.policy_env() if env is None else env
     now = now or datetime.now().astimezone()
+    pending = acctswitch.tick(sid, transcript, now)[0]  # QVD §7.1 T①T②：只負責「該重量了」
     state = qg.pace_state(now)
+    if acctswitch.needs_remeasure(state, pending) and (won := qg.claim_refresh_slot()):
+        qg.refresh_quota_blocking(event=event)  # 讀數早於換帳號事件：TTL 名額內補量一次（紅線 1）
+        state = qg.settled_quota(won)
     if not state.usable() and payload:
         state = qg.quota_floor_reading(payload, now) or state
     decision = qg.dispatch_decision(state, now, env, model, event, peek=True)
@@ -132,6 +140,21 @@ def rule_from_decision(state, decision, now: datetime, payload: dict, model=None
     transcript = Path(raw) if isinstance(raw, str) and raw.strip() else None
     sid = transcript.stem if transcript is not None else str(payload.get("session_id") or "")
     return compose(state, decision, now, sid=sid, transcript=transcript, model=model).ruling
+
+
+def account_tick(payload: dict, now: datetime | None = None) -> int:
+    """PostToolUse 的一行呼叫（QVD §7.1 T①T② 檢查站點）：本次新成立觸發器 ⇒ 走 `gather` 補量＋作廢，
+    回作廢數；沒有新觸發 ⇒ 0（不取數、零網路）。例外一律吞掉（hook 熱路徑 fail-open）。"""
+    try:
+        raw = payload.get("transcript_path") if isinstance(payload, dict) else None
+        transcript = Path(raw) if isinstance(raw, str) and raw.strip() else None
+        sid = transcript.stem if transcript is not None else ""
+        now = now or datetime.now().astimezone()
+        if not acctswitch.tick(sid, transcript, now)[1]:
+            return 0
+        return gather(sid, transcript, now=now).ruling.voided
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 #: 哨兵維持撞線等待的判決動作（QVD §3.5 C11；無人窗口的 WAIT_RESET 交哨兵，§3.6）。
@@ -291,4 +314,5 @@ def cli(argv: list[str], env=None, *, now: datetime | None = None, out=None) -> 
 
 
 __all__ = ["Snapshot", "gather", "cached", "compose", "rule_from_decision", "fresh_or_recompute",
+           "account_tick",
            "pace_report", "pace_block", "cli", "default_next_est", "USAGE_RC"]

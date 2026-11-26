@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import endurance_env
+import quota_halt_marker
 import quota_limits
 import transcript_activity
 
@@ -100,11 +101,22 @@ def read_ledger(sid: str) -> dict:
     return empty
 
 
+def _other_account(sid: str) -> bool:
+    """QVD §7.2（R-4.1.7-1）：帳上記的帳號與額度快取當下的帳號皆量到且不同 ⇒ 舊帳號的保溫進度不
+    沿用（鍵帶 acct，不同帳號不命中；下次寫入時以新帳號覆寫）。任一量不到＝不判。"""
+    try:
+        old = json.loads(ledger_path(sid).read_text(encoding="utf-8")).get("acct")
+    except (OSError, ValueError, AttributeError):
+        return False
+    now = quota_halt_marker.cache_account()
+    return bool(old and now and old != now)
+
+
 def load_ledger(sid: str, transcript) -> dict:
     """讀帳並套用歸零：帳上已有 ping 且（最後真人提示標記變了 ∨ 真工作標記變了）⇒ pings 歸零、
     `last_ping_*` 清空。"""
     row = read_ledger(sid)
-    if row["pings"] > 0 and (human_mark(transcript) != row["human"]
+    if row["pings"] > 0 and (human_mark(transcript) != row["human"] or _other_account(sid)
                              or work_mark(transcript) != row["work"]):
         row.update(pings=0, last=None, last_n=None, last_reset=None)
     return row
@@ -118,7 +130,8 @@ def record_ping(sid: str, pings: int, ctx: int, star: int, mark: str, *, work: s
     pct, at, n_live = (tuple(last) + (None,))[:3] if last else (None, None, None)
     row = {"schema": SCHEMA, "sid": sid, "pings": pings, "n_star": star, "ctx": ctx, "human": mark,
            _WORK: work, **qw_schema.ledger_extra(pct, at, costs, n_live),
-           _LAST_RESET: last_reset if last else None}
+           _LAST_RESET: last_reset if last else None,
+           "acct": quota_halt_marker.cache_account()}  # QVD §7.2：保溫帳綁帳號（量不到＝null）
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(row, ensure_ascii=False), encoding="utf-8", newline="\n")

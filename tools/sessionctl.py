@@ -102,6 +102,9 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stdout.write("\n".join(qw_cli.status_lines(sid)) + "\n")
             sys.stdout.write(oldwin_sched.status_text())  # R217：舊窗重試排程與「只提醒」列
             sys.stdout.write(rv_orphans.status_line() + "\n")  # 真機驗證租約帳孤兒（只讀）
+            from lib.sessionctl import acctswitch  # R-4.1.7-6：帳號指紋（只讀快取身分欄）
+
+            sys.stdout.write(acctswitch.status_line() + "\n")
         return rc
     if verb == "switch-plan":  # W5（DES §7、REQ-CTL-30）：換手決策表的唯讀重現（零 token）
         from lib.sessionctl import statuscmd
