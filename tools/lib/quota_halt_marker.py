@@ -51,12 +51,13 @@ def halt_marker_probe_path(sid: str) -> Path:
 
 
 def cache_account() -> str | None:
-    """額度快取最近一次量到的帳號指紋（`account_key`；PRD R-4.1.7-1 寫入端用）。只讀身分欄、不判新鮮度
+    """額度快取最近一次量到的帳號指紋（`account_key`；R-4.1.7-1 寫入端用）。只讀身分欄、不判新鮮度
     （指紋是「最近一次伺服器回應的帳號」，不是讀數）；讀不到／缺鍵 ⇒ `None`。"""
     try:
-        import quota_meter  # noqa: PLC0415 — 快取路徑 SSOT 在 meter（同 `quota_gate.quota_cache_path`）
+        import quota_gate  # noqa: PLC0415 — 讀者側快取路徑單一家（lazy：quota_gate re-export 本檔）
 
-        key = json.loads(quota_meter.cache_path().read_text(encoding="utf-8")).get("account_key")
+        path = quota_gate.quota_cache_path()
+        key = json.loads(path.read_text(encoding="utf-8")).get("account_key")
     except Exception:  # noqa: BLE001 — 量不到＝None（呼叫端寫 null 並出聲）
         return None
     return key if isinstance(key, str) and key else None

@@ -19,7 +19,7 @@ import os
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -1193,6 +1193,321 @@ class SingleHouseTest(unittest.TestCase):
         pairs = {f"{k[0]}::{k[1]}" for k, v in RULING_INPUT_SITES.items() if v[0] != "ruling"}
         self.assertEqual(pairs, set(QVD_EXPECTED))
         self.assertTrue(all(why.strip() for why in PENDING_REWIRE.values()))
+
+
+# ───────────────────────────────────────────── REQ-AP-AC-01～04（換帳號；QVD §7）
+import quota_rush  # noqa: E402
+
+from lib.sessionctl import acctswitch, kw_ledger  # noqa: E402
+
+OLD, NEW = "34cd3507237f", "eaf5241f6fe2"
+REAL_SID = "406454ea-91fc-4481-9c11-b28ed7d9e95f"
+#: 真 halt 標記（`~/.autosdd/traces/halt_406454ea-….json`，11-24 21:32:50 寫、無帳號欄）逐字，
+#: 只把 `transcript` 的使用者路徑換成佔位（其餘鍵值逐位元組相同）。
+REAL_MARKER = {"sid": REAL_SID, "band": "halt", "binding": "seven_day",
+               "reset_at": "2026-11-27T22:00:00.232640+00:00",
+               "at": "2026-11-24T21:32:50.264007+08:00",
+               "transcript": "<projects>/406454ea-91fc-4481-9c11-b28ed7d9e95f.jsonl",
+               "resolved_source": "payload"}
+#: 真逐字稿 406454ea L174 的 `/login` 記錄逐字（11-24 21:36:47 +08）。
+LOGIN_LINE = (
+    '{"parentUuid":"4cfcdede-13d4-43c5-b3b4-665f5dde566e","isSidechain":false,"type":"user",'
+    '"message":{"role":"user","content":"<command-name>/login</command-name>\\n'
+    '            <command-message>login</command-message>\\n'
+    '            <command-args></command-args>"},'
+    '"uuid":"8fb05779-45a7-49b5-9471-877c0e5cce14","timestamp":"2026-11-24T13:36:47.427Z",'
+    '"rowSource":"local","userType":"external","entrypoint":"cli",'
+    '"cwd":"D:\\\\CursorProject\\\\AISDCL_Agent",'
+    '"sessionId":"406454ea-91fc-4481-9c11-b28ed7d9e95f","version":"2.1.331",'
+    '"gitBranch":"main","dataFlowOn":true}')
+#: 引用 `/login` 字面但不是指令記錄（助理文字）——不得觸發。
+QUOTED_LINE = json.dumps({"type": "assistant", "message": {"content": [
+    {"type": "text", "text": "見 <command-name>/login</command-name> 記錄"}]}})
+#: 真讀數錄製（`quota_burn.jsonl` 2026-11-26T11:39:10+08 的新帳號列：five_hour 20、seven_day 79）。
+REC_NOW = datetime(2026, 11, 26, 11, 39, 10, tzinfo=TPE)
+REC_AXES = (("five_hour", 20.0, "2026-11-26T07:19:59.655264+00:00"),
+            ("seven_day", 79.0, "2026-12-01T10:59:59.655288+00:00"))
+
+
+def _week_state(pct, acct=NEW, now=NOW):
+    return _state(_axis("five_hour", 10, 120, now=now), _axis("seven_day", pct, 4 * 1440, now=now),
+                  acct=acct, now=now)
+
+
+class AcctSwitchTest(_Fenced):
+    """REQ-AP-AC-01～04（TCS §2.2 AC-AC-*）：標記綁帳號、作廢、觸發器、呈現。"""
+
+    def setUp(self):
+        super().setUp()
+        self.traces = self.tmp / "traces"
+        self.traces.mkdir(parents=True, exist_ok=True)
+        self.cache = self.tmp / "autosdd_quota.json"
+        self.enterContext(mock.patch.object(quota_gate, "quota_cache_path", lambda: self.cache))
+        self.err = self.enterContext(mock.patch("sys.stderr", new_callable=__import__("io").StringIO))
+
+    def _write_cache(self, acct, axes, measured):
+        self.cache.write_text(json.dumps({
+            "schema": quota_gate.quota_schema(), "source": "endpoint", "measured_at": _iso(measured),
+            "account_key": acct,
+            "axes": [{"kind": k, "pct": p, "resets_at": r} for k, p, r in axes]}),
+            encoding="utf-8")
+
+    def _marker(self, sid=SID, **over):
+        data = {**REAL_MARKER, "sid": sid, **over}
+        quota_gate.write_halt_marker(sid, data)
+        return quota_gate.halt_marker_path(sid)
+
+    def _rule(self, state, now=NOW, sid=SID):
+        return ruling_io.current(sid, None, {}, now, read_quota=lambda _n: state).ruling
+
+    def _events(self, name="account_switch"):
+        path = self.traces / "autosdd_session_switch.jsonl"
+        rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()] \
+            if path.is_file() else []
+        return [r for r in rows if r.get("event") == name]
+
+    def _voids(self, stem):
+        return sorted(p.name for p in self.traces.glob(f"{stem}.void-*"))
+
+    def test_writes_carry_account(self):
+        """AC-AC-01a：halt 標記、趕工戳記、保溫帳新寫入帶 account；量不到 ⇒ null＋出聲。"""
+        now = datetime.now().astimezone()
+        state = _state(_axis("seven_day", 100, 3 * 1440, now=now), now=now)
+        dec = quota_policy.decide(state, now, POLICY)
+        got, _ = quota_gate.halt_marker_or_rejection(SID, dec, now, None, "payload", account=NEW)
+        self.assertEqual(got["account"], NEW)
+        got, _ = quota_gate.halt_marker_or_rejection(SID, dec, now, None, "payload")
+        self.assertIn("account", got)
+        self.assertIsNone(got["account"])
+        quota_gate.quota_halt_actions({}, dec, now, plan_writer=lambda _t: "",
+                                      waker=lambda *_a: {}, account=None)
+        self.assertIn("account=null", self.err.getvalue(), "halt 標記量不到帳號沒出聲")
+        rc, msg = quota_rush.issue(1, "換帳號驗收用的趕工戳記", sid=SID, now=now, env={},
+                                   account=None)
+        self.assertEqual(rc, 0)
+        self.assertIn("account=null", msg)
+        self.assertIsNone(json.loads(quota_rush.stamp_path().read_text("utf-8"))["account"])
+        self._write_cache(NEW, [("five_hour", 5.0, _iso(now + timedelta(hours=2)))], now)
+        quota_rush.issue(1, "換帳號驗收用的趕工戳記", sid=SID, now=now, env={})
+        self.assertEqual(json.loads(quota_rush.stamp_path().read_text("utf-8"))["account"], NEW)
+        kw_ledger.record_ping(SID, 1, 1000, 9, "")
+        row = json.loads(kw_ledger.ledger_path(SID).read_text(encoding="utf-8"))
+        self.assertEqual(row["acct"], NEW)
+
+    def test_mismatch_voids_marker(self):
+        """AC-AC-02a：標記 OLD、讀數 NEW ⇒ 改名 .void-<ts>、account_switch 一列、出聲一次、不印 halted。"""
+        path = self._marker(account=OLD)
+        r = self._rule(_week_state(96))
+        self.assertNotEqual(r.action, QR.HALT_WEEKLY)
+        self.assertEqual(r.voided, 1)
+        self.assertFalse(path.exists())
+        self.assertEqual(len(self._voids(path.stem)), 1)
+        rows = self._events()
+        self.assertEqual([(x["old"], x["new"]) for x in rows], [(OLD, NEW)])
+        self._marker(account=OLD)
+        self.assertEqual(self._rule(_week_state(96)).voided, 1)
+        self.assertEqual(self.err.getvalue().count("已作廢"), 1, "同一對 old→new 只出聲一次")
+        self.assertEqual(len(self._events()), 2)
+        self._write_cache(NEW, [("seven_day", 96.0, _iso(datetime.now().astimezone()
+                                                          + timedelta(days=3)))],
+                          datetime.now().astimezone())
+        self._marker(account=OLD)
+        pace = ruling_io.pace_report(sid=SID)
+        self.assertNotIn("halted", pace)
+        self.assertFalse(quota_gate.halt_marker_path(SID).exists(), "--pace 仍讀到舊帳號標記")
+
+    def test_legacy_marker_by_reading(self):
+        """AC-AC-02b：舊格式標記（真標記逐字）＋同軸讀數 79 < halt ⇒ 作廢；100 ⇒ 保留並補寫 account。"""
+        legacy = dict(REAL_MARKER)
+        self.assertEqual(QR.marker_disposition(legacy, NEW, _week_state(79), POLICY, NOW), QR.VOID)
+        self.assertEqual(QR.marker_disposition(legacy, NEW, _week_state(100), POLICY, NOW),
+                         QR.BACKFILL)
+        self.assertEqual(QR.marker_disposition(legacy, None, _week_state(100), POLICY, NOW),
+                         QR.KEEP)
+        expired = NOW + timedelta(days=4)  # reset 已過的低讀數由 reset 解釋 ⇒ 不作廢
+        self.assertNotEqual(QR.marker_disposition(legacy, NEW, _week_state(79, now=expired),
+                                                  POLICY, expired), QR.VOID)
+        path = self._marker()
+        self.assertEqual(self._rule(_week_state(79)).voided, 1)
+        self.assertFalse(path.exists())
+        path = self._marker()
+        r = self._rule(_week_state(100))
+        self.assertEqual((r.action, r.voided), (QR.HALT_WEEKLY, 0))
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["account"], NEW)
+
+    def test_park_delegated_rush_voided(self):
+        """AC-AC-02c：park 標記不在本流程（走 parkprobe.account_changed）；rush 戳記不符即作廢。"""
+        now = datetime.now().astimezone()
+        rc, _ = quota_rush.issue(1, "換帳號驗收用的趕工戳記", sid=SID, now=now, env={}, account=OLD)
+        self.assertEqual(rc, 0)
+        stamp = quota_rush.stamp_path()
+        self.assertEqual(self._rule(_week_state(10, now=now), now=now).voided, 1)
+        self.assertFalse(stamp.exists())
+        self.assertEqual(len(self._voids(stamp.stem)), 1)
+        src = Path(acctswitch.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("import park", src)
+        self.assertNotIn("from .park", src)
+        from lib.sessionctl import parkprobe  # noqa: PLC0415
+        self.assertTrue(parkprobe.account_changed({"parked_account": OLD}, NEW))
+
+    def test_trigger_credentials_file(self):
+        """AC-AC-03a：憑證檔 (mtime,size) 變 ⇒ T1；不變 ⇒ 不觸發；macOS ⇒ T① 缺席並出聲。"""
+        cred = self.tmp / "claude" / ".credentials.json"
+        cred.parent.mkdir(parents=True, exist_ok=True)
+        cred.write_text('{"a": 1}', encoding="utf-8")
+        self.assertEqual(acctswitch.tick("", None)[1], [], "首見只記基準")
+        self.assertEqual(acctswitch.tick("", None)[1], [])
+        cred.write_text('{"a": 12345}', encoding="utf-8")
+        pending, fired = acctswitch.tick("", None)
+        self.assertEqual(fired, ["T1"])
+        self.assertIsNotNone(pending)
+        self.assertEqual(acctswitch.tick("", None, platform="darwin")[1], [])
+        acctswitch.tick("", None, platform="darwin")
+        self.assertEqual(self.err.getvalue().count("macOS 缺席"), 1)
+
+    def test_trigger_login_record(self):
+        """AC-AC-03b：逐字稿增量出現 /login 記錄 ⇒ T2；offset 前已讀者不重觸發；引用字面不算。"""
+        ts = self.tmp / f"{SID}.jsonl"
+        ts.write_text(QUOTED_LINE + "\n" + LOGIN_LINE + "\n", encoding="utf-8")
+        pending, fired = acctswitch.tick(SID, ts)
+        self.assertEqual(fired, ["T2"])
+        self.assertEqual(pending, datetime(2026, 11, 24, 13, 36, 47, tzinfo=UTC))
+        self.assertEqual(acctswitch.tick(SID, ts)[1], [], "已讀過的 /login 又觸發")
+        with ts.open("a", encoding="utf-8") as fh:
+            fh.write(QUOTED_LINE + "\n")
+        self.assertEqual(acctswitch.tick(SID, ts)[1], [])
+        with ts.open("a", encoding="utf-8") as fh:
+            fh.write(LOGIN_LINE.replace("13:36:47.427Z", "15:00:00.000Z") + "\n")
+        self.assertEqual(acctswitch.tick(SID, ts)[1], ["T2"])
+
+    def test_trigger_fingerprint_change(self):
+        """AC-AC-03c：指紋變化（T③）⇒ reconcile 判作廢，痕跡 trigger=T3。"""
+        self._rule(_week_state(50, acct=OLD))
+        self._marker(account=OLD)
+        self.assertEqual(self._rule(_week_state(50, acct=NEW)).voided, 1)
+        self.assertEqual([x["trigger"] for x in self._events()], ["T3"])
+
+    def test_trigger_alone_never_voids(self):
+        """AC-AC-03d：觸發器成立但補量失敗（量不到指紋）⇒ 不作廢；補量成功且指紋相同 ⇒ 不作廢。"""
+        ts = self.tmp / f"{SID}.jsonl"
+        ts.write_text(LOGIN_LINE + "\n", encoding="utf-8")
+        self.assertEqual(acctswitch.tick(SID, ts)[1], ["T2"])
+        path = self._marker(account=OLD)
+        self.assertEqual(self._rule(_state()).voided, 0)
+        self.assertEqual(self._rule(_week_state(50, acct=None)).voided, 0)
+        self.assertTrue(path.exists(), "量不到指紋卻作廢了標記")
+        self.assertEqual(self._rule(_week_state(50, acct=OLD)).voided, 0)
+        self.assertTrue(path.exists())
+        # 觸發器成立＋手上讀數量於事件前 ⇒ gather 在 TTL 名額內補量一次（立即補量）
+        now = datetime.now().astimezone()
+        self._write_cache(OLD, [("seven_day", 50.0, _iso(now + timedelta(days=3)))],
+                          now - timedelta(seconds=30))
+        with ts.open("a", encoding="utf-8") as fh:
+            fh.write(LOGIN_LINE.replace("2026-11-24T13:36:47.427Z", _iso(now)) + "\n")
+        calls = []
+        meter = SimpleNamespace(SCHEMA=quota_gate.quota_schema(), read_retry_hint=lambda _p: "",
+                                measure_detail=lambda _t: calls.append(1) or (None, "http-429"),
+                                write_cache=lambda *_a: True)
+        self.enterContext(mock.patch.object(quota_gate, "quota_meter", meter))
+        ruling_io.gather(SID, ts, now=now)
+        self.assertEqual(len(calls), 1, "觸發器成立、讀數早於事件卻沒補量")
+        self.assertTrue(path.exists(), "補量失敗時不得作廢")
+
+    def test_first_verdict_reports_voided(self):
+        """AC-AC-04a：換帳號後第一行判決附「已作廢 n 個舊帳號標記」；之後不再附。"""
+        self._marker(account=OLD)
+        first = self._rule(_week_state(40))
+        self.assertIn("已作廢 1 個舊帳號標記", first.reason)
+        self.assertIn("已作廢 1 個舊帳號標記", QR.line(first))
+        self.assertEqual(QR.as_json(first)["voided"], 1)
+        again = self._rule(_week_state(40))
+        self.assertNotIn("已作廢", again.reason)
+
+    def test_no_switch_advice_wording(self):
+        """AC-AC-04b：任何輸出不含「建議換帳號」類字樣（詞表；§7.4 非目標）。"""
+        words = ("建議換帳號", "建議切換帳號", "請換帳號", "換個帳號", "switch account",
+                 "change account")
+        self._marker(account=OLD)
+        r = self._rule(_week_state(40))
+        texts = [Path(acctswitch.__file__).read_text(encoding="utf-8"), self.err.getvalue(),
+                 QR.line(r), acctswitch.status_line()]
+        for text in texts:
+            for w in words:
+                self.assertNotIn(w, text)
+
+    def test_status_shows_fingerprint(self):
+        """AC-AC-04c：`sessionctl status` 帳號指紋行＝acct=<12 碼> 或 acct=none。"""
+        self.assertIn("acct=none", acctswitch.status_line())
+        self._write_cache(NEW, [("five_hour", 5.0, _iso(NOW))], NOW)
+        self.assertIn(f"acct={NEW}", acctswitch.status_line())
+        src = (_REPO_ROOT / "tools" / "sessionctl.py").read_text(encoding="utf-8")
+        self.assertIn("acctswitch.status_line()", src, "status 動詞沒接帳號指紋行")
+
+
+class AcctSwitchE2ETest(_Fenced):
+    """E2E-AP-AC-03（家族結案主證；載具 H 逐字稿重放＋真讀數錄製重放）：真 halt 標記逐字＋真
+    `/login` 記錄逐字（時間平移到當下）＋舊帳號快取，經**真** `sessionctl quota` 動詞（`ruling_io.cli`）
+    取數；替身只在取數器邊界（回錄製的新帳號讀數）。斷言：判決不是 HALT_WEEKLY、舊標記作廢、立即補量。"""
+
+    def test_e2e_real_marker_and_login_replay(self):
+        now = datetime.now().astimezone()
+        shift = now - REC_NOW
+
+        def moved(text):
+            return _iso(datetime.fromisoformat(text) + shift)
+
+        traces = self.tmp / "traces"
+        traces.mkdir(parents=True, exist_ok=True)
+        cache = self.tmp / "autosdd_quota.json"
+        self.enterContext(mock.patch.object(quota_gate, "quota_cache_path", lambda: cache))
+        marker = {**REAL_MARKER, "reset_at": moved(REAL_MARKER["reset_at"]),
+                  "at": moved(REAL_MARKER["at"])}
+        quota_gate.write_halt_marker(REAL_SID, marker)
+        proj = self.tmp / "projects"
+        proj.mkdir()
+        login = LOGIN_LINE.replace("2026-11-24T13:36:47.427Z",
+                                   moved("2026-11-24T13:36:47.427+00:00"))
+        (proj / f"{REAL_SID}.jsonl").write_text(QUOTED_LINE + "\n" + login + "\n",
+                                                encoding="utf-8")
+        cache.write_text(json.dumps({  # 舊帳號最後一筆讀數（11-24 20:50，seven_day 96）
+            "schema": quota_gate.quota_schema(), "source": "endpoint",
+            "measured_at": moved("2026-11-24T20:50:10+08:00"), "account_key": OLD,
+            "axes": [{"kind": "seven_day", "pct": 96.0,
+                      "resets_at": moved("2026-11-27T22:00:00.156903+00:00")}]}),
+            encoding="utf-8")
+        calls = []
+
+        def measure(_t):
+            calls.append(1)
+            return {"schema": quota_gate.quota_schema(), "source": "endpoint",
+                    "measured_at": _iso(datetime.now().astimezone()), "account_key": NEW,
+                    "axes": [{"kind": k, "pct": p, "resets_at": moved(r)}
+                             for k, p, r in REC_AXES]}, "ok"
+
+        meter = SimpleNamespace(SCHEMA=quota_gate.quota_schema(), measure_detail=measure,
+                                read_retry_hint=lambda _p: "",
+                                write_cache=lambda reading, path: bool(Path(path).write_text(
+                                    json.dumps(reading), encoding="utf-8")))
+        self.enterContext(mock.patch.object(quota_gate, "quota_meter", meter))
+        out = __import__("io").StringIO()
+        with mock.patch("sys.stderr", new_callable=__import__("io").StringIO) as err:
+            rc = ruling_io.cli(["--sid", REAL_SID, "--projects-dir", str(proj), "--json"],
+                               out=out)
+        self.assertEqual(rc, 0)
+        got = json.loads(out.getvalue())
+        self.assertNotEqual(got["action"], QR.HALT_WEEKLY, got)
+        self.assertEqual((got["acct"], got["voided"]), (NEW, 1), got)
+        self.assertIn("已作廢 1 個舊帳號標記", got["reason"])
+        self.assertGreaterEqual(len(calls), 1, "沒有立即補量")
+        self.assertFalse(quota_gate.halt_marker_path(REAL_SID).exists())
+        self.assertEqual(len(list(traces.glob(f"halt_{REAL_SID}.void-*.json"))), 1)
+        rows = [json.loads(x) for x in (traces / "autosdd_session_switch.jsonl")
+                .read_text(encoding="utf-8").splitlines()]
+        switch = [x for x in rows if x["event"] == "account_switch"]
+        self.assertEqual([(x["old"], x["new"], x["trigger"]) for x in switch],
+                         [("legacy", NEW, "T2")])
+        self.assertIn("已作廢 1 個舊帳號標記", err.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

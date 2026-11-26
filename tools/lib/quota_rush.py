@@ -170,7 +170,7 @@ _AUTO = object()
 
 def issue(hours, why, sid="", now=None, env=None, path=None, account=_AUTO):
     """發戳記（覆寫舊戳記＝延長）。`(rc, 訊息)`：0 成功／2 拒絕（不寫檔）／1 檔案系統錯誤。
-    `account`＝帳號指紋（QVD §7.3；缺＝讀額度快取最近一次量到的指紋；量不到寫 `null` 並在訊息出聲）。"""
+    `account`＝帳號指紋（QVD §7.3；缺＝讀額度快取最近一次的指紋；量不到寫 `null` 並出聲）。"""
     env = os.environ if env is None else env
     if _unattended(env):
         return 2, "拒絕：無人窗口無人可宣告趕工（AUTOSDD_UNATTENDED 有設）"
@@ -199,7 +199,8 @@ def issue(hours, why, sid="", now=None, env=None, path=None, account=_AUTO):
     log_event("pace_rush_on", at=now.isoformat(), until=until.isoformat(), hours=span,
               why=reason, sid=sid)
     note = "" if account else "\n" + quota_halt_marker.unmeasured_account_note("趕工戳記").rstrip()
-    return 0, f"趕工戳記已發：到期 {until.isoformat()}（剩 {int(span * 60)} 分鐘）；配速床暫停{note}"
+    left = int(span * 60)
+    return 0, f"趕工戳記已發：到期 {until.isoformat()}（剩 {left} 分鐘）；配速床暫停{note}"
 
 
 def revoke(now=None, path=None):

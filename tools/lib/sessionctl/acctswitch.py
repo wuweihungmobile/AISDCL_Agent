@@ -2,12 +2,13 @@
 
 立案（暴露證據）：2026-11-26 11:39 單一判決讀到舊帳號殘留、無帳號欄的 halt 標記
 （`halt_406454ea-….json`，寫於 11-24 21:32:50，早於 /login 21:36:47），新帳號 weekly 77% 卻判
-`HALT_WEEKLY … cap=0`，派工閘死鎖。本檔讓「換帳號後舊標記仍當輸入」機械地不再發生：
+`HALT_WEEKLY … cap=0`，派工閘死鎖。本檔讓「換帳號後舊標記仍當輸入」機械地不再
+發生：
 
 · 觸發器（只負責「該重量了」，R-4.1.7-2）：T① 憑證檔 (mtime_ns, size) 與上次記錄不同（macOS 缺席，
   照實出聲一次）；T② 逐字稿自上次位移後出現 `/login` 指令記錄（增量讀、記 byte offset）；T③ 補量
   到的帳號指紋與上次不同（`reconcile` 內判）。成立 ⇒ 記 `pending`（事件時刻），讀數早於它 ⇒ 呼叫端
-  （`ruling_io.gather`）在紅線 1 的 TTL 名額內補量一次。觸發器本身**從不**作廢任何標記（R-4.1.7-3）。
+  （`ruling_io.gather`）在紅線 1 的 TTL 名額內補量一次。觸發器本身**從不**作廢標記（R-4.1.7-3）。
 · 判定與作廢（`reconcile`）：以**這一次量到**的 `state.account_key` 為權威，逐個持久標記交
   `quota_ruling.marker_disposition`（門檻比較只住判決家）；`void` ⇒ 改名 `.void-<ts>` 保留史料、
   落 `account_switch` 痕跡、同一對 old→new 只出聲一次；`backfill` ⇒ 補寫 `account`。park 標記不在
@@ -73,9 +74,9 @@ def _sec(when: datetime) -> str:
 
 
 def credentials_path() -> Path:
-    from platform_utils import claude_home  # noqa: PLC0415 — 尊重 CLAUDE_CONFIG_DIR（同 quota_meter）
+    import platform_utils  # noqa: PLC0415 — 尊重 CLAUDE_CONFIG_DIR（同 quota_meter）
 
-    return claude_home() / ".credentials.json"
+    return platform_utils.claude_home() / ".credentials.json"
 
 
 def cred_sig(path: Path) -> list | None:
@@ -166,7 +167,12 @@ def needs_remeasure(state, pending: datetime | None) -> bool:
 
 
 def _void(path: Path, now: datetime) -> Path | None:
-    target = path.with_name(f"{path.stem}.void-{now.strftime('%Y%m%dT%H%M%S%z')}{path.suffix}")
+    stamp = now.strftime("%Y%m%dT%H%M%S%z")
+    target = path.with_name(f"{path.stem}.void-{stamp}{path.suffix}")
+    for n in range(2, 100):  # 同一秒再作廢同一檔（史料不得互相覆蓋）⇒ 加序號
+        if not target.exists():
+            break
+        target = path.with_name(f"{path.stem}.void-{stamp}-{n}{path.suffix}")
     try:
         path.rename(target)  # Windows 被開著＝PermissionError（OSError）⇒ 本次不作廢、下次再判
     except OSError:
@@ -183,7 +189,7 @@ def _backfill(path: Path, data: dict, acct: str) -> None:
 
 
 def reconcile(sid: str, state, policy, now: datetime, *, halt_marker=None) -> int:
-    """QVD §7.2：以本次讀數的帳號指紋判 halt 標記與趕工戳記；回本次作廢數（判決行附「已作廢 n 個」）。
+    """QVD §7.2：以本次讀數的帳號指紋判 halt 標記與趕工戳記；回本次作廢數（判決行附作廢數）。
     `halt_marker`＝呼叫端（判決家 `compose`）已讀到的標記內容。另結 T③ 與 pending。"""
     acct = getattr(state, "account_key", None) or None
     items = []
@@ -219,8 +225,9 @@ def reconcile(sid: str, state, policy, now: datetime, *, halt_marker=None) -> in
         pair = f"{old}>{acct or 'none'}"
         said = probe.setdefault("voiced", [])
         if pair not in said:
+            names = "、".join(voided)
             sys.stderr.write(f"ℹ️ 帳號指紋 {old}→{acct or 'none'}（觸發 {trigger or 'T3'}）："
-                             f"已作廢 {len(voided)} 個舊帳號標記（改名保留：{'、'.join(voided)}）\n")
+                             f"已作廢 {len(voided)} 個舊帳號標記（改名保留：{names}）\n")
             said.append(pair)
             del said[:-_MAX_VOICED]
         probe["last_switch"] = {"old": old, "new": acct, "at": now.isoformat(), "n": len(voided)}

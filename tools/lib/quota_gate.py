@@ -818,7 +818,7 @@ def resolve_halt_transcript(payload: dict) -> tuple[Path | None, str]:
 # halt 標記的路徑／寫／讀三支住 `quota_halt_marker`（為配速床接線騰 hub 餘裕而抽出；re-export）。
 def quota_halt_actions(payload: dict, decision: quota_policy.Decision, now: datetime, *,
                        plan_writer, waker, account: str | None = None) -> dict:
-    """halt 閂鎖那一刻真的做的事。回稽核欄位（給訊息與測試讀）。`account`＝取數帳號指紋（QVD §7.3）。
+    """halt 閂鎖那一刻真的做的事。回稽核欄位（給訊息與測試讀）。`account`＝帳號指紋（QVD §7.3）。
 
     `plan_writer(transcript) -> str` 與 `waker(transcript, plan) -> dict` 都由 hook 端
     注入：spawn 與平台判斷（`os.name`／哨兵逃生口）是 hook 行程的事，本檔只讀它們的回報。
