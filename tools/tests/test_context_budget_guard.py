@@ -11020,7 +11020,7 @@ class QuotaDegradationIsAudibleTest(unittest.TestCase):
 
     def test_the_throttle_message_is_not_the_degraded_message(self) -> None:
         """控制組②：真的滿了要走節流那條路（有 pct 的訊息），不是降級那條。"""
-        _quota_cache(self.tmp, 99.0).replace(self.tmp / "c.json")
+        _quota_cache(self.tmp, 99.0, account_key="acct-fix").replace(self.tmp / "c.json")
         rc, err, trace = self._gate()
         self.assertEqual((rc, trace), (2, []))
         self.assertIn("停止派發", err)
@@ -12949,7 +12949,7 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
     def test_post_tool_use_at_halt_writes_a_plan_and_says_so_once_without_an_error(self) -> None:
         """DEF-200-435：PostToolUse 時工具已跑完、無可擋，halt 提醒不得以 rc=2 紅字出現（會被讀
         成「工具被擋」）⇒ exit 0＋`additionalContext`；任務書仍要真的落磁碟（訴求 6c）。"""
-        _quota_cache(self.tmp, 96.0)
+        _quota_cache(self.tmp, 96.0, account_key="acct-fix")  # 帳號量得到 ⇒ 無「帳號量不到」雜訊
         rc, err, out = _run_hook3(self._post("Read"), self.tmp)
         self.assertEqual((rc, err), (0, ""), "halt 提醒又是錯誤樣式（rc!=0 或 stderr 有字）")
         ctx = json.loads(out)["hookSpecificOutput"]
@@ -12977,7 +12977,7 @@ class QuotaGateIsWiredToTheBurnPathTest(unittest.TestCase):
     def test_a_blocked_first_call_says_the_halt_in_its_first_line_and_not_executed(self) -> None:
         """DEF-200-435：halt 首見在 PreToolUse×Agent（新視窗第一個量測呼叫）：首則同樣不得說
         「已正常執行完成」，副作用照做一次；CC 摺疊列只顯示首行⇒首行要講清楚是停止水位。"""
-        _quota_cache(self.tmp, 96.0)
+        _quota_cache(self.tmp, 96.0, account_key="acct-fix")  # 帳號量得到 ⇒ 首行仍是 halt 訊息
         rc, err = _run_hook(self._pre("Agent"), self.tmp)
         self.assertEqual(rc, 2)
         self.assertIn("停止", err.splitlines()[0])

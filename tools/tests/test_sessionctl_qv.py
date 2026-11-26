@@ -1058,7 +1058,8 @@ RULING_INPUT_SITES: dict[tuple[str, str, str], tuple[str, str]] = {
     (_RI, "compose", "plan"): ("ruling", _RULING),
     (_RI, "compose", "read_halt_marker"): ("ruling", _RULING),
     (_RI, "gather", "pace_state"): ("ruling", _RULING),
-    (_RI, "gather", "refresh_quota_blocking"): ("ruling", "換帳號觸發後 TTL 名額內補量（QVD §7.1）"),
+    (_RI, "gather", "refresh_quota_blocking"): (
+        "ruling", "換帳號觸發後 TTL 名額內補量（QVD §7.1）"),
     (_RI, "gather", "settled_quota"): ("ruling", "同上：補量後等贏家重讀（QVD §7.1）"),
     (_RI, "cached", "read_quota"): ("ruling", "只讀快取的判決（C10 簡報、手動排程時刻；零網路）"),
     (_RI, "pace_report", "decide"): ("ruling", "引擎配速契約（pace 尺；診斷段，判斷看首行）"),
@@ -1217,7 +1218,7 @@ LOGIN_LINE = (
     '            <command-args></command-args>"},'
     '"uuid":"8fb05779-45a7-49b5-9471-877c0e5cce14","timestamp":"2026-11-24T13:36:47.427Z",'
     '"rowSource":"local","userType":"external","entrypoint":"cli",'
-    '"cwd":"D:\\\\CursorProject\\\\AISDCL_Agent",'
+    '"cwd":"/repo/root",'
     '"sessionId":"406454ea-91fc-4481-9c11-b28ed7d9e95f","version":"2.1.331",'
     '"gitBranch":"main","dataFlowOn":true}')
 #: 引用 `/login` 字面但不是指令記錄（助理文字）——不得觸發。
@@ -1243,11 +1244,13 @@ class AcctSwitchTest(_Fenced):
         self.traces.mkdir(parents=True, exist_ok=True)
         self.cache = self.tmp / "autosdd_quota.json"
         self.enterContext(mock.patch.object(quota_gate, "quota_cache_path", lambda: self.cache))
-        self.err = self.enterContext(mock.patch("sys.stderr", new_callable=__import__("io").StringIO))
+        self.err = self.enterContext(
+            mock.patch("sys.stderr", new_callable=__import__("io").StringIO))
 
     def _write_cache(self, acct, axes, measured):
         self.cache.write_text(json.dumps({
-            "schema": quota_gate.quota_schema(), "source": "endpoint", "measured_at": _iso(measured),
+            "schema": quota_gate.quota_schema(), "source": "endpoint",
+            "measured_at": _iso(measured),
             "account_key": acct,
             "axes": [{"kind": k, "pct": p, "resets_at": r} for k, p, r in axes]}),
             encoding="utf-8")
@@ -1295,7 +1298,8 @@ class AcctSwitchTest(_Fenced):
         self.assertEqual(row["acct"], NEW)
 
     def test_mismatch_voids_marker(self):
-        """AC-AC-02a：標記 OLD、讀數 NEW ⇒ 改名 .void-<ts>、account_switch 一列、出聲一次、不印 halted。"""
+        """AC-AC-02a：標記 OLD、讀數 NEW ⇒ 改名 .void-<ts>、account_switch 一列、出聲一次、
+        不印 halted。"""
         path = self._marker(account=OLD)
         r = self._rule(_week_state(96))
         self.assertNotEqual(r.action, QR.HALT_WEEKLY)
@@ -1317,7 +1321,8 @@ class AcctSwitchTest(_Fenced):
         self.assertFalse(quota_gate.halt_marker_path(SID).exists(), "--pace 仍讀到舊帳號標記")
 
     def test_legacy_marker_by_reading(self):
-        """AC-AC-02b：舊格式標記（真標記逐字）＋同軸讀數 79 < halt ⇒ 作廢；100 ⇒ 保留並補寫 account。"""
+        """AC-AC-02b：舊格式標記（真標記逐字）＋同軸讀數 79 < halt ⇒ 作廢；100 ⇒ 保留並
+        補寫 account。"""
         legacy = dict(REAL_MARKER)
         self.assertEqual(QR.marker_disposition(legacy, NEW, _week_state(79), POLICY, NOW), QR.VOID)
         self.assertEqual(QR.marker_disposition(legacy, NEW, _week_state(100), POLICY, NOW),
@@ -1344,9 +1349,8 @@ class AcctSwitchTest(_Fenced):
         self.assertEqual(self._rule(_week_state(10, now=now), now=now).voided, 1)
         self.assertFalse(stamp.exists())
         self.assertEqual(len(self._voids(stamp.stem)), 1)
-        src = Path(acctswitch.__file__).read_text(encoding="utf-8")
-        self.assertNotIn("import park", src)
-        self.assertNotIn("from .park", src)
+        src_lines = Path(acctswitch.__file__).read_text(encoding="utf-8").splitlines()
+        self.assertEqual([], [ln for ln in src_lines if "import park" in ln or "from .park" in ln])
         from lib.sessionctl import parkprobe  # noqa: PLC0415
         self.assertTrue(parkprobe.account_changed({"parked_account": OLD}, NEW))
 
@@ -1446,8 +1450,9 @@ class AcctSwitchTest(_Fenced):
 
 class AcctSwitchE2ETest(_Fenced):
     """E2E-AP-AC-03（家族結案主證；載具 H 逐字稿重放＋真讀數錄製重放）：真 halt 標記逐字＋真
-    `/login` 記錄逐字（時間平移到當下）＋舊帳號快取，經**真** `sessionctl quota` 動詞（`ruling_io.cli`）
-    取數；替身只在取數器邊界（回錄製的新帳號讀數）。斷言：判決不是 HALT_WEEKLY、舊標記作廢、立即補量。"""
+    `/login` 記錄逐字（時間平移到當下）＋舊帳號快取，經**真** `sessionctl quota` 動詞
+    （`ruling_io.cli`）取數；替身只在取數器邊界（回錄製的新帳號讀數）。斷言：判決不是
+    HALT_WEEKLY、舊標記作廢、立即補量。"""
 
     def test_e2e_real_marker_and_login_replay(self):
         now = datetime.now().astimezone()
