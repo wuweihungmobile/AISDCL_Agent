@@ -237,47 +237,58 @@ class RealRunnerTest(unittest.TestCase):
 
 
 # 三支真 run（macos-compat-ci，2026-11-24）attempt 1 的 cancelled job：created_at → completed_at。
-# 取自 `gh api repos/{owner}/{repo}/actions/runs/<id>/attempts/1/jobs`（唯讀 GET），steps／runner_name 同真值。
+# 取自 `gh api repos/{owner}/{repo}/actions/runs/<id>/attempts/1/jobs`（唯讀 GET），
+# steps／runner_name 同真值。
 RECORDED_QUEUE_JOBS = {
     45427135743: ("2026-11-24T15:34:44Z", "2026-11-24T15:49:45Z"),
     45439253352: ("2026-11-24T16:37:16Z", "2026-11-24T16:52:16Z"),
     45456241389: ("2026-11-24T18:08:26Z", "2026-11-24T18:23:26Z"),
 }
+T_START, T_END = RECORDED_QUEUE_JOBS[45427135743]
+T_MID = "2026-11-24T15:40:00Z"
 
 
-def qjob(created="2026-11-24T15:34:44Z", completed="2026-11-24T15:49:45Z", *, conclusion="cancelled",
+def qjob(created=T_START, completed=T_END, *, conclusion="cancelled",
          steps=None, runner="", branch="main", sha=FULL):
-    return {"conclusion": conclusion, "steps": [] if steps is None else steps, "runner_name": runner,
-            "created_at": created, "completed_at": completed, "head_branch": branch, "head_sha": sha}
+    return {"conclusion": conclusion, "steps": [] if steps is None else steps,
+            "runner_name": runner, "created_at": created, "completed_at": completed,
+            "head_branch": branch, "head_sha": sha}
 
 
 def jobs_of(*jobs):
-    skipped = qjob(conclusion="skipped", created="2026-11-24T15:34:44Z", completed="2026-11-24T15:34:44Z")
+    skipped = qjob(conclusion="skipped", created=T_START, completed=T_START)
     return {"total_count": len(jobs) + 1, "jobs": [*jobs, skipped]}
 
 
+def verdict_line(w):
+    return w.lines[-1]
+
+
 class QueueTimeoutTest(unittest.TestCase):
-    """tools/lib/ciwait/core.py 的排隊逾時自動重跑（REQ-AP-CI-01）：只對「cancelled ∧ 零步驟 ∧ runner
-    未指派 ∧ 14.5～16 分」重跑、次數有上限，其餘一律照舊 fail（真紅不得被吸收成綠）。"""
+    """tools/lib/ciwait/core.py 的排隊逾時自動重跑（REQ-AP-CI-01）：
+    只對「cancelled ∧ 零步驟 ∧ runner 未指派 ∧ 14.5～16 分」重跑、次數有上限，
+    其餘一律照舊 fail（真紅不得被吸收成綠）。"""
 
     def test_classify_recorded_attempts(self):
-        """AC-CI-01a：三支真 run 命中；有步驟／14 分／16.5 分／有 runner／同 ref 有較新 run 不命中。"""
+        """AC-CI-01a：三支真 run 命中；有步驟／14 分／16.5 分／有 runner／較新 run 不命中。"""
         for rid, (c, e) in RECORDED_QUEUE_JOBS.items():
             self.assertEqual(core.classify_attempt(jobs_of(qjob(c, e))), "queue_timeout", rid)
-        self.assertEqual(core.classify_attempt(jobs_of(qjob(steps=[{"name": "x"}]))), "other")
-        self.assertEqual(core.classify_attempt(jobs_of(qjob(completed="2026-11-24T15:48:44Z"))), "other")
-        self.assertEqual(core.classify_attempt(jobs_of(qjob(completed="2026-11-24T15:51:14Z"))), "other")
-        self.assertEqual(core.classify_attempt(jobs_of(qjob(runner="GitHub Actions 7"))), "other")
-        self.assertEqual(core.classify_attempt(jobs_of(qjob(conclusion="failure"))), "other")
+        misses = [
+            qjob(steps=[{"name": "x"}]), qjob(completed="2026-11-24T15:48:44Z"),
+            qjob(completed="2026-11-24T15:51:14Z"), qjob(runner="GitHub Actions 7"),
+            qjob(conclusion="failure")]
+        for job in misses:
+            self.assertEqual(core.classify_attempt(jobs_of(job)), "other", job)
         self.assertEqual(core.classify_attempt(jobs_of(qjob()), newer_run=True), "other")
         for junk in (None, {}, "x", {"jobs": "x"}, [None], {"jobs": [qjob(created="bad")]}):
             self.assertEqual(core.classify_attempt(junk), "other", junk)
 
     def test_newer_run_on_same_ref_inside_the_window_is_concurrency_not_queue(self):
         job = qjob()
-        inside = [{"databaseId": 9, "headSha": OTHER, "createdAt": "2026-11-24T15:40:00Z"}]
+        inside = [{"databaseId": 9, "headSha": OTHER, "createdAt": T_MID}]
         outside = [{"databaseId": 9, "headSha": OTHER, "createdAt": "2026-11-24T16:40:00Z"},
-                   {"databaseId": 8, "headSha": FULL, "createdAt": "2026-11-24T15:40:00Z"}]
+                   {"databaseId": 8, "headSha": FULL, "createdAt": T_MID}]
+
         def runner(data):
             return lambda argv: (0, json.dumps(data), "")
         self.assertTrue(core.has_newer_run(job, runner(inside)))
@@ -285,7 +296,8 @@ class QueueTimeoutTest(unittest.TestCase):
         self.assertTrue(core.has_newer_run(job, lambda argv: (1, "", "boom")), "查不到＝保守當有")
 
     def _world(self, listing, jobs=None, *, rerun_rc=0, newer=()):
-        """路由假世界：`gh run list --commit` 依序回 listing；`gh api` 回 jobs；`--branch` 回 newer。"""
+        """路由假世界：`gh run list --commit` 依序回 listing；`gh api` 回 jobs；
+        `--branch` 回 newer。"""
         w = _World()
         w.reruns: list[list[str]] = []
         script = list(listing)
@@ -310,37 +322,44 @@ class QueueTimeoutTest(unittest.TestCase):
 
     @staticmethod
     def _q(attempt, status="completed", conclusion="cancelled"):
-        return [{**r("macos-compat-ci", status, conclusion, rid=45427135743), "attempt": attempt}]
+        return [{**r("macos-compat-ci", status, conclusion, rid=45427135743),
+                 "attempt": attempt}]
 
     def test_rerun_and_exhaustion(self):
-        """AC-CI-01b：命中 ⇒ `gh run rerun <id> --failed` 並繼續等，末行 `pass rerun=queue_timeout×1`。
-        第 3 次排隊逾時 ⇒ `fail reason=queue_timeout_exhausted` rc 1，且只重跑過 2 次。"""
-        w = self._world([self._q(1), self._q(2, "in_progress", None), self._q(2, conclusion="success")])
+        """AC-CI-01b：命中 ⇒ `gh run rerun <id> --failed` 並繼續等，末行
+        `pass rerun=queue_timeout×1`；第 3 次排隊逾時 ⇒ `fail reason=queue_timeout_exhausted`
+        rc 1，且只重跑過 2 次。"""
+        q = self._q
+        w = self._world([q(1), q(2, "in_progress", None), q(2, conclusion="success")])
         self.assertEqual(w.wait(interval_sec=30), core.EXIT_PASS)
         self.assertEqual(w.reruns, [["gh", "run", "rerun", "45427135743", "--failed"]])
-        self.assertTrue(w.lines[-1].startswith("CI_WAIT_VERDICT=pass rerun=queue_timeout×1 sha="), w.lines[-1])
+        self.assertTrue(verdict_line(w).startswith(
+            "CI_WAIT_VERDICT=pass rerun=queue_timeout×1 sha="), verdict_line(w))
         self.assertEqual(len(w.traces), 1)
         self.assertEqual((w.traces[0]["event"], w.traces[0]["run"], w.traces[0]["attempt"]),
                          ("ci_queue_timeout", 45427135743, 1))
         self.assertAlmostEqual(w.traces[0]["minutes"], 15.02, places=1)
-        w = self._world([self._q(1), self._q(2), self._q(3)])
+        w = self._world([q(1), q(2), q(3)])
         self.assertEqual(w.wait(interval_sec=30), core.EXIT_FAIL)
         self.assertEqual(len(w.reruns), core.QUEUE_RERUN_MAX)
-        self.assertTrue(w.lines[-1].startswith("CI_WAIT_VERDICT=fail reason=queue_timeout_exhausted sha="),
-                        w.lines[-1])
+        self.assertTrue(verdict_line(w).startswith(
+            "CI_WAIT_VERDICT=fail reason=queue_timeout_exhausted sha="), verdict_line(w))
 
     def test_stale_listing_right_after_rerun_does_not_rerun_twice(self):
-        """rerun 後 GitHub 可能仍短暫列出同一 attempt 的 cancelled；同 (run, attempt) 不得重跑第二次。"""
-        w = self._world([self._q(1), self._q(1), self._q(1), self._q(2, conclusion="success")])
+        """rerun 後 GitHub 可能仍短暫列出同一 attempt 的 cancelled；同 (run, attempt) 不得
+        重跑第二次。"""
+        q = self._q
+        w = self._world([q(1), q(1), q(1), q(2, conclusion="success")])
         self.assertEqual(w.wait(interval_sec=30), core.EXIT_PASS)
         self.assertEqual(len(w.reruns), 1)
 
     def test_real_failures_are_never_absorbed_into_a_rerun(self):
-        """有步驟的 cancelled（真取消）、failure、以及「排隊逾時＋真失敗」並存：一律 fail 且 0 次重跑。"""
+        """有步驟的 cancelled（真取消）、failure、「排隊逾時＋真失敗」並存、同 ref 有較新 run：
+        一律 fail 且 0 次重跑。"""
         w = self._world([self._q(1)], jobs_of(qjob(steps=[{"name": "checkout"}])))
         self.assertEqual(w.wait(), core.EXIT_FAIL)
         self.assertEqual(w.reruns, [])
-        self.assertEqual(w.lines[-1], f"CI_WAIT_VERDICT=fail sha={FULL} runs=1")
+        self.assertEqual(verdict_line(w), f"CI_WAIT_VERDICT=fail sha={FULL} runs=1")
         w = self._world([self._q(1, conclusion="failure")])
         self.assertEqual(w.wait(), core.EXIT_FAIL)
         self.assertEqual(w.reruns, [])
@@ -348,41 +367,46 @@ class QueueTimeoutTest(unittest.TestCase):
         w = self._world([mixed])
         self.assertEqual(w.wait(), core.EXIT_FAIL)
         self.assertEqual(w.reruns, [])
-        w = self._world([self._q(1)], newer=[{"databaseId": 9, "headSha": OTHER,
-                                              "createdAt": "2026-11-24T15:40:00Z"}])
-        self.assertEqual(w.wait(), core.EXIT_FAIL, "同 ref 有較新 run＝concurrency 自取消，不重跑")
+        newer = [{"databaseId": 9, "headSha": OTHER, "createdAt": T_MID}]
+        w = self._world([self._q(1)], newer=newer)
+        self.assertEqual(w.wait(), core.EXIT_FAIL, "同 ref 較新 run＝concurrency 自取消")
         self.assertEqual(w.reruns, [])
 
     def test_rerun_command_failure_degrades_to_plain_fail(self):
         w = self._world([self._q(1)], rerun_rc=1)
         self.assertEqual(w.wait(), core.EXIT_FAIL)
-        self.assertTrue(w.lines[-1].startswith(f"CI_WAIT_VERDICT=fail sha={FULL}"), w.lines[-1])
+        self.assertTrue(verdict_line(w).startswith(f"CI_WAIT_VERDICT=fail sha={FULL}"))
         self.assertEqual(w.traces, [], "重跑沒成功就不落命中痕跡")
 
     def test_default_trace_lands_in_the_trace_dir(self):
         import os
         import tempfile
-        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {"AUTOSDD_TRACE_DIR": td}):
-            core._trace_default({"event": "ci_queue_timeout", "run": 1, "attempt": 1, "minutes": 15.0})
-            rows = [json.loads(ln) for ln in
-                    (Path(td) / "autosdd_ci_queue.jsonl").read_text(encoding="utf-8").splitlines()]
-        self.assertEqual(rows[0]["event"], "ci_queue_timeout")
+        row = {"event": "ci_queue_timeout", "run": 1, "attempt": 1, "minutes": 15.0}
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.dict(os.environ, {"AUTOSDD_TRACE_DIR": td}):
+            core._trace_default(row)
+            text = (Path(td) / "autosdd_ci_queue.jsonl").read_text(encoding="utf-8")
+        self.assertEqual(json.loads(text.splitlines()[0])["event"], "ci_queue_timeout")
 
 
 _FAKE_GH_SITE = '''
-"""以 sitecustomize 注入真 ci_wait 行程：攔 subprocess.run 的 gh 呼叫，重放錄製的真實 JSON 形狀。"""
+"""sitecustomize 注入真 ci_wait 行程：攔 gh 呼叫，重放錄製的真實 JSON 形狀。"""
 import json, os, subprocess
 _real = subprocess.run
 _state = {"lists": 0}
 _SHA = os.environ["FAKE_SHA"]
 _LOG = os.environ["FAKE_LOG"]
+_T0, _T1 = "2026-11-24T15:34:44Z", "2026-11-24T15:49:45Z"
+
+def _job(conclusion, end):
+    return {"conclusion": conclusion, "steps": [], "runner_name": "",
+            "head_branch": "main", "head_sha": _SHA, "created_at": _T0, "completed_at": end}
 
 def _jobs():
-    return {"total_count": 2, "jobs": [
-        {"conclusion": "cancelled", "steps": [], "runner_name": "", "head_branch": "main", "head_sha": _SHA,
-         "created_at": "2026-11-24T15:34:44Z", "completed_at": "2026-11-24T15:49:45Z"},
-        {"conclusion": "skipped", "steps": [], "runner_name": "", "head_branch": "main", "head_sha": _SHA,
-         "created_at": "2026-11-24T15:34:44Z", "completed_at": "2026-11-24T15:34:44Z"}]}
+    return {"total_count": 2, "jobs": [_job("cancelled", _T1), _job("skipped", _T0)]}
+
+def _done(argv, out="", rc=0, err=""):
+    return subprocess.CompletedProcess(argv, rc, out, err)
 
 def _fake(argv, *a, **kw):
     if argv and argv[0] == "gh":
@@ -391,17 +415,17 @@ def _fake(argv, *a, **kw):
         if argv[1:3] == ["run", "list"] and "--commit" in argv:
             _state["lists"] += 1
             done = _state["lists"] >= 3
-            row = {"databaseId": 45427135743, "workflowName": "macos-compat-ci", "headSha": _SHA,
-                   "status": "completed", "attempt": 2 if done else 1,
+            row = {"databaseId": 45427135743, "workflowName": "macos-compat-ci",
+                   "headSha": _SHA, "status": "completed", "attempt": 2 if done else 1,
                    "conclusion": "success" if done else "cancelled"}
-            return subprocess.CompletedProcess(argv, 0, json.dumps([row]), "")
+            return _done(argv, json.dumps([row]))
         if argv[1] == "api":
-            return subprocess.CompletedProcess(argv, 0, json.dumps(_jobs()), "")
+            return _done(argv, json.dumps(_jobs()))
         if argv[1:3] == ["run", "list"]:
-            return subprocess.CompletedProcess(argv, 0, "[]", "")
+            return _done(argv, "[]")
         if argv[1:3] == ["run", "rerun"]:
-            return subprocess.CompletedProcess(argv, 0, "", "")
-        return subprocess.CompletedProcess(argv, 1, "", "unexpected gh call")
+            return _done(argv)
+        return _done(argv, rc=1, err="unexpected gh call")
     return _real(argv, *a, **kw)
 
 subprocess.run = _fake
@@ -409,14 +433,14 @@ subprocess.run = _fake
 
 
 class QueueTimeoutRealProcessTest(unittest.TestCase):
-    """E2E-AP-CI-01：真 `tools/ci_wait.py` 行程（真 git rev-parse、真 default_runner、真 argparse），
-    gh 呼叫由 sitecustomize 重放錄製形狀；不碰真 GitHub、不做任何寫操作。"""
+    """E2E-AP-CI-01：真 `tools/ci_wait.py` 行程（真 git rev-parse、真 default_runner、
+    真 argparse），gh 呼叫由 sitecustomize 重放錄製形狀；不碰真 GitHub、不做任何寫操作。"""
 
     def test_real_process_reruns_once_then_passes(self):
         import os
         import tempfile
-        sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, encoding="utf-8",
-                             cwd=_REPO_ROOT, check=True).stdout.strip()
+        sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                             encoding="utf-8", cwd=_REPO_ROOT, check=True).stdout.strip()
         with tempfile.TemporaryDirectory() as td:
             Path(td, "sitecustomize.py").write_text(_FAKE_GH_SITE, encoding="utf-8")
             log = Path(td, "gh.log")
@@ -425,13 +449,15 @@ class QueueTimeoutRealProcessTest(unittest.TestCase):
             proc = subprocess.run(
                 [sys.executable, str(_REPO_ROOT / "tools" / "ci_wait.py"), "--commit", "HEAD",
                  "--interval-sec", "0.05", "--timeout-min", "2"],
-                capture_output=True, encoding="utf-8", env=env, cwd=_REPO_ROOT, timeout=120, check=False)
+                capture_output=True, encoding="utf-8", env=env, cwd=_REPO_ROOT,
+                timeout=120, check=False)
             calls = log.read_text(encoding="utf-8").splitlines()
             trace = Path(td, "autosdd_ci_queue.jsonl").read_text(encoding="utf-8")
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertTrue(proc.stdout.strip().splitlines()[-1].startswith(
-            "CI_WAIT_VERDICT=pass rerun=queue_timeout×1 sha="), proc.stdout)
-        self.assertEqual([c for c in calls if " rerun " in c], ["gh run rerun 45427135743 --failed"])
+        last = proc.stdout.strip().splitlines()[-1]
+        self.assertTrue(last.startswith("CI_WAIT_VERDICT=pass rerun=queue_timeout×1 sha="), last)
+        reruns = [c for c in calls if " rerun " in c]
+        self.assertEqual(reruns, ["gh run rerun 45427135743 --failed"])
         self.assertIn('"event": "ci_queue_timeout"', trace)
 
 
