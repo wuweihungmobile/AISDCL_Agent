@@ -60,3 +60,12 @@
 - **成因**：WP-QV 把交接包額度欄的預設取數從只讀快取改為 `ruling_io.current` → `gather` → `pace_state`（設計 C14，產品行為不改）。該測試走 FRESH 支線時圍籬快取是空的、補量名額可搶 ⇒ 以真憑證打額度端點，再把真讀數寫進本模組共用的圍籬快取；180 秒內後面兩類讀到真週軸 ≥ converge ⇒ 改走 FRESH ⇒ 多一次真排程查詢被數成 spawn、`_fake_run` 在 spawn 前快照之前就寫了 scratch（判準④ files_changed 歸零）。綠紅取決於真週軸當下高低與快取新鮮度，所以 WP-QV 乾淨 worktree 那次沒紅。
 - **修法（測試側結構正解）**：①模組圍籬 `_pin_handoff_hermetic`（掛在 `_pin_sentinel_off`，巢狀補釘同路）把 `ensure_mechanical` 的兩縫換成零副作用版本——排程列舉只准 git、其餘 rc 127，額度欄只讀快取——交接包其餘欄位照真函式產生，本模組所有 FRESH 選路一次罩住；②兩支 `_run_resume` 類宣告專屬空額度快取（與既有 `AUTOSDD_QUOTA_CACHE_DIR` 隔離類同形），選路輸入不再取自共用快取。產品碼、斷言、門檻都沒動，沒加 retry／skip。
 - **回歸鎖**：`Flk2HermeticResumeRouteTest` 三案：圍籬在時 FRESH 支線零端點、零非 git 行程；注入組拔掉圍籬，同一呼叫必打端點（Windows 另起排程查詢）；共用快取種週軸 95% 並拔掉圍籬時兩類照樣綠。紅綠自證：拿掉兩類的專屬快取 ⇒ 第三案以與真實紅同形的兩筆失敗轉紅；拿掉模組圍籬 ⇒ 第一案 `([(4,)], [['powershell.exe']]) != ([], [])`；還原後三案與兩類全綠。
+
+## H 項：DEF-200-656 windows-compat-ci 分片 3/3 的 E2E-AP-QV-10 `stderr` 為 None（FLK3）
+
+- **症狀**：GitHub windows-compat-ci run 45761837270（commit `33ea299d`）分片 3/3 唯一紅：`SingleHouseLockE2ETest.test_e2e_ap_qv_10_planted_site_turns_the_real_lock_red` 第 893 行 `red.stderr[-800:]` → `TypeError: 'NoneType' object is not subscriptable`。本機全套未重現。
+- **排除**：根層 runner 每個派工單位各起一個子行程（`tools/lib/parallel_shard.py` 的 Popen），別的模組換掉 `subprocess.run` 不可能外洩進來；本檔自身也沒有替換 `subprocess.run`。斷言訊息參數是先求值的，所以 None 並不代表 rc 為 0——「植入站點沒讓鎖紅」這個推測不成立。
+- **成因**：E2E 的子行程 `python -m unittest …` 以繼承的環境啟動；CI runner 沒有 `PYTHONUTF8`／`PYTHONIOENCODING`，子行程 stderr 用 locale 碼頁寫斷言訊息裡的中文，父端以 `encoding="utf-8"` 解碼。Windows 的 `subprocess._communicate` 用讀取執行緒解碼，解碼失敗時執行緒死掉、緩衝是空的，回傳值就是 `stderr=None`（不拋例外）。本機殼層設了 `PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8:surrogateescape`，所以看不到。
+- **重現**：同一台開發機移除這兩個變數後單跑該類 ⇒ 讀取執行緒印 `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa1`，測試以與 CI 逐字相同的 `TypeError` 失敗。
+- **修法（消除成因）**：子行程環境改由 `_utf8_child_env` 產生：清空 `PYTHONPATH`（原本的沙盒密閉）並強制 `PYTHONUTF8=1`＋`PYTHONIOENCODING=utf-8`。兩個都要：`PYTHONIOENCODING` 優先序高於 UTF-8 模式，只設 `PYTHONUTF8` 擋不住繼承來的值（探針：父環境 `PYTHONIOENCODING=cp950`、只補 `PYTHONUTF8=1` ⇒ 仍得 `None`；用 helper ⇒ 得原字串）。父端補 `errors="replace"`（倉庫慣例），解碼不一致時不再整段丟失。
+- **回歸鎖**：`test_child_env_forces_utf8_even_under_a_locale_encoded_parent`：父環境刻意拔掉 `PYTHONUTF8`、設 `PYTHONIOENCODING=cp950`，子行程寫中文到 stderr，父端以 utf-8 解碼（不帶 `errors`）必須逐字取回。紅綠自證見上一條探針；修後在無 UTF-8 模式的環境單跑該類兩案皆綠，E2E 的 `rc≠0` 斷言照常成立。

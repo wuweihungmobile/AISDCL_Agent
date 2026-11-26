@@ -887,14 +887,32 @@ class SingleHouseLockE2ETest(unittest.TestCase):
             return subprocess.run(
                 [sys.executable, "-m", "unittest",
                  f"{Path(__file__).stem}.SingleHouseTest.test_sites_equal_allowlist"],
-                capture_output=True, text=True, encoding="utf-8", timeout=300,
-                cwd=str(root / "tools" / "tests"), env={**os.environ, "PYTHONPATH": ""})
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
+                cwd=str(root / "tools" / "tests"), env=_utf8_child_env(os.environ))
         red = run()
         self.assertNotEqual(red.returncode, 0, red.stderr[-800:])
         self.assertIn("tools/lib/zz_private_peek.py", red.stderr)
         planted.unlink()
         green = run()
         self.assertEqual(green.returncode, 0, green.stderr[-1500:])
+
+    def test_child_env_forces_utf8_even_under_a_locale_encoded_parent(self):
+        """FLK3（DEF-200-656）：CI Windows 沒有 PYTHONUTF8 ⇒ 子行程 stderr 用 locale 碼頁寫中文，
+        父端以 utf-8 解碼時 Windows 讀取執行緒死掉、`stderr is None`。子行程環境必須自己強制
+        UTF-8，不能賴繼承來的環境（這裡刻意餵 cp950 與無 UTF-8 模式的父環境）。"""
+        import subprocess  # noqa: PLC0415
+        poisoned = {k: v for k, v in os.environ.items() if k != "PYTHONUTF8"}
+        poisoned["PYTHONIOENCODING"] = "cp950"
+        done = subprocess.run([sys.executable, "-c", "import sys; sys.stderr.write('單一判讀家')"],
+                              capture_output=True, text=True, encoding="utf-8", timeout=60,
+                              env=_utf8_child_env(poisoned))
+        self.assertEqual(done.stderr, "單一判讀家")
+
+
+def _utf8_child_env(base) -> dict:
+    """E2E 子行程環境：清空 PYTHONPATH（沙盒密閉），並強制 UTF-8 stdio（父端以 utf-8 解碼）。
+    兩個變數都要：PYTHONIOENCODING 的優先序高於 UTF-8 模式，只設 PYTHONUTF8 擋不住繼承來的值。"""
+    return {**base, "PYTHONPATH": "", "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
 
 
 class LocTest(unittest.TestCase):

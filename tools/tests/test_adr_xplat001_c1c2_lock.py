@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9775,
+    "test_adr_xplat001_c1c2_lock.py": 9787,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -770,7 +770,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sessionctl_parkprobe.py": 660,
     "test_sessionctl_quotawall.py": 1091,
     "test_sessionctl_quotawall_q4.py": 494,
-    "test_sessionctl_qv.py": 1518,
+    "test_sessionctl_qv.py": 1536,
     "test_sessionctl_roster.py": 953,
     "test_sessionctl_se_isolation.py": 694,
     "test_sessionctl_seal.py": 394,
@@ -3404,6 +3404,12 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "仍生效致唯一判決誤判）：test_sessionctl_qv.py +322（AcctSwitchTest 十一案與真標記、"
      "真 /login 記錄逐字重放）加本檔自身重釘漂移。逐檔清單見 CrossPlatform_R145_Scan_Findings.md "
      "尾端 R214 標記行；規格＝docs/02_architecture/QuotaVerdict_AccountSwitch_Design.md。"),
+    ("R214", 191634, 191664, +30,  # round-label-ok r218flk3
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE "
+     "的R214 名冊列承接] 同標籤第七十五列（FLK3：DEF-200-656 E2E 子行程 stderr 依 locale 碼頁"
+     "寫中文、父端 utf-8 解碼失敗得 None）：test_sessionctl_qv.py +18（子行程強制 UTF-8 環境、"
+     "回歸鎖一案）加本檔自身 +12。逐檔清單見 CrossPlatform_R145_Scan_Findings.md "
+     "尾端 R214 標記行；證據＝docs/06_quality/CrossPlatform_R218_TestHygiene_Evidence.md。"),
 )
 
 
@@ -3505,7 +3511,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (63122, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (63152, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3599,6 +3605,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "第七十二列（r218wpqv）+1376＝62663。"
         "第七十三列（r218flk2）+125＝62788。"
         "第七十四列（r218wpac）+334＝63122。"
+        "第七十五列（r218flk3）+30＝63152。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -4263,6 +4270,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "WP-AC：換帳號偵測與舊帳號標記作廢回歸鎖："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok r218flk3
+     "FLK3：E2E 子行程在無 UTF-8 模式的父環境下仍輸出可解碼 stderr 的回歸鎖："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -4438,10 +4449,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 421
+_REPIN_LOG_FROZEN_PREFIX_LEN = 422
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "bb92b2fa5db64e0cfd340c4a46fbb7ab221dcc42a780ca399b07801faaeb4f57")
+    "453bb2c358a145155e27cf0f5f171cc3f7741eff8e45490ab15b8bc245edd4f8")
 
 
 def repin_log_history_digest(
@@ -4704,6 +4715,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "77a6d236ec9e", "168a8a4fa7c1", "DEF-200-653"),  # round-label-ok r218wpqvledger
     ("R214", "168a8a4fa7c1", "2d525c178690", "DEF-200-654"),  # round-label-ok r218flk2ledger
     ("R214", "2d525c178690", "bb92b2fa5db6", "DEF-200-655"),  # round-label-ok r218wpacledger
+    ("R214", "bb92b2fa5db6", "453bb2c358a1", "DEF-200-656"),  # round-label-ok r218flk3ledger
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
