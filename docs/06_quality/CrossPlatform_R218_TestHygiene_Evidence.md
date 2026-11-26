@@ -70,6 +70,13 @@
 - **修法（消除成因）**：子行程環境改由 `_utf8_child_env` 產生：清空 `PYTHONPATH`（原本的沙盒密閉）並強制 `PYTHONUTF8=1`＋`PYTHONIOENCODING=utf-8`。兩個都要：`PYTHONIOENCODING` 優先序高於 UTF-8 模式，只設 `PYTHONUTF8` 擋不住繼承來的值（探針：父環境 `PYTHONIOENCODING=cp950`、只補 `PYTHONUTF8=1` ⇒ 仍得 `None`；用 helper ⇒ 得原字串）。父端補 `errors="replace"`（倉庫慣例），解碼不一致時不再整段丟失。
 - **回歸鎖**：`test_child_env_forces_utf8_even_under_a_locale_encoded_parent`：父環境刻意拔掉 `PYTHONUTF8`、設 `PYTHONIOENCODING=cp950`，子行程寫中文到 stderr，父端以 utf-8 解碼（不帶 `errors`）必須逐字取回。紅綠自證見上一條探針；修後在無 UTF-8 模式的環境單跑該類兩案皆綠，E2E 的 `rc≠0` 斷言照常成立。
 
+## J 項：DEF-200-658 `ci_wait` 把 GitHub 排隊逾時當真紅（WP-CI，REQ-AP-CI-01）
+
+- **症狀**：macos-compat-ci 的 macOS smoke job 首跑排隊恰 15 分、runner 名稱空白即 `cancelled`、零步驟，三次真實發生（run 45427135743、45439253352、45456241389，皆 2026-11-24）；`ci_wait` 判 fail，主控手動 `gh run rerun --failed` 後立即全綠。
+- **成因**：外部現象（GitHub 排隊逾時取消）與真失敗在 run 層同為 `cancelled`，只有 attempt 的 jobs 資料能分辨（唯讀 `gh api …/attempts/<n>/jobs`：`steps==[]`、`runner_name==""`、`created_at→completed_at` 約 15.0 分）。
+- **修法**：`classify_attempt`／`queue_timeout_minutes` 判形態，`wait()` 在「全部完成且失敗者全是排隊逾時」才 `gh run rerun <id> --failed` 續等，同 SHA ≤ 2 輪，超過 `fail reason=queue_timeout_exhausted`；同 ref 在 job 存活期間有不同 SHA 的 run＝concurrency 自取消，不重跑；查不到一律保守判 fail。痕跡 `autosdd_ci_queue.jsonl`（`ci_queue_timeout {run, attempt, minutes}`）。
+- **驗證**：唯讀 GET 對三支真 run 重放，`queue_timeout_minutes` 回 15.02／15.0／15.0；單元＋真 `ci_wait.py` 行程（gh 以 sitecustomize 重放錄製形狀）全綠；八個突變全數殺死。規格＝`docs/02_architecture/Autopilot_Pipeline_Design.md` §6、`docs/03_testing/contracts/TCS-Autopilot-20261125.md` REQ-AP-CI-01。
+
 ## I 項：DEF-200-657 macos-compat-ci 兩支 macOS 專屬紅（FLK4）
 
 - **症狀**：GitHub macos-compat-ci run 45789188660（commit `96ff7665`）兩紅：`AcctSwitchTest.test_trigger_credentials_file` 的 `[] != ['T1']`；`QuotaCliE2ETest.test_e2e_ap_qv_07_billing_and_unmeasured`（billing＝unknown 子案）`json.loads` 得 `JSONDecodeError … char 0`。Windows／ubuntu 皆綠。
