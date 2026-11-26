@@ -721,7 +721,9 @@ class RulingWaitResetTest(_Fenced):
         self.assertIn(QR.WAIT_RESET, ruling_io.SENTINEL_WAIT_ACTIONS)
         r = self._wait()
         snap = SimpleNamespace(ruling=r)
-        with mock.patch.object(ruling_io, "gather", lambda *_a, **_k: snap):
+        # 哨兵巡邏只讀快取（零 token、零子行程）⇒ 注入點是 `cached`，不是會補量的 `gather`
+        with mock.patch.object(ruling_io, "cached", lambda *_a, **_k: snap), \
+                mock.patch.object(ruling_io.qg, "read_halt_marker", lambda _sid: None):
             halt = ruling_io.sentinel_halt(SID, None, NOW, {"AUTOSDD_UNATTENDED": "1"})
             self.assertIsNone(ruling_io.sentinel_halt(SID, None, NOW, {}),
                               "互動窗口的 WAIT_RESET 由 keepwarm 叫醒，不交哨兵")
