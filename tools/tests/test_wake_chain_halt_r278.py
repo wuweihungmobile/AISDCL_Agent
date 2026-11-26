@@ -590,8 +590,8 @@ class HaltedBandLineTest(unittest.TestCase):
 
 
 class PaceReportShortCircuitsDuringHaltTest(unittest.TestCase):
-    """D23（SD-07；INV-H3）→ QVD §6（v2.1.28 R-4.1.6-6 取代）：halt 有效不再短路取數。
-    原詳見 docs/06_quality/
+    """D23（SD-07；INV-H3）→ QVD §6（R-4.1.6-6 取代）：受測 `tools/lib/sessionctl/ruling_io.py`
+    的 `pace_report()`——halt 有效不再短路取數。原詳見 docs/06_quality/
     CrossPlatform_DEF200275_Context_Metering_Evidence.md〈第六輪〉。"""
 
     def setUp(self) -> None:
