@@ -155,6 +155,7 @@
 | DEF-200-651 | 2026-11-25 | pre-push 全套 AT-749-9-2 紅（本欄刻意零輪號） | **觀測孫行程與牆鐘砍樹賽跑**：負載下輪詢窗落在砍樹後 | P3 | 砍樹前先等到觀測 | fixed：CLOSE3；`test_selfimproving_p7_push.py` |
 | DEF-200-652 | 2026-11-25 | pre-push 全套 switch-plan smoke 得 PARK_UNTIL（本欄刻意零輪號） | **smoke 以真憑證線上補量額度** | P3 | 設定目錄圍到 tmp | fixed：CLOSE3；`test_sessionctl_switchplan.py` |
 | DEF-200-653 | 2026-11-26 | 短窗 87%、14 分後重置卻判 park；重置後仍被舊 halt 標記壓住（本欄刻意零輪號） | **額度判讀多家各自比門檻，無單一權威判決** | P2 | 單一判決 `QUOTA_VERDICT=`＋單一家機械鎖（QVD） | fixed：WP-QV；`test_sessionctl_qv.py` |
+| DEF-200-654 | 2026-11-26 | 整檔直跑 `test_context_budget_guard` 兩支 `_run_resume` 類紅、單跑綠（本欄刻意零輪號） | **FRESH 選路產交接包時以真憑證補量並跑真排程查詢，真週軸讀數污染模組共用快取** | P3 | 模組圍籬罩住交接包兩縫＋兩類宣告專屬空快取 | fixed：FLK2；`test_context_budget_guard.py` |
 
 > **R41「四方複審裁決總結」敘事段落已搬遷至 [`AutoSDD_Defect_Log_archive_17.md`](AutoSDD_Defect_Log_archive_17.md)（R43 帳本 housekeeping，逐字保全）。**
 

@@ -71,6 +71,7 @@ import sdd_latest  # noqa: E402  # DEF-200-275 第七輪 D28：現查 AISDLC_SDD
 import sentinel_lifecycle  # noqa: E402  # R82／HELM-02：哨兵生命週期判準
 from _ps_engine import production_engine  # noqa: E402  # R60 E-A-03：5.1 優先（DEF-101-509 判準）
 
+from lib.sessionctl import handoff as HANDOFF  # noqa: E402  # FLK2：FRESH 路交接包的模組圍籬
 from lib.sessionctl import ruling_io as RIO  # noqa: E402  # QVD §9：pace_report 搬出 hub
 
 
@@ -122,6 +123,37 @@ def _pin_sentinel_off() -> None:
     for name in {spec.name for spec in quota_policy.ENV_SPEC} - {guard.SENTINEL_OFF_ENV}:
         os.environ.pop(name, None)
     os.environ.update(_factory_policy_env())
+    _pin_handoff_hermetic()
+
+
+#: FLK2（DEF-200-654）：`handoff.ensure_mechanical` 進模組前的原值（只捕捉一次，巢狀補釘不疊層）。
+_HANDOFF_PIN_ORIGINAL = None
+
+
+def _hermetic_handoff_runner(argv, **kwargs):
+    """交接包機械層在本模組只准跑 git（唯讀、與 relay 快照同一面）；其餘一律 rc 127、不起行程。"""
+    if isinstance(argv, list) and argv[:1] == ["git"]:
+        return HANDOFF.build.default_runner(argv, **kwargs)
+    return 127, "FLK2 測試圍籬：本模組不查真排程器", None
+
+
+def _pin_handoff_hermetic() -> None:
+    """FLK2（DEF-200-654）：planner FRESH 選路與 hook 出聲都會呼叫 `handoff.ensure_mechanical`，
+    其預設縫會真的跑 `Get-ScheduledTask` 並經 `ruling_io.gather` 用真憑證打額度端點，再把**真讀數**
+    寫進本模組共用的圍籬快取；之後 180 秒內每支讀快取的測試都吃到開發機的真週軸。這裡把兩個縫
+    換成零副作用版本（排程列舉 rc 127、額度欄只讀快取），交接包其餘欄位照真函式產生。冪等。"""
+    global _HANDOFF_PIN_ORIGINAL
+    if _HANDOFF_PIN_ORIGINAL is None:
+        _HANDOFF_PIN_ORIGINAL = HANDOFF.ensure_mechanical
+    HANDOFF.ensure_mechanical = functools.partial(
+        _HANDOFF_PIN_ORIGINAL, runner=_hermetic_handoff_runner,
+        quota_fn=lambda now: qg.read_quota(now))
+
+
+def _unpin_handoff_hermetic() -> None:
+    """還原 `_pin_handoff_hermetic`；冪等（理由同 `_unpin_sentinel_off`）。"""
+    if _HANDOFF_PIN_ORIGINAL is not None:
+        HANDOFF.ensure_mechanical = _HANDOFF_PIN_ORIGINAL
 
 
 def _unpin_sentinel_off() -> None:
@@ -136,6 +168,7 @@ def _unpin_sentinel_off() -> None:
         os.environ.pop(name, None)
         if original is not None:
             os.environ[name] = original
+    _unpin_handoff_hermetic()
 
 
 def _run_nested_suite(suite: unittest.TestSuite) -> unittest.TestResult:
@@ -5820,6 +5853,10 @@ class RunResumeWritesHandbackPathIntoStateTest(unittest.TestCase):
         self.addCleanup(lambda: os.environ.pop(endurance_env.HANDBACK_DIR_ENV, None)
                         if old is None else os.environ.update(
                             {endurance_env.HANDBACK_DIR_ENV: old}))
+        # FLK2（DEF-200-654）：選路吃額度快取的週軸（`resume_route.weekly_why`）；給專屬空快取
+        # ⇒ 必走 RESUME，不隨模組共用快取裡別支測試留下的讀數改道 FRESH。
+        self.enterContext(unittest.mock.patch.dict(
+            os.environ, {quota_meter.CACHE_DIR_ENV: str(self.tmp / "qcache")}))
         self.plan = self.tmp / "plan.md"
         self.transcript = self.tmp / "sid-f1.jsonl"
         self.transcript.write_text('{"type":"assistant"}\n', encoding="utf-8")
@@ -6004,6 +6041,8 @@ class RunResumeOtherDriverTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = _tmpdir(self, "od-run-")
+        self.enterContext(unittest.mock.patch.dict(  # FLK2：專屬空快取，理由同 F1 類
+            os.environ, {quota_meter.CACHE_DIR_ENV: str(self.tmp / "qcache")}))
         (self.tmp / "p.md").write_text("# 任務書", encoding="utf-8")
         self.transcript, self.spawned, self.during_leg = self.tmp / "sid-od.jsonl", [], lambda: None
         real = planner.subprocess.run
@@ -6146,6 +6185,80 @@ class ArmedPlanStepThreeTest(unittest.TestCase):
             argv = " ".join(route["argv"])
             self.assertEqual(route["strategy"], strategy)
             self.assertTrue(planner._RESUME_RULES in argv and "Workflow(" not in argv, argv)
+
+
+class Flk2HermeticResumeRouteTest(unittest.TestCase):
+    """FLK2（DEF-200-654）回歸鎖：受測碼＝`tools/session_resume_planner.py::choose_resume_route`
+    的 FRESH 支線（`tools/lib/sessionctl/handoff.py::ensure_mechanical`）與兩支 `_run_resume`
+    類別的選路輸入。立案：整檔直跑時 `ArmedPlanStepThreeTest` 經 FRESH 支線用真憑證打額度端點、
+    把開發機真週軸 81% 寫進模組共用快取，後面兩類在 180 秒內讀到它改道 FRESH，多出一次真
+    `Get-ScheduledTask` ⇒ spawn 計數 1≠0、判準④ files_changed 被提前寫髒。"""
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self, "flk2-")
+        self.enterContext(unittest.mock.patch.dict(os.environ, {
+            quota_meter.CACHE_DIR_ENV: str(self.tmp / "ambient"),
+            endurance_env.HANDOFF_DIR_ENV: str(self.tmp / "handoff")}))
+        (self.tmp / "ambient").mkdir()
+        self.enterContext(unittest.mock.patch.object(  # 名額可搶：未圍住時必走補量
+            qg, "refresh_stamp_path", lambda: self.tmp / "refresh.stamp"))
+        self.endpoint: list = []
+        self.enterContext(unittest.mock.patch.object(
+            quota_meter, "measure_detail",
+            lambda *a, **k: self.endpoint.append(a) or (None, "flk2-spy")))
+        self.foreign: list = []
+        real = subprocess.run
+
+        def _spy(argv, **kwargs):
+            if isinstance(argv, list) and argv[:1] == ["git"]:
+                return real(argv, **kwargs)
+            self.foreign.append(argv[:1] if isinstance(argv, list) else argv)
+            return unittest.mock.MagicMock(returncode=0, stdout="", stderr="")
+
+        self.enterContext(unittest.mock.patch.object(subprocess, "run", _spy))
+
+    def _bare(self) -> None:
+        """拔掉模組圍籬，收尾還原成**進來前**的值（不無條件補釘，免得遮住圍籬本身沒釘上）。"""
+        self.addCleanup(setattr, HANDOFF, "ensure_mechanical", HANDOFF.ensure_mechanical)
+        _unpin_handoff_hermetic()
+
+    def _fresh(self, sid: str) -> dict:
+        plan = self.tmp / "plan.md"
+        plan.write_text("# 任務書", encoding="utf-8")
+        transcript = _write_jsonl(self.tmp / f"{sid}.jsonl", [1000])
+        return planner.choose_resume_route("claude", sid, transcript, str(plan), max_bytes=1)
+
+    def test_the_fresh_branch_touches_neither_the_endpoint_nor_the_scheduler(self) -> None:
+        route = self._fresh("sid-flk2-pinned")
+        self.assertEqual(route["strategy"], planner.STRATEGY_FRESH)
+        self.assertIn("按交接包繼續：讀 ", " ".join(route["argv"]), "交接包仍須照真函式產生")
+        self.assertEqual((self.endpoint, self.foreign), ([], []),
+                         "模組圍籬沒罩住 FRESH 支線：交接包機械層打了額度端點或起了非 git 行程")
+
+    def test_red_without_the_pin_the_same_call_reaches_both(self) -> None:
+        """注入組：拔掉模組圍籬，同一呼叫必打端點（全平台）且在 Windows 起排程查詢。"""
+        self._bare()
+        self.assertEqual(self._fresh("sid-flk2-bare")["strategy"], planner.STRATEGY_FRESH)
+        self.assertGreaterEqual(len(self.endpoint), 1, "判準失去鑑別力：未圍住也沒打端點")
+        if sys.platform == "win32":
+            self.assertIn(["powershell.exe"], self.foreign)
+
+    def test_the_two_resume_classes_ignore_an_ambient_converge_band_cache(self) -> None:
+        """模組共用快取被種上週軸 95%（新鮮）時，兩類照樣綠：它們的選路輸入是自己宣告的。
+        刻意拔掉模組圍籬，只驗類別層那一道（兩道各自有鑑別力，不靠彼此兜底）。"""
+        self._bare()
+        _quota_cache(self.tmp / "ambient", 95.0, "weekly_all", 5 * 86400.0)
+        self.assertTrue(resume_route.weekly_why(), "前置失效：種下的快取沒有讓週軸命中")
+        live = "test_a_live_driver_refuses_the_spawn_but_a_stale_or_limit_only_one_does_not"
+        relay = "test_state_handback_path_is_populated_and_relay_next_is_reached"
+        for case in (RunResumeOtherDriverTest(live),
+                     RunResumeWritesHandbackPathIntoStateTest(relay)):
+            with self.subTest(case.id()):
+                result = unittest.TestResult()
+                case.run(result)
+                self.assertEqual(
+                    (result.testsRun, len(result.failures), len(result.errors)), (1, 0, 0),
+                    "".join(text for _case, text in result.failures + result.errors)[-1500:])
 
 
 class PrintModeBgCeilingTest(unittest.TestCase):

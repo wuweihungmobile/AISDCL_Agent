@@ -52,3 +52,11 @@
 - **DEF-200-651 成因**：舊載具用背景執行緒每 0.5 秒以 `Get-CimInstance` 查一次行程表；孫行程只活在「hook 起來」到「牆鐘 3 秒砍樹」之間。時間線探針（包住 `sleeper_pids` 記每次查詢起訖與命中）：閒置時活著的窗口約 2.3 秒、可命中 3～4 次；60 支燒機行程＋6 條 CIM 查詢迴圈下，單次查詢最長 2.53 秒、命中降到 1 次（4 次中 3 次只剩 1 次命中）。並行全套下守門 git 呼叫把 hook 推遲、查詢又更慢，查詢窗整個落在砍樹之後 ⇒ `seen` 為空。產品（`runner.run_argv` 逾時砍樹）沒有缺陷，缺陷在觀測與砍樹賽跑。
 - **修法（結構正解）**：測試把 `runner._timeout_kill` 包一層：逾時那一刻先查到孫行程（上界 `SEEN_GATE_SECONDS=20`，小於孫行程的 27.31 秒）才呼叫真的砍樹。觀測不再跟砍樹賽跑；hook 起得晚也能等到。量 `run_argv` 耗時時扣掉這段等待，(ii)「逾時＋寬限內返回」的鑑別力不變。產品碼、牆鐘、寬限、斷言門檻都沒動。
 - **回歸鎖**：`test_DEF_200_651_kill_is_judged_even_when_the_hook_is_late_past_the_wall`：hook 先睡 4.07 秒（超過牆鐘）才生出帶標記的孫行程，把「負載下 hook 起得晚」做成確定性輸入。紅綠自證：把 `SEEN_GATE_SECONDS` 改成 0（砍樹不等觀測，等同舊載具），該案以與真實紅逐字相同的訊息轉紅；還原後 `TestLockAndWall` 6 案全綠。
+
+## G 項：DEF-200-654 整檔直跑兩支 `_run_resume` 類紅（FLK2）
+
+- **症狀**：2026-11-26 主控在 WP-QV 合入後（HEAD `5fe81290`）整檔直跑 `test_context_budget_guard.py` 兩紅：`RunResumeOtherDriverTest`〔近期有人打字〕`(1, 1, True) != (1, 0, True)`、`RunResumeWritesHandbackPathIntoStateTest` 的 `[] != [(1, '--resume-tick')]`；`-k` 單跑恆綠。本棒照原指令重跑三次皆重現。
+- **重現探針**（scratchpad，不改產品碼）：在兩類 `setUp` 後包住 `subprocess.run`，非 git 呼叫印 argv 與堆疊 ⇒ 被數成 spawn 的那一次是 `powershell.exe … Get-ScheduledTask`，來自 `choose_resume_route` → `handoff.ensure_mechanical` → `handoff_build._schedule_rows`；選路紀錄為 FRESH，理由「週軸 weekly_all=81%、seven_day=81% 已達 converge 帶」。逐支比對 `quota_meter.cache_path()` 內容雜湊 ⇒ 唯一改寫模組共用圍籬快取的是 `ArmedPlanStepThreeTest.test_the_resume_prompt_points_a_todo_section_three_at_the_handback_and_memory`，寫入 `source=endpoint`、與開發機真快取同值的讀數；環境變數逐支比對零洩漏。
+- **成因**：WP-QV 把交接包額度欄的預設取數從只讀快取改為 `ruling_io.current` → `gather` → `pace_state`（設計 C14，產品行為不改）。該測試走 FRESH 支線時圍籬快取是空的、補量名額可搶 ⇒ 以真憑證打額度端點，再把真讀數寫進本模組共用的圍籬快取；180 秒內後面兩類讀到真週軸 ≥ converge ⇒ 改走 FRESH ⇒ 多一次真排程查詢被數成 spawn、`_fake_run` 在 spawn 前快照之前就寫了 scratch（判準④ files_changed 歸零）。綠紅取決於真週軸當下高低與快取新鮮度，所以 WP-QV 乾淨 worktree 那次沒紅。
+- **修法（測試側結構正解）**：①模組圍籬 `_pin_handoff_hermetic`（掛在 `_pin_sentinel_off`，巢狀補釘同路）把 `ensure_mechanical` 的兩縫換成零副作用版本——排程列舉只准 git、其餘 rc 127，額度欄只讀快取——交接包其餘欄位照真函式產生，本模組所有 FRESH 選路一次罩住；②兩支 `_run_resume` 類宣告專屬空額度快取（與既有 `AUTOSDD_QUOTA_CACHE_DIR` 隔離類同形），選路輸入不再取自共用快取。產品碼、斷言、門檻都沒動，沒加 retry／skip。
+- **回歸鎖**：`Flk2HermeticResumeRouteTest` 三案：圍籬在時 FRESH 支線零端點、零非 git 行程；注入組拔掉圍籬，同一呼叫必打端點（Windows 另起排程查詢）；共用快取種週軸 95% 並拔掉圍籬時兩類照樣綠。紅綠自證：拿掉兩類的專屬快取 ⇒ 第三案以與真實紅同形的兩筆失敗轉紅；拿掉模組圍籬 ⇒ 第一案 `([(4,)], [['powershell.exe']]) != ([], [])`；還原後三案與兩類全綠。
