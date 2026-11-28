@@ -1547,8 +1547,8 @@ def main(argv: list[str]) -> int:
     # 不外溢（付費探針仍為互動 session 保留）。
     if args.sentinel_tick or args.resume_tick:
         os.environ[UNATTENDED_ENV] = "1"
-    if args.sentinel_tick: return _sentinel_tick(args)  # noqa: E701 — D23：LOC 餘裕為 0 起，本檔沿用既有單行 if 慣例
-    if args.resume_tick: return _resume_tick(args)  # noqa: E701
+    if args.sentinel_tick: return __import__("lib.sessionctl.crashguard", fromlist=["_"]).planner_tick("sentinel-tick", args, sys.modules[__name__])  # noqa: E501,E701 — WP-SW REQ-CTL-50：排程入口崩潰護欄（判準全在 crashguard，惰性 import 不佔 LOC）
+    if args.resume_tick: return __import__("lib.sessionctl.crashguard", fromlist=["_"]).planner_tick("resume-tick", args, sys.modules[__name__])  # noqa: E501,E701
     if args.reconcile: return quota_reconcile.cli(args.reconcile, args.reconcile_at)  # noqa: E701,E501
     if args.probe_quota:
         if (refused := sched_isolation.tick_gate(_REPO_ROOT, "main:probe_quota", None, switch.trace, exe=args.probe_command)) is not None: return refused  # noqa: E501,E701 — DES S2：互動動詞同樣不得由沙盒工具副本呼叫真 `claude`

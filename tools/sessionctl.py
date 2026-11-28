@@ -111,16 +111,20 @@ def main(argv: list[str] | None = None) -> int:
 
         return statuscmd.switch_plan_cli(rest)
     if verb == "oldwin":  # R217 §7.1：舊視窗有條件自動關閉的重試／回收入口
-        from lib.sessionctl import oldwin_sched
+        from lib.sessionctl import crashguard, oldwin_sched
 
+        if "--retry" in rest:  # WP-SW REQ-CTL-50：排程到點的舊窗重試 job 也過崩潰護欄
+            return crashguard.run("oldwin-job", lambda: oldwin_sched.cli(rest))
         return oldwin_sched.cli(rest)
     if verb == "advice":
         return _advice(rest)
     if verb == "rush":  # ADR-XPLAT-004 §2.15 D2：趕工戳記（判準與讀寫全在 `lib/quota_rush.py`）
         return _rush(rest)
     if verb == "park":  # ADR-XPLAT-004 §2.17：額度自願停工續航
-        from lib.sessionctl import park_cli
+        from lib.sessionctl import crashguard, park_cli
 
+        if "--fire" in rest:  # WP-SW REQ-CTL-50：排程到點 job 的外層崩潰護欄（留痕＋標記走失敗鏈）
+            return crashguard.run_park(park_cli.cli, rest)
         return park_cli.cli(rest)
     if verb == "watch":  # R3 WP-4A：背景代理監督（阻塞到有事發生才結束＝叫醒主控）
         from lib.sessionctl import watch
