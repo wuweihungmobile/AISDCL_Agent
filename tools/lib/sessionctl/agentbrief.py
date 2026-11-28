@@ -291,14 +291,56 @@ def render_rows(rows: list[dict]) -> str:
     return _fit([_block(r) for r in rows], COL12_MAX_CHARS, "；全清單見 `sessionctl status`")
 
 
-def render_cut(rows: list[dict]) -> str:
-    """被切／被 TaskStop／殘局代理清單（DES §6.4 三處出聲共用的同一份文字；**不自動重派**）。"""
+_CUT_SECTIONS = (("cut", "被額度切斷"), ("stopped", "主控已停止（TaskStop）"),
+                 ("residue", "殘局（擁有者已不在、非燒額度中）"))
+_TOKEN_SPLIT = re.compile(r"[\s｜|，。；：、（）()\[\]【】「」]+")
+
+
+def main_layer(pkg_text: str | None) -> str:
+    """交接包的**主控層**（`## 主控層` 之後；不含機械層）。判「已記入」只看這裡：機械層第 12 欄本來就列所有
+    代理，把它算進去＝恆為「已記入」，判準失去鑑別力（TCS MU-CTL-62）。"""
+    text = pkg_text or ""
+    at = text.find("## 主控層")
+    return text[at:] if at >= 0 else ""
+
+
+def recorded_in_main(row: dict, pkg_text: str | None) -> bool:
+    """主控層是否提到該代理：id 前 8 碼，或描述的首個詞元（以空白／`｜`／全形標點切；長度≥3 且含英數）。"""
+    main = main_layer(pkg_text)
+    if not main:
+        return False
+    if str(row.get("id") or "")[:8] and str(row["id"])[:8] in main:
+        return True
+    tokens = [t for t in _TOKEN_SPLIT.split(str(row.get("description") or "")) if t]
+    first = tokens[0] if tokens else ""
+    return len(first) >= 3 and any(c.isascii() and c.isalnum() for c in first) and first in main
+
+
+def _stopped_block(row: dict, pkg_text: str | None, pkg_path: str | None) -> str:
+    """`stopped` 一列：處置行換成「已記入交接包」或「交接包未記處置」；其餘行與第 12 欄同源逐字。"""
+    head = _block(row).rsplit("\n", 1)[0]
+    done = (f"主控已停止並已記入交接包 {pkg_path}（處置見主控層〈未完成〉）"
+            if recorded_in_main(row, pkg_text) and pkg_path
+            else "主控已停止、交接包未記處置 ⇒ 下一棒依第 12 欄重派")
+    return f"{head}\n  - 處置：{done}"
+
+
+def render_cut(rows: list[dict], *, pkg_text: str | None = None, pkg_path: str | None = None) -> str:
+    """被切／被 TaskStop／殘局代理清單（DES §6.4 三處出聲共用的同一份文字；**不自動重派、不再寫「由主控
+    決定」**）。三種狀態各自一段標題；`stopped` 的處置看本 sid 最新已封存包的主控層是否提到它
+    （`pkg_text`／`pkg_path` 缺省＝找不到包 ⇒「未記處置」句）。第 12 欄 `render_rows` 逐字不變。"""
     cut = [r for r in rows if r.get("status") in ("cut", "stopped", "residue")]
     if not cut:
         return ""
-    return (f"有 {len(cut)} 支背景代理被切斷／停止／未收尾（不自動重派，由主控決定）：\n"
-            + render_rows(cut))
-
+    parts = []
+    for status, title in _CUT_SECTIONS:
+        mine = [r for r in cut if r["status"] == status]
+        if not mine:
+            continue
+        blocks = [_stopped_block(r, pkg_text, pkg_path) if status == "stopped" else _block(r) for r in mine]
+        parts.append(f"{title}（{len(mine)} 支；不自動重派）：\n"
+                     + _fit(blocks, COL12_MAX_CHARS, "；全清單見 `sessionctl status`"))
+    return "\n".join(parts)
 
 def cut_list(agents: list[dict], sid: str, transcript: Path | None,
              projects: Path | None = None) -> list[dict]:

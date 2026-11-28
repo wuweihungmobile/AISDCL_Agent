@@ -2,7 +2,7 @@
 
 三處呼叫點（Stop `roster.stop_message`、`watch` 判決處置字尾、SessionStart `briefline`）用**同一個**
 文字函式 `agentbrief.render_cut(rows)`；判準用 `agentbrief.cut_kind`
-（DES 原寫 `rosterscope.cut_kind`，實作住 `agentbrief`）。**不自動重派**——只出聲，重派由主控決定。
+（DES 原寫 `rosterscope.cut_kind`，實作住 `agentbrief`）。**不自動重派**——只出聲，重派由主控依交接包處置。
 
 WHY 獨立成檔：`roster.py`／`watch.py`／`briefline.py` 各只能加極少行（DES §21 行數牆），判準與閂鎖
 一律放在這裡；所有函式 fail-open（出聲失敗不得擋回合結束／簡報／判決）。
@@ -40,6 +40,20 @@ def _key(row: dict) -> str:
     return f"{row['id']}:{row['kind']}"
 
 
+def _pkg(sid: str, env=None) -> dict:
+    """本 sid **最新已封存**包的 `{pkg_text, pkg_path}`（給 `render_cut` 判 `stopped` 是否已記入主控層）；
+    找不到包／沒封存／讀不到 ⇒ `{}`（走「未記處置」句，不拋、不因此推回）。"""
+    try:
+        from . import seal  # noqa: PLC0415 — lazy
+
+        row = seal.latest_package(sid, env)
+        if row is None or not seal.sealed_path(row["path"]).exists():
+            return {}
+        return {"pkg_text": Path(row["path"]).read_text(encoding="utf-8"), "pkg_path": str(row["path"])}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _cut_rows(agents: list[dict], sid: str, transcript, projects, *, full: bool) -> list[dict]:
     rows = agentbrief.collect(agents, sid, transcript, full=full, projects=projects)
     return [r for r in rows if r["status"] in CUT_STATUSES]
@@ -64,7 +78,7 @@ def stop_text(payload: dict, *, env: Mapping | None = None, now=None) -> str:
         keep = [a for a in agents if str(a.get("id")) in fresh_ids]
         rows = [r for r in _cut_rows(keep, sid, transcript, projects, full=True)
                 if r["id"] in fresh_ids]
-        text = agentbrief.render_cut(rows)
+        text = agentbrief.render_cut(rows, **_pkg(sid, env))
         if not text:
             return ""
         latch.parent.mkdir(parents=True, exist_ok=True)
@@ -79,7 +93,7 @@ def watch_text(agents: list[dict], sid: str, transcript, projects=None) -> str:
     """`watch` 判決處置之後的字尾（每次判決都帶、不過閂鎖——主控被叫醒時要看到全貌）；
     有內容時以換行結尾，沒有 ⇒ `""`。"""
     try:
-        text = agentbrief.render_cut(_cut_rows(agents, sid, transcript, projects, full=True))
+        text = agentbrief.render_cut(_cut_rows(agents, sid, transcript, projects, full=True), **_pkg(sid))
         return text + "\n" if text else ""
     except Exception:  # noqa: BLE001
         return ""
@@ -105,6 +119,6 @@ def brief_text(orphans: list[dict], sid: str | None) -> str:
     try:
         rows = [r for r in agentbrief.collect(_cut_orphans(orphans), sid or "", None, full=True)
                 if r["status"] == "cut"]
-        return ("\n" + agentbrief.render_cut(rows)) if rows else ""
+        return ("\n" + agentbrief.render_cut(rows, **_pkg(sid or ""))) if rows else ""
     except Exception:  # noqa: BLE001
         return ""

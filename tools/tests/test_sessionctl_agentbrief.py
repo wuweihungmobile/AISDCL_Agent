@@ -500,5 +500,74 @@ class SourceContractTest(unittest.TestCase):
                           promptchain.COL13_MAX_CHARS, promptchain.CHAIN_DEPTH), (200, 3, 8000, 5))
 
 
+# ───────────────────────────── WP-SW REQ-CTL-55（AT-CTL-123～128）：名冊訊息三段式
+def _wrow(aid: str, status: str, desc: str, **over) -> dict:
+    kind = {"cut": "usage_limit", "stopped": "stopped", "residue": "residue"}[status]
+    return {"id": aid, "description": desc, "model": "sonnet", "state": "quiet", "kind": kind, "ctx": 5000,
+            "last_at": "2026-11-26T23:46:36+08:00", "path": None, "error": "量不到：找不到代理逐字稿",
+            "status": status, **over}
+
+
+_PKG_HEAD = "# 交接包 <!-- sessionctl-handoff sid=406454ea-91fc-4481-9c11-b28ed7d9e95f at=x -->\n\n## 機械層\n\n"
+_AGENT_ID = "aee3d937b179d8639"
+
+
+class WpSwThreeSectionTest(unittest.TestCase):
+    """WHY：406454ea 逐字稿第 10412 行把 cut／stopped／residue 併成一句「由主控決定」，而同稿第 10306 行已
+    TaskStop、包第 284／288 行已記處置——掌舵者據此重提問題 3。三段標題＋看主控層才不再誤導。"""
+
+    ROWS = [_wrow("cutcutcut0000001", "cut", "額度切斷者"), _wrow(_AGENT_ID, "stopped", "FLK5 mac 修復"),
+            _wrow("resresres0000002", "residue", "殘局者")]
+
+    def render(self, rows=None, **kw) -> str:
+        return agentbrief.render_cut(rows or self.ROWS, **kw)
+
+    def test_at_ctl_123_three_headings_in_fixed_order_and_no_old_phrase(self) -> None:
+        text = self.render()
+        heads = ("被額度切斷", "主控已停止（TaskStop）", "殘局（擁有者已不在、非燒額度中）")
+        at = [text.index(h) for h in heads]
+        self.assertEqual(at, sorted(at))
+        for h in heads:
+            self.assertEqual(text.count(f"{h}（"), 1)
+        self.assertNotIn("由主控決定", text)
+        only = self.render([self.ROWS[1]])
+        self.assertIn("主控已停止（TaskStop）", only)
+        self.assertNotIn("被額度切斷", only)
+        self.assertNotIn("殘局（擁有者", only)
+
+    def test_at_ctl_124_stopped_recorded_by_id_prefix_or_first_description_token(self) -> None:
+        by_id = _PKG_HEAD + f"- 第 12 欄略\n\n## 主控層\n\n## 未完成\n- 代理 {_AGENT_ID[:8]} 已停\n"
+        self.assertIn("主控已停止並已記入交接包 X.md", self.render(pkg_text=by_id, pkg_path="X.md"))
+        # 406454ea 形狀：id 只在機械層第 12 欄、主控層只寫「FLK5」
+        real = _PKG_HEAD + f"## 12. 背景代理\n- {_AGENT_ID}｜FLK5 mac 修復\n\n## 主控層\n\n## 未完成\n- FLK5 已 TaskStop、半成品已保全\n"
+        self.assertIn("主控已停止並已記入交接包 X.md", self.render(pkg_text=real, pkg_path="X.md"))
+
+    def test_at_ctl_125_stopped_without_record_or_machine_layer_mention_only(self) -> None:
+        machine_only = _PKG_HEAD + f"## 12. 背景代理\n- {_AGENT_ID}｜FLK5 mac 修復\n\n## 主控層\n\n## 未完成\n- 別的事\n"
+        for pkg in (machine_only, None, ""):
+            with self.subTest(pkg=str(pkg)[:12]):
+                text = self.render(pkg_text=pkg, pkg_path="X.md")
+                self.assertIn("交接包未記處置 ⇒ 下一棒依第 12 欄重派", text)
+                self.assertNotIn("已記入交接包", text)
+
+    def test_at_ctl_126_cut_and_residue_actions_and_column12_unchanged(self) -> None:
+        text = self.render()
+        self.assertIn(f"建議處置：{agentbrief._ACTIONS['cut']}", text)  # noqa: SLF001
+        self.assertIn(f"建議處置：{agentbrief._ACTIONS['residue']}", text)  # noqa: SLF001
+        col12 = agentbrief.render_rows([self.ROWS[1]])
+        self.assertIn(f"建議處置：{agentbrief._ACTIONS['stopped']}", col12)  # noqa: SLF001
+        self.assertNotIn("處置：主控已停止", col12, "第 12 欄是交接包本身，建議處置逐字不變")
+
+    def test_at_ctl_127_no_new_pushback_decision_field(self) -> None:
+        src =(_REPO_ROOT / "tools" / "lib" / "sessionctl" / "agentbrief.py").read_text(encoding="utf-8")
+        self.assertNotIn('"decision"', src)
+        self.assertNotIn("decision:block", src)
+
+    def test_at_ctl_128_old_phrase_absent_from_all_session_tests_and_sources(self) -> None:
+        for name in ("agentbrief.py", "cutvoice.py", "roster.py", "briefline.py", "watch.py"):
+            path = _REPO_ROOT / "tools" / "lib" / "sessionctl" / name
+            self.assertNotIn("由主控決定", path.read_text(encoding="utf-8"), name)
+
+
 if __name__ == "__main__":
     unittest.main()
