@@ -893,13 +893,17 @@ def quota_prepare_actions(payload: dict, decision: quota_policy.Decision, now: d
 # 🔴 **零 token**：只讀快取；快取不可用時每 TTL 至多補量一次（`claim_refresh_slot()`），
 #   而那一次打的是 `/api/oauth/usage`——**不是模型推論**（見 `quota_meter.USAGE_URL`），
 #   不吃額度、不進 5 小時視窗。派工前查一次不會讓被查的那個數字變大。
+MEASURE_NOTE: dict = {}  # `pace_state` 最近一次補量的 {won, reason}；行程內旁記，不入任何判準
+
+
 def pace_state(now: datetime) -> quota_policy.QuotaState:
     """讀快取；不可用且本 TTL 還沒人量過時補量一次；名額被搶走則等贏家（DEF-200-451）。"""
     state = read_quota(now)
     if state.usable() or quota_meter is None:
         return state
-    if won := claim_refresh_slot():
-        reading = quota_meter.measure_detail(QUOTA_SYNC_TIMEOUT_SECONDS)[0]
+    MEASURE_NOTE.update(won=(won := claim_refresh_slot()), reason="")  # WP-SW REQ-CTL-51：提前探針的 `why` 取證（唯讀旁記）
+    if won:
+        reading, MEASURE_NOTE["reason"] = quota_meter.measure_detail(QUOTA_SYNC_TIMEOUT_SECONDS)
         if reading is not None:
             quota_meter.write_cache(reading, quota_cache_path())
     return settled_quota(won)

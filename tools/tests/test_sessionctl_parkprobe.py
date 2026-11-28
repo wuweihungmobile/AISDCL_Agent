@@ -656,5 +656,98 @@ class StatusLineCompatTest(unittest.TestCase):
         self.assertEqual([r.split(":")[0] for r in rows], ["primary", "backup", "sentinel"])
 
 
+class WpSwUnmeasuredWhyTest(_EarlyFence, unittest.TestCase):
+    """WP-SW REQ-CTL-51（AT-CTL-104～108）：提前探針量不到必帶具名原因（封閉值域）；fail-closed 不變。
+    WHY：痕跡第 1379、1381 行 `unmeasured reading=null` 無原因，根因只能靠推理。"""
+
+    def whys(self) -> list:
+        return [p.get("why") for p in self.probes() if p.get("reading") is None]
+
+    def test_at_ctl_104_measure_exception_is_named_and_never_recovers(self) -> None:
+        from lib.sessionctl import parkwhy  # noqa: PLC0415
+
+        self.state = OSError("端點炸了")
+        self.assertIsNone(self.tick(), "例外照舊吞掉、EV_ERROR 照舊落")
+        self.assertIn(parkearly.EV_ERROR, [t["event"] for t in self.traces()])
+        self.assertEqual(self.whys(), ["measure_exception:OSError"])
+        self.assertEqual(self.recovered_events(), [])
+        for why in self.whys():
+            self.assertTrue(parkwhy.valid(why), why)
+        self.assertFalse(parkwhy.valid(None), "負控：缺 why 即違規")
+        self.assertFalse(parkwhy.valid("random_reason"))
+
+    def test_at_ctl_105_each_closed_domain_value_has_a_fixture(self) -> None:
+        import quota_gate  # noqa: PLC0415
+
+        from lib.sessionctl import parkwhy  # noqa: PLC0415
+
+        usable = _keyed(_state(five=0.0, week=0.0), "acct-A")
+        empty = _state(axes=())
+        cases = [
+            ({"state": empty, "note": {"won": True, "reason": "no-credentials"}}, "no_credential"),
+            ({"state": empty, "note": {"won": True, "reason": "no-credentials-darwin"}}, "no_credential"),
+            ({"state": empty, "note": {"won": False, "reason": ""}}, "claim_lost"),
+            ({"state": empty, "note": {"won": True, "reason": "http-429-unmeasured"}}, "http_error:429"),
+            ({"state": empty, "note": {"won": True, "reason": "http-503"}}, "http_error:503"),
+            ({"state": empty, "note": {"won": True, "reason": "meter-unreachable"}}, "timeout"),
+            ({"state": empty, "note": {}}, "stale_cache"),
+            ({"state": _keyed(usable, None), "expected_account": "acct-A"}, "account_unreadable"),
+            ({"state": usable, "expected_account": "acct-A"}, ""),
+        ]
+        for kwargs, want in cases:
+            with self.subTest(want=want, note=kwargs.get("note")):
+                got = parkwhy.classify(**kwargs)
+                self.assertEqual(got, want)
+                self.assertTrue(not got or parkwhy.valid(got))
+        with mock.patch.object(sys, "stderr", None):
+            self.assertEqual(parkwhy.classify(exc=AttributeError("write")), "stdio_none")
+        self.assertEqual(parkwhy.classify(exc=AttributeError("write")), "measure_exception:AttributeError")
+        # tick 層：no_credential 取自 `pace_state` 補量旁記（MEASURE_NOTE），tick 先清再讀
+
+        def fake_pace(_now):
+            quota_gate.MEASURE_NOTE.update(won=True, reason="no-credentials")
+            return empty
+
+        with mock.patch.object(quota_gate, "pace_state", fake_pace):
+            self.tick(quota=None)
+        self.assertEqual(self.whys(), ["no_credential"])
+
+    def test_at_ctl_106_account_switch_timeline_recovers_within_two_patrols(self) -> None:
+        """tick1：舊帳號、讀數仍高 ⇒ hold；tick2：新帳號 weekly 0% ⇒ 提前接手。"""
+        self.state = _keyed(_state(five=95.0, week=95.0), "acct-A")
+        self.assertFalse(self.tick()["recovered"])
+        self.state = _keyed(_state(five=0.0, week=0.0), "acct-B")
+        verdict = self.tick(now=NOW + timedelta(minutes=15))
+        self.assertTrue(verdict["recovered"] and verdict["account_changed"])
+        self.assertEqual(verdict["fired"], "fired")
+        self.assertEqual(len(self.recovered_events()), 1)
+        self.assertLessEqual(15 * 60, 2 * 900 + parkearly.CHILD_TIMEOUT_SECONDS)
+
+    def test_at_ctl_107_fail_closed_is_unchanged(self) -> None:
+        self.state = _state(axes=())
+        verdict = self.tick()
+        self.assertFalse(verdict["recovered"])
+        self.assertTrue(self.whys() and self.whys()[0], "量不到必有 why")
+        self.assertEqual((self.spawned, self.recovered_events()), ([], []))
+
+    def test_at_ctl_108_pythonw_root_cause_note(self) -> None:
+        """AT-CTL-108：根因探針的程式面證據——補量旁記 `MEASURE_NOTE` 由 `pace_state` 寫（won／reason），
+        量測路徑在 `STDIO` 縫（stderr 為 None、SSOT 已綁 devnull）下不拋；真 pythonw 重放見 E2E-CTL-25。"""
+        import quota_gate  # noqa: PLC0415
+
+        import _stdio_utf8  # noqa: PLC0415
+
+        with mock.patch.object(sys, "stderr", None), mock.patch.object(sys, "stdout", None):
+            _stdio_utf8.reconfigure_stdio_utf8()
+            quota_gate.MEASURE_NOTE.clear()
+            with mock.patch.object(quota_gate, "read_quota", return_value=_state(axes=())), \
+                    mock.patch.object(quota_gate, "claim_refresh_slot", return_value=True), \
+                    mock.patch.object(quota_gate, "settled_quota", return_value=_state(axes=())), \
+                    mock.patch.object(quota_gate.quota_meter, "measure_detail",
+                                      return_value=(None, "no-credentials")):
+                quota_gate.pace_state(NOW)
+            self.assertEqual(quota_gate.MEASURE_NOTE, {"won": True, "reason": "no-credentials"})
+
+
 if __name__ == "__main__":
     unittest.main()

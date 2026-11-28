@@ -98,15 +98,27 @@ def tick(args, now: datetime | None = None, S: dict | None = None, env=None) -> 
             return None
         if _primary_handles(marker, sid) or _live_driver(sid, env, now, S):
             return None
+        why = ""
         if not parkprobe.has_baseline(marker):
             verdict = parkprobe.evaluate(marker, None, None, now)  # state 不會被讀（無基準先返回）
         else:
-            from . import park_reset  # noqa: PLC0415 — QVD C21：同 park 前置的當下判決
+            from . import park_reset, parkwhy  # noqa: PLC0415 — QVD C21：同 park 前置的當下判決
 
-            snap = park_reset.ruling_for(sid, S, now, env, default_est=False)
+            parkwhy.reset_note()
+            try:
+                snap = park_reset.ruling_for(sid, S, now, env, default_est=False)
+            except Exception as err:  # 量測路徑拋例外 ⇒ 仍是「量不到」，但要具名（REQ-CTL-51）；照舊往外走 EV_ERROR
+                switch.trace(parkprobe.EV_PROBE, sid=sid, reason=parkprobe.REASON_UNMEASURED, reading=None,
+                             parked_pct=marker.get(parkprobe.MK_PARKED_PCT), recovered=False,
+                             why=parkwhy.classify(exc=err))
+                raise
             state = snap.state
             verdict = parkprobe.evaluate(marker, state, snap.ruling, now)
+            why = parkwhy.classify(state=state, note=parkwhy.last_note(),
+                                   expected_account=marker.get(parkprobe.MK_PARKED_ACCOUNT))
         extra = {} if not parkprobe.has_baseline(marker) else {"stale": not state.axes}
+        if why:
+            extra["why"] = why  # 量不到（或帳號讀不到）必帶具名原因（封閉值域；缺＝違規）
         switch.trace(parkprobe.EV_PROBE, sid=sid, reason=verdict["reason"], reading=verdict["cur"],
                      parked_pct=verdict["baseline"], recovered=verdict["recovered"],
                      account_changed=verdict["account_changed"], action=verdict["action"],
