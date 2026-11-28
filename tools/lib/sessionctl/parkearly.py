@@ -61,7 +61,23 @@ def _precheck(marker: dict, env, now: datetime, S: dict) -> str:
     if (handoff._duplicate_refusals(pkg, now, S.get("alive") or handoff._alive)  # noqa: SLF001
             or seal._spawned(pkg, now)):  # noqa: SLF001
         return "spawned"  # 已 handed_over、剛 spawn 過，或 spawning 意圖仍有效
-    return ""
+    return _other_session(marker, env, now, S)
+
+
+def _other_session(marker: dict, env, now: datetime, S: dict) -> str:
+    """WP-SW REQ-CTL-52：同專案另一 session 有 AI 回合 ⇒ 不提前（`hold`，探針下一巡邏照常）；讀不到＝沒人在動。"""
+    from . import othersession, park_cli  # noqa: PLC0415 — 惰性：park_cli 反向呼叫本套件
+
+    sid = str(marker.get("sid") or "")
+    try:
+        found = (S.get("transcript") or (lambda s: park_cli._find_transcript(s, env)))(sid)  # noqa: SLF001
+        other = othersession.active(found.parent if found is not None else None, sid, now)
+    except Exception:  # noqa: BLE001
+        return ""
+    if other is None:
+        return ""
+    othersession.trace("hold", sid, other)
+    return "other_session"
 
 
 def _primary_handles(marker: dict, sid: str) -> bool:

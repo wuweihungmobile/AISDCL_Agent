@@ -66,6 +66,6 @@ def park_probe_line(env: Mapping | None = None) -> str:
 
 
 def lines(sid: str | None, env: Mapping | None = None) -> str:
-    from . import crashguard  # noqa: PLC0415 — WP-SW REQ-CTL-50⑧
+    from . import crashguard, othersession  # noqa: PLC0415 — WP-SW REQ-CTL-50⑧／52
 
-    return join([orphan_line(sid, env), park_probe_line(env), *(f" {x}" for x in crashguard.status_lines(env))])  # noqa: E501
+    return join([orphan_line(sid, env), park_probe_line(env), *(f" {x}" for x in crashguard.status_lines(env) + othersession.status_lines(env))])  # noqa: E501

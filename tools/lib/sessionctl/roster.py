@@ -484,9 +484,9 @@ def render_snapshot(snap: dict) -> str:
         for w in snap["windows"]) or "無（或未列舉）"))
     lines.append("排程：" + ("、".join(snap["schedules"]) or "無（或未查詢）"))
     lines.append("過期哨兵：" + ("、".join(snap["stale_sentinels"]) or "無"))
-    from . import crashguard  # noqa: PLC0415 — WP-SW REQ-CTL-50⑧：崩潰停止的可見面（判斷全在新葉）
+    from . import crashguard, othersession  # noqa: PLC0415 — WP-SW REQ-CTL-50⑧／52：崩潰停止、他 session 終局 skip 的可見面
 
-    lines += crashguard.status_lines()
+    lines += crashguard.status_lines() + othersession.status_lines()
     lines.append("未 ack 交接包：" + ("、".join(snap["handoffs"]) or "無"))
     if snap.get("retired"):  # REQ-WP-43：滿壽命殘局只顯示計數，逐字稿保留
         lines.append(f"已退役殘局：{snap['retired']} 筆（滿 24 小時；只顯示計數，逐字稿未刪）")

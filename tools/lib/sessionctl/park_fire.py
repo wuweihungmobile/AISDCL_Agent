@@ -47,6 +47,33 @@ def run(opts, sid: str, env, S: dict, clock, marker, label: str, pkg: Path, now:
     driver = transcript_activity.live_driver(transcript, now)
     if driver is not None:
         return skip("live_driver", driver_kind=driver["kind"], driver_at=driver["timestamp"])
+    from . import othersession  # noqa: PLC0415 — WP-SW REQ-CTL-52：同專案另一 session 在動（惰性：不進頂層閉包）
+
+    other = othersession.active(transcript.parent if transcript is not None else None, sid, now)
+    if other is not None:
+        done = int(marker.get(othersession.DEFERS_KEY) or 0)
+        if done < othersession.OTHER_SESSION_MAX_DEFERS:  # 延後：沿用 park_yield 的重排原語，計數欄分開
+            when = now.timestamp() + othersession.SENTINEL_INTERVAL_SECONDS
+            res = oldwin_park._rearm(sid, pkg, when, env, handoff._aware(now), S,  # noqa: SLF001
+                                     extra=othersession.rearm_fields(marker, when))
+            if res == "refused":
+                return finish(0, "refused", "sideeffect_refused", reason="rearm_refused")
+            if res == "ok":
+                othersession.trace("defer", sid, other, n=done + 1)
+                return finish(0)
+        othersession.trace("skip", sid, other, n=done)  # 用盡（或排不出重排）⇒ 終局 skip，且必須出聲
+        rc = skip("other_session", other_sid=other["sid"])
+        park_announce.announce(
+            sid, pkg, marker, [], claude=opts.claude, env=env, notify=S.get("notify"),
+            repo=park_cli._REPO,  # noqa: SLF001
+            title="park 接手已放棄：他 session 在動、交接包待人接", tail="park_other_session",
+            body=(f"session {sid[:8]} 的 park 到點時另一個 session（{other['sid'][:8]}）仍在動，延後 {done} 次後放棄；"
+                  f"手動接手：python tools/sessionctl.py handoff --spawn {pkg}"),
+            handback_text=("## 做了什麼\npark 到點時偵測到同專案另一個 session 在動，延後後終局 skip。\n\n"
+                           f"## 驗了什麼\nother_sid={other['sid']}、other_at={other['at']}、延後 {done} 次。\n\n"
+                           f"## 卡在哪\n交接包 {pkg} 無人接。\n\n## 下一步指令\n"
+                           f"`python tools/sessionctl.py handoff --spawn {pkg}`，或 `claude -r {sid}`。\n"))
+        return rc
     if handoff._duplicate_refusals(pkg, now, S.get("alive") or handoff._alive):
         return skip("spawned")  # forward／--spawn 已開出新 session、對方還沒 ack：不再動舊 sid
     verdict = park_yield.decide(sid, marker, env, S, clock, find)
