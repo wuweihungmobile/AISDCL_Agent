@@ -40,6 +40,10 @@ from __future__ import annotations
 import io
 import sys
 
+# 與 os.devnull 同值；不 import os＝守住本檔「只依賴 io／sys」的可搬遷契約鎖（test_the_ssot_only_imports_stdlib）
+_NULL_DEVICE = "nul" if sys.platform == "win32" else "/dev/null"
+_DEVNULL: dict = {}  # 行程內每個串流名至多一個 devnull 檔（冪等）
+
 
 def reconfigure_stdio_utf8() -> None:
     """把 sys.stdout/stderr 強制為 UTF-8（`errors="replace"`），不分平台。
@@ -69,7 +73,14 @@ def reconfigure_stdio_utf8() -> None:
     """
     for name in ("stdout", "stderr"):
         stream = getattr(sys, name, None)
-        if stream is None:  # pragma: no cover - pythonw 等無 stdio 的執行環境
+        if stream is None:  # pythonw／DETACHED 子行程沒有 std handle：綁 devnull，直接 .write 不再 AttributeError（REQ-CTL-49）
+            stream = _DEVNULL.get(name)
+            if stream is None:
+                try:
+                    stream = _DEVNULL[name] = open(_NULL_DEVICE, "w", encoding="utf-8", errors="replace")  # noqa: SIM115
+                except OSError:  # pragma: no cover - devnull 都開不了：維持舊行為
+                    continue
+            setattr(sys, name, stream)
             continue
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:

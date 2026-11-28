@@ -72,5 +72,132 @@ class TestReconfigureStdioUtf8(unittest.TestCase):
         fake_stderr.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
 
 
+# ───────────────── WP-SW REQ-CTL-49（AT-CTL-93～96）：pythonw 沒有 std handle ⇒ 綁 devnull
+def _old_reconfigure() -> None:
+    """修前 `reconfigure_stdio_utf8` 的 None 分支逐字複本（oracle，先證夾具確實觸發舊行為）。"""
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name, None) is None:
+            continue
+
+
+class _StdioNone:
+    """`STDIO` 縫：把 sys.stdout／sys.stderr 設為 None（pythonw 的真實形狀）。"""
+
+    def __init__(self) -> None:
+        self._ctx = [mock.patch.object(sys, "stdout", None), mock.patch.object(sys, "stderr", None)]
+
+    def __enter__(self):
+        for c in self._ctx:
+            c.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        for c in reversed(self._ctx):
+            c.__exit__(*exc)
+
+
+class WpSwStdioNoneTest(unittest.TestCase):
+    def test_at93_none_streams_become_writable_utf8(self) -> None:
+        """AT-CTL-93：兩串流皆 None ⇒ 變成可 write／flush 的 utf-8 文字串流；oracle 證舊版會炸。"""
+        with _StdioNone():
+            _old_reconfigure()
+            with self.assertRaises(AttributeError):
+                sys.stderr.write("x")  # type: ignore[union-attr]
+            m.reconfigure_stdio_utf8()
+            for name in ("stdout", "stderr"):
+                stream = getattr(sys, name)
+                self.assertEqual(stream.encoding, "utf-8")
+                stream.write("中文✅\n")
+                stream.flush()
+
+    def test_at94_idempotent_one_devnull_object_and_replicas_untouched(self) -> None:
+        """AT-CTL-94：連呼兩次同一物件（不重複開檔）；StringIO 替身 no-op。"""
+        with _StdioNone():
+            m.reconfigure_stdio_utf8()
+            first = (sys.stdout, sys.stderr)
+            m.reconfigure_stdio_utf8()
+            self.assertIs(first[0], sys.stdout)
+            self.assertIs(first[1], sys.stderr)
+        fake = io.StringIO()
+        with mock.patch.object(sys, "stdout", fake), mock.patch.object(sys, "stderr", fake):
+            m.reconfigure_stdio_utf8()
+            self.assertIs(sys.stdout, fake)
+
+    def test_at95_acctswitch_reconcile_survives_pythonw_stderr(self) -> None:
+        """AT-CTL-95：重現 406454ea 10:21:52——舊帳號標記＋新帳號讀數 ⇒ reconcile 作廢標記時
+        `sys.stderr.write` 在 pythonw 下不得拋；voided 與 last_switch 已存檔。"""
+        import json  # noqa: PLC0415
+        import shutil  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+        from datetime import datetime  # noqa: PLC0415
+        from types import SimpleNamespace  # noqa: PLC0415
+
+        lib = str(Path(__file__).resolve().parents[1] / "lib")
+        tools = str(Path(__file__).resolve().parents[1])
+        for p in (tools, lib):
+            if p not in sys.path:
+                sys.path.insert(0, p)
+        from lib.sessionctl import acctswitch  # noqa: PLC0415
+        import quota_halt_marker  # noqa: PLC0415
+
+        tmp = Path(tempfile.mkdtemp(prefix="wpsw95_"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        env = {"AUTOSDD_TRACE_DIR": str(tmp / "traces"), "TEMP": str(tmp), "TMP": str(tmp),
+               "TMPDIR": str(tmp), "AUTOSDD_QUOTA_CACHE_DIR": str(tmp / "cache"),
+               "CLAUDE_CONFIG_DIR": str(tmp / "claude"), "AUTOSDD_SESSION_SWITCH_MODE": "auto"}
+        sid = "406454ea-91fc-4481-9c11-b28ed7d9e95f"
+        now = datetime.now().astimezone()
+        policy = SimpleNamespace(halt_pct=100.0)
+        state = SimpleNamespace(account_key="34cd3507237f", measured_at=now.isoformat(),
+                                axes=(), usable=lambda: False)
+        with mock.patch.dict("os.environ", env):
+            (tmp / "traces").mkdir(parents=True)
+            marker_path = quota_halt_marker.halt_marker_path(sid)
+            marker_path.parent.mkdir(parents=True, exist_ok=True)
+            marker = {"sid": sid, "band": "halt", "binding": "seven_day", "account": "eaf5241f6fe2"}
+            marker_path.write_text(json.dumps(marker), encoding="utf-8")
+            with _StdioNone():
+                m.reconfigure_stdio_utf8()
+                voided = acctswitch.reconcile(sid, state, policy, now, halt_marker=marker)
+            self.assertEqual(voided, 1)
+            probe = acctswitch.load_probe()
+            self.assertTrue(probe.get("voiced"))
+            self.assertEqual(probe["last_switch"]["new"], "34cd3507237f")
+            # oracle：舊 None 分支下同夾具拋 AttributeError 且 voiced 未存
+            marker_path.write_text(json.dumps(marker), encoding="utf-8")
+            acctswitch.save_probe({})
+            with _StdioNone():
+                _old_reconfigure()
+                with self.assertRaises(AttributeError):
+                    acctswitch.reconcile(sid, state, policy, now, halt_marker=marker)
+            self.assertFalse(acctswitch.load_probe().get("voiced"))
+
+    def test_at96_every_raw_std_write_site_in_scheduler_closure_resolves(self) -> None:
+        """AT-CTL-96：AST 掃排程入口會 import 的模組，所有 `sys.stderr|stdout.write/flush` 與
+        `sys.std* is (not) None` 站點；STDIO 縫下 SSOT 讓每個站點的屬性鏈可解（新增站點自動納入）。"""
+        import ast  # noqa: PLC0415
+
+        tools = Path(__file__).resolve().parents[1]
+        files = [tools / "lib" / n for n in ("quota_gate.py", "pace_contract.py", "quota_availability.py",
+                                             "apply_lock.py")]
+        files += [tools / "lib" / "sessionctl" / "acctswitch.py", tools / "lib" / "openitems" / "verbs.py",
+                  tools / "selfimproving.py"]
+        sites = []
+        for path in files:
+            if not path.is_file():
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if (isinstance(node, ast.Attribute) and node.attr in ("write", "flush")
+                        and isinstance(node.value, ast.Attribute) and isinstance(node.value.value, ast.Name)
+                        and node.value.value.id == "sys" and node.value.attr in ("stdout", "stderr")):
+                    sites.append((path.name, node.lineno, node.value.attr, node.attr))
+        self.assertGreaterEqual(len(sites), 8, "掃描面失明：quota_gate 等站點應有數十處")
+        with _StdioNone():
+            m.reconfigure_stdio_utf8()
+            for _file, _line, stream, attr in sites:
+                self.assertTrue(callable(getattr(getattr(sys, stream), attr)), (_file, _line))
+            self.assertIsNotNone(sys.stdout)  # `is not None` 分支站點：改綁後走「寫進 devnull」，rc 不變
+
+
 if __name__ == "__main__":
     unittest.main()
