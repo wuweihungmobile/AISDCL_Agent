@@ -103,7 +103,7 @@ class SummaryTest(_Fence):
 
         def digest() -> str:
             h = hashlib.sha256()
-            for p in sorted(self.tmp.rglob("*")):
+            for p in sorted(self.tmp.rglob("*"), key=lambda q: q.as_posix()):
                 if p.is_file():
                     h.update(p.name.encode() + p.read_bytes())
             return h.hexdigest()
