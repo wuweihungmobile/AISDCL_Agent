@@ -154,7 +154,7 @@ class SweepTest(_Fence):
         self.assertEqual((be.state_calls, be.disarmed), (0, []))
         src = (_REPO_ROOT / "tools" / "lib" / "sessionctl"
             / "roster.py").read_text(encoding="utf-8")
-        self.assertNotIn("sentgc", src, "GC 不得進 status")
+        self.assertEqual([], [ln for ln in src.splitlines() if "sentgc" in ln], "GC 不得進 status")
 
     def test_at_ctl_136_running_or_unknown_state_is_never_a_candidate_when_dead(self) -> None:
         """MU-CTL-75：④「State≠Running」是獨立判準——tick 進行中（Running）或排程器沒回 State
@@ -182,7 +182,8 @@ class SweepTest(_Fence):
         names = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
         self.assertNotIn("subprocess", names)
         sites = (_REPO_ROOT / "tools" / "lib" / "sandbox_scope.py").read_text(encoding="utf-8")
-        self.assertNotIn("sentgc", sites, "SITES 登記無新增")
+        added = [ln for ln in sites.splitlines() if "sentgc" in ln]
+        self.assertEqual([], added, "SITES 登記無新增")
 
 
 class ScopeTest(_Fence):

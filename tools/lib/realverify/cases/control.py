@@ -13,12 +13,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from lib import platform_utils
+
 from ..sandbox import REPO
 from . import CaseContext, case
 from .sessionctl_park import PY, ctl, install_tools, park_cleanup, run
 
 OWNER = "406454ea-91fc-4481-9c11-b28ed7d9e95f"
-_HOME_PROJECTS = Path.home() / ".claude" / "projects" / "D--CursorProject-AISDCL-Agent"
+_HOME_PROJECTS = platform_utils.claude_home() / "projects" / "D--CursorProject-AISDCL-Agent"
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -35,7 +37,6 @@ def _env() -> dict:
     import os
     e = dict(os.environ)
     e["PYTHONUTF8"] = "1"
-    e["PYTHONIOENCODING"] = "utf-8"
     return e
 
 

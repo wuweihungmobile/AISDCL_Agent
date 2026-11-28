@@ -572,13 +572,15 @@ class WpSwThreeSectionTest(unittest.TestCase):
     def test_at_ctl_127_no_new_pushback_decision_field(self) -> None:
         src =(_REPO_ROOT / "tools" / "lib" / "sessionctl"
             / "agentbrief.py").read_text(encoding="utf-8")
-        self.assertNotIn('"decision"', src)
-        self.assertNotIn("decision:block", src)
+        hits = [ln for ln in src.splitlines() if '"decision"' in ln or "decision:block" in ln]
+        self.assertEqual([], hits)
 
     def test_at_ctl_128_old_phrase_absent_from_all_session_tests_and_sources(self) -> None:
         for name in ("agentbrief.py", "cutvoice.py", "roster.py", "briefline.py", "watch.py"):
             path = _REPO_ROOT / "tools" / "lib" / "sessionctl" / name
-            self.assertNotIn("由主控決定", path.read_text(encoding="utf-8"), name)
+            lines = path.read_text(encoding="utf-8").splitlines()
+            hits = [ln for ln in lines if "由主控決定" in ln]
+            self.assertEqual([], hits, name)
 
 
 if __name__ == "__main__":

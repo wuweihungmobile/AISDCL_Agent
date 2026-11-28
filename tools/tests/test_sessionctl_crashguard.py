@@ -195,7 +195,7 @@ class RunTest(_Fence, unittest.TestCase):
         self.assertEqual(self.traces(), [])
 
 
-class ParkFireCrashTest(P.JobTest):
+class ParkFireCrashTest(P.JobTest, unittest.TestCase):
     """AT-CTL-100：`park --fire` 崩潰 ⇒ park_job_crashed＋標記走既有失敗鏈結算 failed。"""
 
     def setUp(self) -> None:
@@ -268,8 +268,9 @@ class StaticTest(unittest.TestCase):
         hits = [ln for ln in ast.get_source_segment(text, main).splitlines()
                 if "planner_tick(" in ln]
         self.assertEqual(len(hits), 2)
-        self.assertNotIn("crash_streak", text)
-        self.assertNotIn("sentinel_crashed", text)
+        words = ("crash_streak", "sentinel_crashed")
+        inline = [ln for ln in text.splitlines() if any(w in ln for w in words)]
+        self.assertEqual([], inline)
 
 
 if __name__ == "__main__":

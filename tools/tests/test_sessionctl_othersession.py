@@ -201,7 +201,7 @@ def _planner_interval() -> int:
         if ln.startswith("SENTINEL_INTERVAL_SECONDS")).split("=")[1])
 
 
-class ParkFireOtherSessionTest(P.JobTest):
+class ParkFireOtherSessionTest(P.JobTest, unittest.TestCase):
     """AT-CTL-111／112：`park_fire.run` 前置——另一 session 在動 ⇒ 延後，用盡終局 skip 且出聲。"""
 
     def setUp(self) -> None:
