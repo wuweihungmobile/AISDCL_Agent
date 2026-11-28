@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -271,6 +272,73 @@ class StaticTest(unittest.TestCase):
         words = ("crash_streak", "sentinel_crashed")
         inline = [ln for ln in text.splitlines() if any(w in ln for w in words)]
         self.assertEqual([], inline)
+
+
+class LinkageSurfaceTest(unittest.TestCase):
+    """REQ-CTL-59（AT-CTL-142～145）：連動面清單與零放寬。受測面＝
+    `tools/lib/sessionctl/crashguard.py` 等四個新葉的落點登記、compat-ci paths、
+    `tools/session_resume_planner.py` 與 `tools/lib/sessionctl/park_cli.py` 的增量上界、
+    TCS-Control §8 的計數自檢。WHY：連動面漏一格，他機 CI 才紅（記憶 tools-lib-new-module）。"""
+
+    LEAVES = ("ackevents", "crashguard", "othersession", "sentgc", "schedstates", "parkwhy")
+    TESTS = ("test_sessionctl_ackevents", "test_sessionctl_crashguard",
+             "test_sessionctl_othersession", "test_sessionctl_sentgc")
+    #: 動工前基線（a7cba8c2）的實體行數；增量上界只准不變或收緊
+    PLANNER_BASE_LINES, PARK_CLI_BASE_LINES = 1666, 403
+    MIN_TESTS_BASE = 8276
+
+    @staticmethod
+    def _read(rel: str) -> str:
+        return (_REPO_ROOT / rel).read_text(encoding="utf-8")
+
+    def test_at_ctl_142_every_linkage_surface_is_listed(self) -> None:
+        layout = self._read("docs/02_architecture/Root_Layout_and_Module_Placement.md")
+        self.assertEqual([], [n for n in self.LEAVES + self.TESTS if n not in layout])
+        for wf in ("windows-compat-ci.yml", "macos-compat-ci.yml"):
+            text = self._read(f".github/workflows/{wf}")
+            self.assertIn('"tools/lib/sessionctl/**"', text, wf)
+            self.assertIn('"tools/tests/**"', text, wf)
+        cases = self._read("docs/06_quality/RealVerify_Protocol/cases.json")
+        self.assertEqual([], [n for n in range(25, 36) if f'"RV-CTL{n}"' not in cases])
+
+    def test_at_ctl_143_loc_increment_and_import_closure_stay_within_budget(self) -> None:
+        planner = len(self._read("tools/session_resume_planner.py").splitlines())
+        self.assertLessEqual(planner - self.PLANNER_BASE_LINES, 6)
+        park_cli = len(self._read("tools/lib/sessionctl/park_cli.py").splitlines())
+        self.assertEqual(park_cli, self.PARK_CLI_BASE_LINES)
+        for rel in ("tools/lib/quota_policy.py", "tools/lib/transcript_activity.py"):
+            tree = ast.parse(self._read(rel))
+            tops = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
+            names = " ".join(ast.dump(n) for n in tops)
+            self.assertNotIn("othersession", names, rel)
+
+    def test_at_ctl_144_no_existing_lock_is_loosened(self) -> None:
+        text = self._read("tools/run_root_unittests.py")
+        m = re.search(r"^MIN_TESTS = (\d+)", text, re.M)
+        self.assertIsNotNone(m)
+        self.assertGreaterEqual(int(m.group(1)), self.MIN_TESTS_BASE)
+
+    def test_at_ctl_145_tcs_section8_counts_and_no_empty_coverage_row(self) -> None:
+        text = self._read("docs/03_testing/contracts/TCS-Control-20261122.md")
+        sec = text[text.index("## 8. WP-SW"):]
+        reqs = set(re.findall(r"^\| REQ-CTL-(\d+) \|", sec, re.M))
+        at_rows = re.findall(r"^\| AT-CTL-(\d+) \| (\d+) \|", sec, re.M)
+        e2e_rows = [(e, n) for e, col in re.findall(r"^\| E2E-CTL-(\d+) \| ([^|]*) \|", sec, re.M)
+                    for n in re.findall(r"\d+", col)]
+        mu_rows = re.findall(r"^\| MU-CTL-(\d+) \|.*\| ([^|]*) \|$", sec, re.M)
+        self.assertEqual(11, len(reqs & {str(n) for n in range(49, 60)}))
+        self.assertEqual(53, len({a for a, _ in at_rows if 93 <= int(a) <= 145}))
+        self.assertEqual(11, len({e for e, _ in e2e_rows if 25 <= int(e) <= 35}))
+        # E2E-CTL-25 的對應欄寫「49、51（stdio 半）」，故以 findall 取全部數字（上一行已含）
+        self.assertEqual(27, len({m for m, _ in mu_rows if 50 <= int(m) <= 76}))
+        req_of_at = dict(at_rows)
+        mu_reqs = {req_of_at[a] for _, refs in mu_rows for a in re.findall(r"AT-CTL-(\d+)", refs)
+                   if a in req_of_at}
+        for n in range(49, 60):
+            r = str(n)
+            self.assertIn(r, {q for _, q in at_rows}, f"REQ-{r} 無 AT")
+            self.assertIn(r, {q for _, q in e2e_rows}, f"REQ-{r} 無 E2E")
+            self.assertIn(r, mu_reqs, f"REQ-{r} 無 MU")
 
 
 if __name__ == "__main__":
