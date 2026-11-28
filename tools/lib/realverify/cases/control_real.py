@@ -96,17 +96,12 @@ def wrap_fire(ctx: CaseContext, sb: Sandbox, name: str, delay_s: int = 40, *, cr
     tmp = _norm(sb)
     ps1 = tmp / f"fire_{re.sub(r'[^A-Za-z0-9]', '_', name)[-24:]}.ps1"
     if crash_exit is None:
-        body = (f"$env:TEMP = {_q(tmp)}; $env:TMP = {_q(tmp)}
-"
+        body = (f"$env:TEMP = {_q(tmp)}; $env:TMP = {_q(tmp)}\n"
                 f"$p = Start-Process -FilePath {_q(t['execute'])} -ArgumentList {_q(t['arguments'])} "
-                f"-WorkingDirectory {_q(t['workdir'] or str(sb.root))} -Wait -PassThru
-exit $p.ExitCode
-")
+                f"-WorkingDirectory {_q(t['workdir'] or str(sb.root))} -Wait -PassThru\nexit $p.ExitCode\n")
     else:
-        body = f"exit {crash_exit}
-"
-    ps1.write_text(body, encoding="utf-8", newline="\r
-")
+        body = f"exit {crash_exit}\n"
+    ps1.write_text(body, encoding="utf-8", newline="\r\n")
     register_once(ctx, name, "powershell.exe", f'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{ps1}"', delay_s, workdir=str(sb.root))
 
 
@@ -150,8 +145,7 @@ def set_streak(plan: Path, n: int) -> None:
     lo, hi = block.index("{"), block.rindex("}") + 1
     state = json.loads(block[lo:hi])
     state["crash_streak"] = n
-    plan.write_text(text[:b] + block[:lo] + json.dumps(state, ensure_ascii=False, indent=2) + block[hi:] + text[e:], encoding="utf-8", newline="
-")
+    plan.write_text(text[:b] + block[:lo] + json.dumps(state, ensure_ascii=False, indent=2) + block[hi:] + text[e:], encoding="utf-8", newline="\n")
 
 
 def streak_of(plan: Path) -> int:
@@ -164,8 +158,7 @@ def seed_crash_world(sb: Sandbox) -> None:
     """真壞輸入：`acct_probe.json` 合法 JSON 但 `voiced` 是整數 ⇒ `acctswitch.reconcile` 的 `pair not in said` 拋 TypeError
     （搭配舊帳號 halt 標記走到作廢分支）。"""
     write_old_account_world(sb)
-    (sb.home / "traces" / "acct_probe.json").write_text(json.dumps({"voiced": 5}), encoding="utf-8", newline="
-")
+    (sb.home / "traces" / "acct_probe.json").write_text(json.dumps({"voiced": 5}), encoding="utf-8", newline="\n")
 
 
 def regrant(sb: Sandbox, minutes: int) -> None:
@@ -245,22 +238,17 @@ def _copy_ack_world(ctx: CaseContext, sb: Sandbox) -> tuple[Path, str]:
     acker = next((r["acker"] for r in rows if r.get("event") == "park_acked_cancel"), "")
     ctx.check(bool(acker) and any(r.get("event") == "account_switch" for r in rows), f"第 1385～1390 行形狀不符：{[r.get('event') for r in rows]}")
     out = sb.home / "traces" / "autosdd_session_switch.jsonl"
-    with out.open("a", encoding="utf-8", newline="
-") as fh:
+    with out.open("a", encoding="utf-8", newline="\n") as fh:
         for ln in lines:
-            fh.write(ln.replace(OWNER, sb.sid) + "
-")
+            fh.write(ln.replace(OWNER, sb.sid) + "\n")
     src = real_autosdd("handoff", f"{OWNER}_20261126T154649Z")
     if not src.with_suffix(".md").is_file():
         raise EnvMissing(f"真實封存包不在本機：{src}.md")
     stamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%SZ")
     dst = sb.home / "handoff" / f"{sb.sid}_{stamp}"
     dst.parent.mkdir(exist_ok=True)
-    dst.with_suffix(".md").write_text(src.with_suffix(".md").read_text(encoding="utf-8").replace(OWNER, sb.sid), encoding="utf-8", newline="
-")
-    dst.with_suffix(".sealed").write_text(src.with_suffix(".sealed").read_text(encoding="utf-8").strip() + "
-", encoding="utf-8", newline="
-")
+    dst.with_suffix(".md").write_text(src.with_suffix(".md").read_text(encoding="utf-8").replace(OWNER, sb.sid), encoding="utf-8", newline="\n")
+    dst.with_suffix(".sealed").write_text(src.with_suffix(".sealed").read_text(encoding="utf-8").strip() + "\n", encoding="utf-8", newline="\n")
     return dst.with_suffix(".md"), acker
 
 
@@ -288,8 +276,7 @@ def rv_ctl29(ctx: CaseContext) -> None:
         try:
             before = task_info(name)
             r = ctl(sb, "handoff", "--ack", str(pkg), extra={"CLAUDE_CODE_SESSION_ID": acker})
-            ctx.check(r.returncode == 0, f"ack rc={r.returncode}
-{r.stdout[-400:]}{r.stderr[-400:]}")
+            ctx.check(r.returncode == 0, f"ack rc={r.returncode}\n{r.stdout[-400:]}{r.stderr[-400:]}")
             out = r.stdout
             ctx.check("封存後事件摘要" in out and out.index("封存後事件摘要") > 0, f"缺摘要或摘要在 ack 輸出之前：{out[:300]}")
             ctx.check("park_acked_cancel" in out and "account_switch" in out and OLD_ACCT in out and NEW_ACCT in out, f"摘要缺 park_acked_cancel／account_switch：{out[-900:]}")
@@ -331,8 +318,7 @@ def rv_ctl34(ctx: CaseContext) -> None:
             ctx.check(bool(ctl_info0 and ctl_info0["next_run"]), f"對照哨兵應有 NextRunTime：{ctl_info0}")
             ctx.sched_track(ctl_name)
             ps1 = _norm(sb) / "ctl_exit1.ps1"
-            ps1.write_text("exit 1\r
-", encoding="utf-8", newline="")
+            ps1.write_text("exit 1\r\n", encoding="utf-8", newline="")
             register_once(ctx, ctl_name, 'powershell.exe', f'-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{ps1}"', 40)
             rem = wait_ran(ctl_name, "")
             ctx.check(rem["last_result"] != 0 and rem["next_run"] == "" and rem["state"] == "Ready", f"殘骸應為 NextRunTime 空／結果非 0／Ready：{rem}")
