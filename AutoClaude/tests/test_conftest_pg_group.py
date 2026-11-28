@@ -29,6 +29,12 @@ def pytest_runtest_logreport(report):
     """測試專用：記錄每一支測試實際落在哪一個 xdist worker（含 controller 本身）。"""
     if report.when != "call":
         return
+    # DEF-200-660：xdist 的 controller 會把 worker 傳回的報告再 replay 一次（報告帶 `node`），
+    # 且 controller 行程繼承外層的 PYTEST_XDIST_WORKER（外層也是 xdist worker 時為 gw1），
+    # 會用 gw1 的標籤把全部 nodeid 再寫進 gw1 的檔、與真 gw1 worker 同檔交錯寫入。
+    # 只記「真的執行那支測試」的行程（worker 自己的報告沒有 `node`）。
+    if getattr(report, "node", None) is not None:
+        return
     base = os.environ.get("_PG_GROUP_TEST_LOG_BASE")
     if not base:
         return
@@ -96,6 +102,9 @@ def test_pg_serial_grouping_takes_effect_with_dist_loadgroup(
     """
     log_base = tmp_path / "worker_assign.log"
     monkeypatch.setenv("_PG_GROUP_TEST_LOG_BASE", str(log_base))
+    # 模擬「本測試本身跑在外層 xdist worker gw1 上」（CI 的 -n auto 常態）：內層 controller
+    # 會繼承此值；沒有這行時外層序列跑（-p no:xdist）碰不到 controller 與 worker 同檔的路徑
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw1")
     pytester.makeconftest(_CONFTEST_SOURCE + _WORKER_RECORDER)
     _write_toy_tree(pytester)
     result = pytester.runpytest_subprocess(
@@ -104,11 +113,15 @@ def test_pg_serial_grouping_takes_effect_with_dist_loadgroup(
     )
     result.assert_outcomes(passed=5)  # test_c1/test_c2/test_c3(不分群)/test_o1/test_o2
     assigned: dict[str, str] = {}
+    recorded: list[str] = []
     for log_file in tmp_path.glob("worker_assign.log.*"):
         worker = log_file.suffix.lstrip(".")
         for nodeid in log_file.read_text(encoding="utf-8").splitlines():
             if nodeid:
                 assigned[nodeid] = worker
+                recorded.append(nodeid)
+    # 每支測試只該被「真正執行它的 worker」記一次；重複＝controller replay 也在寫（載具缺陷）
+    assert len(recorded) == len(set(recorded)) == 5, recorded
     c1_id = "tests/contract/test_c1.py::test_c1@pg_serial"
     c2_id = "tests/contract/test_c1.py::test_c2@pg_serial"
     assert c1_id in assigned and c2_id in assigned, assigned
