@@ -16,7 +16,7 @@ DEF-200-560）、不新寫詞表、不改 `transcript_activity`。fail 方向：
 assistant」，再推進；真實逐字稿 human 與 assistant 相差 ≥ 毫秒，此路只擋夾具與極端時鐘。
 迴圈上限 `OTHER_SESSION_SCAN_MAX_STEPS` 用盡 ⇒ 該 sid 視為沒人在動並落 `park_other_session action=scan_cap`
 （fail 方向不變）；痕跡落進持久目錄，`sessionctl status`／簡報以 `status_lines` 對「終局 skip」可見。
-"""
+"""  # noqa: E501
 from __future__ import annotations
 
 from datetime import datetime
@@ -113,7 +113,7 @@ def status_lines(env=None) -> list[str]:
             marker = park.read_marker(path.stem)
             outcome = (marker or {}).get("outcome") or {}
             pkg = (marker or {}).get("pkg")
-            if (marker and marker.get("status") == "skipped" and outcome.get("event") == "other_session"
+            if (marker and marker.get("status") == "skipped" and outcome.get("event") == "other_session"  # noqa: E501
                     and pkg and not Path(pkg).with_suffix(".ack").exists()):
                 out.append(f"park 因他 session 在動而終局 skip：{pkg}")
         return out

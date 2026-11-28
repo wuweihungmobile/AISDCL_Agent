@@ -82,8 +82,70 @@ def _asof(paths: list[Path], dest: Path, now: datetime, *, drop_resume: bool) ->
     return dest / main.name
 
 
+def _trace_rows(sid: str) -> list[dict]:
+    """本 sid 的 `autosdd_session_switch.jsonl` 痕跡列（唯讀；讀不到 ⇒ 空）。"""
+    try:
+        path = __import__("endurance_env").trace_dir_peek()[0] / "autosdd_session_switch.jsonl"
+        rows = [json.loads(x) for x in path.read_text(encoding="utf-8", errors="replace").splitlines() if x.strip()]  # noqa: E501
+    except (OSError, ValueError):
+        return []
+    return [r for r in rows if isinstance(r, dict) and r.get("sid") == sid]
+
+
+def _upto(rows: list[dict], now: datetime, *events: str) -> list[dict]:
+    keep = []
+    for r in rows:
+        try:
+            if r.get("event") in events and datetime.fromisoformat(str(r["at"])) <= now:
+                keep.append(r)
+        except (KeyError, ValueError):
+            continue
+    return keep
+
+
+def _asof_park(rows: list[dict], now: datetime) -> dict | None:
+    """WP-SW REQ-CTL-57：以痕跡 `park_armed`／`park_cancelled`／`park_acked_cancel` 摺到 `--now` 的 as-of park 標記
+    （磁碟標記只有現值）。`valid_until`＝`park_armed.fire_at`＋`park.YIELD_GRACE_SECONDS`（登記時的公式；
+    之後若重排，這個欄位量不到真值——該欄以磁碟現值並列，不猜）。"""  # noqa: E501
+    from datetime import timedelta  # noqa: PLC0415
+
+    seen = _upto(rows, now, "park_armed", "park_cancelled", "park_acked_cancel")
+    if not seen:
+        return None
+    last, armed = seen[-1], [r for r in seen if r["event"] == "park_armed"]
+    if not armed:
+        return None
+    fire = datetime.fromisoformat(str(armed[-1]["fire_at"]))
+    grace = __import__("lib.sessionctl.park", fromlist=["x"]).YIELD_GRACE_SECONDS
+    return {"status": "armed" if last["event"] == "park_armed" else "cancelled",
+            "route": armed[-1].get("route", "H"), "valid_until": (fire + timedelta(seconds=grace)).isoformat()}  # noqa: E501
+
+
+def _asof_halt(marker: dict | None, rows: list[dict], now: datetime) -> dict | None:
+    """帳號感知：`account_switch` 痕跡（作廢事件）在 `--now` 之前已發生 ⇒ 真 tick 的 `sentinel_halt` 已把
+    舊帳號標記作廢（標記當時不再是輸入）。純比對、不呼叫 `acctswitch.reconcile`、不寫任何檔。"""  # noqa: E501
+    return None if marker and _upto(rows, now, "account_switch") else marker
+
+
+def _row4(args, now: datetime, view: Path, source: Path, marker, new, idle_new, grace, driver_new) -> None:  # noqa: E501
+    """第四列「真 tick 同輸入」（唯讀）：真 tick（`_sentinel_tick`）傳 `halt=sentinel_halt(…)`＋`park=`＋`stale=`，
+    前三列都不帶 `park=`／`stale=`、不做帳號比對 ⇒ 主控被誤導一次（重放得 arm_reset，真實是 patrol＋崩潰）。"""  # noqa: E501
+    sw = __import__("lib.sessionctl.switch", fromlist=["x"])
+    rows = _trace_rows(args.sid)
+    park_asof, halt4 = _asof_park(rows, now), _asof_halt(marker, rows, now)
+    park_disk = __import__("lib.sessionctl.park", fromlist=["x"]).read_marker(args.sid)
+    stale = sw.superseded_by(source.parent, args.sid, sw.own_last_at(view), now)
+    print("── 第四列「真 tick 同輸入」（不重現排程器 stdio 環境：pythonw `sys.stderr is None`；崩潰類缺陷此列看不見）")  # noqa: E501
+    print(f"   halt（帳號感知 as-of）={_j(halt4)}；park（as-of）={_j(park_asof)}；"
+          f"park（磁碟現值）={_j({k: park_disk.get(k) for k in ('status', 'valid_until')} if park_disk else None)}"  # noqa: E501
+          f"{'（與 as-of 不同，並列）' if (park_disk or {}).get('status') != (park_asof or {}).get('status') else ''}；"  # noqa: E501
+          f"stale={_j(stale)}（stale 取磁碟現值：他 session 在 now 當時的活動不可重建）")
+    _say("真 tick 同輸入 sentinel_decide", planner.sentinel_decide(
+        new, "", idle_new, now, halt=halt4, grace=grace, driver=driver_new, stale=stale, park=park_asof))  # noqa: E501
+
+
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="哨兵判定重放（舊判準 vs 新判準；as-of --now）")
+    parser =argparse.ArgumentParser(description="哨兵判定重放（舊判準 vs 新判準；as-of --now）")
     parser.add_argument("--sid", required=True, help="要重放的 session id")
     parser.add_argument("--now", help="重放時刻（ISO 8601，缺時區＝本機時區；預設現在）")
     args = parser.parse_args(argv)
@@ -124,6 +186,7 @@ def main(argv: list[str]) -> int:
             new, "", idle_new, now, halt=marker, grace=grace, driver=driver_new))
         _say("D3 單獨（事件還原成舊判準的、只靠另一駕駛閘）", planner.sentinel_decide(
             old, "", idle_new, now, halt=marker, grace=grace, driver=driver_old))
+        _row4(args, now, view, source, marker, new, idle_new, grace, driver_new)
     return 0
 
 

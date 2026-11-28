@@ -107,6 +107,58 @@ class MW1Test(unittest.TestCase):
         self.assertNotEqual(got["corrected"]["n"], got["upper_bound"]["n"])
 
 
+# ───────────────────────────── WP-SW REQ-CTL-57（AT-CTL-133～135）：哨兵重放第四列「真 tick 同輸入」
+class ReplayRow4Test(unittest.TestCase):
+    """WHY：重放工具只傳原始 halt 標記、grace、driver，不傳 `park=`／`stale=`、不做帳號比對；真 tick 傳
+    `halt=sentinel_halt(…)`＋`park=`＋`stale=`。主控因此被誤導一次（重放得 arm_reset，真實是 patrol＋崩潰）。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import importlib.util  # noqa: PLC0415
+
+        path = Path(__file__).resolve().parents[1] / "probe" / "sentinel_decide_replay.py"
+        spec = importlib.util.spec_from_file_location("sentinel_decide_replay_under_test", path)
+        cls.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mod)
+        cls.src = path.read_text(encoding="utf-8")
+
+    def rows(self):
+        def r(event, at, **kw):
+            return {"event": event, "at": at, "sid": "406454ea-91fc-4481-9c11-b28ed7d9e95f", **kw}
+
+        return [r("park_armed", "2026-11-28T08:00:00+08:00", route="H", fire_at="2026-11-28T11:00:00+08:00"),
+                r("account_switch", "2026-11-28T10:21:52+08:00", old="eaf5241f6fe2", new="34cd3507237f"),
+                r("park_acked_cancel", "2026-11-28T10:13:43+08:00", acker="4290bf58")]
+
+    def test_at_ctl_133_park_as_of_folds_arm_then_cancel(self) -> None:
+        rows = self.rows()
+        before = datetime.fromisoformat("2026-11-28T09:52:00+08:00")
+        after = datetime.fromisoformat("2026-11-28T10:22:00+08:00")
+        self.assertEqual(self.mod._asof_park(rows, before)["status"], "armed")  # noqa: SLF001
+        self.assertEqual(self.mod._asof_park(rows, after)["status"], "cancelled")  # noqa: SLF001
+        self.assertIsNone(self.mod._asof_park(rows, datetime.fromisoformat("2026-11-28T07:00:00+08:00")))  # noqa: SLF001
+        self.assertIn("valid_until", self.mod._asof_park(rows, before))  # noqa: SLF001
+
+    def test_at_ctl_133_halt_is_account_aware_as_of(self) -> None:
+        marker = {"band": "halt", "account": "eaf5241f6fe2"}
+        before = datetime.fromisoformat("2026-11-28T09:52:00+08:00")
+        after = datetime.fromisoformat("2026-11-28T10:22:00+08:00")
+        self.assertEqual(self.mod._asof_halt(marker, self.rows(), before), marker)  # noqa: SLF001
+        self.assertIsNone(self.mod._asof_halt(marker, self.rows(), after), "作廢事件之後標記不再是輸入")  # noqa: SLF001
+
+    def test_at_ctl_134_read_only_never_calls_reconcile_and_title_is_fixed(self) -> None:
+        code = self.src.split('"""')[2]
+        self.assertNotIn("reconcile(", code.replace("不呼叫 `acctswitch.reconcile`", ""))
+        self.assertNotIn("write_text", self.src[self.src.index("def _trace_rows"):self.src.index("def main")])
+        self.assertIn("不重現排程器 stdio 環境", self.src)
+        self.assertIn("第四列「真 tick 同輸入」", self.src)
+
+    def test_at_ctl_135_three_original_rows_are_still_present(self) -> None:
+        for label in ("舊判準 sentinel_decide", "新判準 sentinel_decide", "D3 單獨"):
+            self.assertIn(label, self.src)
+        self.assertEqual(self.src.count("_row4("), 2, "定義一次、呼叫一次")
+
+
 # ───────────────────────────── WP-SW REQ-CTL-56（AT-CTL-129～132）：M-W1 只計子代理口徑
 class MW1AgentShellSplitTest(unittest.TestCase):
     """WHY：w1_detail 第 14～43 行，29 筆 >30 分中 17 筆是「（1 個背景 shell）」；`STOP_VOICE` 同時命中代理與

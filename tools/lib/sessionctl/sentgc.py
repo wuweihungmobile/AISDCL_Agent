@@ -13,7 +13,7 @@
 **範圍化**（QA P2-5①）：`job_table` 在**列舉階段**依 `sandbox_scope.sandbox_home(repo_root)` 濾名稱——正式 checkout
 ⇒ 全部 `AutoSDD_Sentinel_*`；沙盒 repo ⇒ 只留以 `AutoSDD_Sentinel_<沙盒身分檔 sid>` 為前綴者。真實殘骸因此
 結構上進不了候選與摘要，不靠清理時小心。`ackevents.summary` 與 `sweep` 共用同一次列舉。
-"""
+"""  # noqa: E501
 from __future__ import annotations
 
 import re
@@ -25,7 +25,7 @@ from . import switch
 
 PREFIX = "AutoSDD_Sentinel_"
 SENTGC_MAX_PER_ACK = 5
-#: 不當「已崩潰／已死」證據的 LastTaskResult：成功、執行中（267009）、尚未執行過（267011，Win32 SCHED_S_TASK_HAS_NOT_RUN）
+#: 不當「已崩潰／已死」證據的 LastTaskResult：成功、執行中（267009）、尚未執行過（267011，Win32 SCHED_S_TASK_HAS_NOT_RUN）  # noqa: E501
 _NOT_DEAD_RESULTS = (0, 267009, 267011)
 _DEAD_PLAN_STATES = ("abandoned", "disarmed", "superseded")
 _IDENT = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
@@ -44,7 +44,7 @@ def _sandbox_sid(repo_root) -> str | None:
 
 
 def job_table(env=None, *, repo_root, backend=None) -> list[dict] | None:
-    """範圍化排程列舉縫：回每筆 `{name, sid, state, last_run, last_result, next_run}`；`None`＝量不到。"""
+    """範圍化排程列舉縫：回每筆 `{name, sid, state, last_run, last_result, next_run}`；`None`＝量不到。"""  # noqa: E501
     if backend is None:
         import schedule_backend  # noqa: PLC0415
 
@@ -65,9 +65,10 @@ def job_table(env=None, *, repo_root, backend=None) -> list[dict] | None:
 
 
 def _plan_state(sid: str) -> str | None:
-    """任務書狀態塊的 `state`（讀不到 ⇒ `None`）；任務書住系統暫存、檔名 `<PLAN_PREFIX><sid>.md`。"""
+    """任務書狀態塊的 `state`（讀不到 ⇒ `None`）；任務書住系統暫存、檔名 `<PLAN_PREFIX><sid>.md`。"""  # noqa: E501
     try:
         import quota_escalation  # noqa: PLC0415
+
         import session_resume_planner as planner  # noqa: PLC0415
 
         path = Path(tempfile.gettempdir()) / f"{quota_escalation.guard.PLAN_PREFIX}{sid}.md"
@@ -91,10 +92,10 @@ def candidates(table: list[dict], acker_sid: str, *, min_idle_s: float, now: dat
     for row in table:
         if row.get("next_run") != "" or row.get("sid") == acker_sid:
             continue  # ①NextRunTime 必須是排程器自報的「空」（None＝量不到、非空＝活著，一律不動）②
-        dead = (row.get("last_result") not in _NOT_DEAD_RESULTS and row.get("last_result") is not None
+        dead = (row.get("last_result") not in _NOT_DEAD_RESULTS and row.get("last_result") is not None  # noqa: E501
                 or plan_state(row["sid"]) in _DEAD_PLAN_STATES)
         age = _age_s(row.get("last_run"), now)
-        idle = row.get("state") not in (None, "", "Running") and age is not None and age >= min_idle_s
+        idle = row.get("state") not in (None, "", "Running") and age is not None and age >= min_idle_s  # noqa: E501
         if dead and idle:
             out.append(row)
     return out
@@ -103,7 +104,7 @@ def candidates(table: list[dict], acker_sid: str, *, min_idle_s: float, now: dat
 def sweep(acker_sid: str, env=None, *, repo_root, min_idle_s: float, table=..., backend=None,
           now: datetime | None = None, plan_state=None, say=None) -> list[str]:
     """拆除符合者（至多 5 個）；回已拆名稱。`table`＝已列舉的範圍化表（`...`＝自己列舉）；`None` ⇒ 零動作只出聲。
-    不拋：任何失敗只出聲。"""
+    不拋：任何失敗只出聲。"""  # noqa: E501
     say = say or (lambda text: print(text, file=__import__("sys").stderr))
     now = now or datetime.now().astimezone()
     try:
@@ -122,7 +123,7 @@ def sweep(acker_sid: str, env=None, *, repo_root, min_idle_s: float, table=..., 
         for row in candidates(table, acker_sid, min_idle_s=min_idle_s, now=now,
                               plan_state=plan_state)[:SENTGC_MAX_PER_ACK]:
             try:
-                rc = backend.disarm(row["name"])  # 唯一移除站點（既有 `sentinel_lifecycle._remove_task` 同一條）
+                rc = backend.disarm(row["name"])  # 唯一移除站點（既有 `sentinel_lifecycle._remove_task` 同一條）  # noqa: E501
             except Exception as exc:  # noqa: BLE001 — 其餘殘骸照處理
                 say(f"⚠️ 舊哨兵 GC：移除 {row['name']} 失敗（{type(exc).__name__}）")
                 continue
@@ -130,8 +131,8 @@ def sweep(acker_sid: str, env=None, *, repo_root, min_idle_s: float, table=..., 
                 say(f"⚠️ 舊哨兵 GC：移除 {row['name']} 回 rc={rc}")
                 continue
             removed.append(row["name"])
-            switch.trace("sentinel_gc", sid=row["sid"], task=row["name"], reason="next_run_empty_and_dead",
-                         next_run="", last_result=row.get("last_result"), last_run=row.get("last_run"),
+            switch.trace("sentinel_gc", sid=row["sid"], task=row["name"], reason="next_run_empty_and_dead",  # noqa: E501
+                         next_run="", last_result=row.get("last_result"), last_run=row.get("last_run"),  # noqa: E501
                          state=row.get("state"), acker=acker_sid)
         return removed
     except Exception as exc:  # noqa: BLE001

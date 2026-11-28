@@ -298,14 +298,14 @@ _TOKEN_SPLIT = re.compile(r"[\s｜|，。；：、（）()\[\]【】「」]+")
 
 def main_layer(pkg_text: str | None) -> str:
     """交接包的**主控層**（`## 主控層` 之後；不含機械層）。判「已記入」只看這裡：機械層第 12 欄本來就列所有
-    代理，把它算進去＝恆為「已記入」，判準失去鑑別力（TCS MU-CTL-62）。"""
+    代理，把它算進去＝恆為「已記入」，判準失去鑑別力（TCS MU-CTL-62）。"""  # noqa: E501
     text = pkg_text or ""
     at = text.find("## 主控層")
     return text[at:] if at >= 0 else ""
 
 
 def recorded_in_main(row: dict, pkg_text: str | None) -> bool:
-    """主控層是否提到該代理：id 前 8 碼，或描述的首個詞元（以空白／`｜`／全形標點切；長度≥3 且含英數）。"""
+    """主控層是否提到該代理：id 前 8 碼，或描述的首個詞元（以空白／`｜`／全形標點切；長度≥3 且含英數）。"""  # noqa: E501
     main = main_layer(pkg_text)
     if not main:
         return False
@@ -325,10 +325,10 @@ def _stopped_block(row: dict, pkg_text: str | None, pkg_path: str | None) -> str
     return f"{head}\n  - 處置：{done}"
 
 
-def render_cut(rows: list[dict], *, pkg_text: str | None = None, pkg_path: str | None = None) -> str:
+def render_cut(rows: list[dict], *, pkg_text: str | None = None, pkg_path: str | None = None) -> str:  # noqa: E501
     """被切／被 TaskStop／殘局代理清單（DES §6.4 三處出聲共用的同一份文字；**不自動重派、不再寫「由主控
     決定」**）。三種狀態各自一段標題；`stopped` 的處置看本 sid 最新已封存包的主控層是否提到它
-    （`pkg_text`／`pkg_path` 缺省＝找不到包 ⇒「未記處置」句）。第 12 欄 `render_rows` 逐字不變。"""
+    （`pkg_text`／`pkg_path` 缺省＝找不到包 ⇒「未記處置」句）。第 12 欄 `render_rows` 逐字不變。"""  # noqa: E501
     cut = [r for r in rows if r.get("status") in ("cut", "stopped", "residue")]
     if not cut:
         return ""
@@ -337,7 +337,7 @@ def render_cut(rows: list[dict], *, pkg_text: str | None = None, pkg_path: str |
         mine = [r for r in cut if r["status"] == status]
         if not mine:
             continue
-        blocks = [_stopped_block(r, pkg_text, pkg_path) if status == "stopped" else _block(r) for r in mine]
+        blocks = [_stopped_block(r, pkg_text, pkg_path) if status == "stopped" else _block(r) for r in mine]  # noqa: E501
         parts.append(f"{title}（{len(mine)} 支；不自動重派）：\n"
                      + _fit(blocks, COL12_MAX_CHARS, "；全清單見 `sessionctl status`"))
     return "\n".join(parts)

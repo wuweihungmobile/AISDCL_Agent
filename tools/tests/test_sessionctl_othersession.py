@@ -23,8 +23,8 @@ sys.path.insert(0, str(_REPO_ROOT / "tools"))
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 
 import test_sessionctl_park as P  # noqa: E402  # 模組引用：避免把對方的 TestCase 帶進本檔重跑
-
 import transcript_activity as ta  # noqa: E402
+
 from lib.sessionctl import othersession, park, park_announce  # noqa: E402
 
 OWN = "11111111-2222-4333-8444-555555555555"

@@ -901,7 +901,7 @@ def pace_state(now: datetime) -> quota_policy.QuotaState:
     state = read_quota(now)
     if state.usable() or quota_meter is None:
         return state
-    MEASURE_NOTE.update(won=(won := claim_refresh_slot()), reason="")  # WP-SW REQ-CTL-51：提前探針的 `why` 取證（唯讀旁記）
+    MEASURE_NOTE.update(won=(won := claim_refresh_slot()), reason="")  # WP-SW REQ-CTL-51：提前探針的 `why` 取證（唯讀旁記）  # noqa: E501
     if won:
         reading, MEASURE_NOTE["reason"] = quota_meter.measure_detail(QUOTA_SYNC_TIMEOUT_SECONDS)
         if reading is not None:

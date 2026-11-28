@@ -74,7 +74,7 @@ def _pending_turn(r: dict) -> bool:
 
 def _voice_kind(content: str) -> str:
     """WP-SW REQ-CTL-56：Stop 出聲含「支背景代理」⇒ `agent`（兩者皆含也算 agent）；只含「個背景 shell」⇒ `shell`。
-    `STOP_VOICE` 同時命中兩者（W1 把背景 shell 也算成無看管，w1_detail 29 筆 >30 分中 17 筆其實是 shell）。"""
+    `STOP_VOICE` 同時命中兩者（W1 把背景 shell 也算成無看管，w1_detail 29 筆 >30 分中 17 筆其實是 shell）。"""  # noqa: E501
     return "agent" if "支背景代理" in content or "個背景 shell" not in content else "shell"
 
 
@@ -90,7 +90,7 @@ def stop_events(recs: list[dict]) -> list[dict]:
     for i, r in enumerate(recs):
         if _pending_turn(r):
             if not any(abs(e["t"] - r["t"]) < HOOK_MERGE_S for e in ev):
-                ev.append({"i": i, "t": r["t"], "src": "B", "kind": "agent"})  # pendingBackgroundAgentCount>0＝子代理
+                ev.append({"i": i, "t": r["t"], "src": "B", "kind": "agent"})  # pendingBackgroundAgentCount>0＝子代理  # noqa: E501
     ev.sort(key=lambda e: e["t"])
     for e in ev:
         nxt = next((r for r in recs[e["i"] + 1:] if _is_real_assistant(r)), None)
@@ -112,7 +112,7 @@ def m_w1(sessions: list[dict], credential: NoCredential = _no_credential) -> dic
             "total_hours": round(sum(gaps) / 60, 1), "gap_min": quantiles(gaps),
             "gt_60min": sum(1 for g in gaps if g > 60),
             "never_returned": sum(1 for e in events if e["gap_s"] is None),
-            # WP-SW REQ-CTL-56：既有鍵逐字不變；另列只計子代理／只計 shell 的子集（agent.n + shell.n == n）
+            # WP-SW REQ-CTL-56：既有鍵逐字不變；另列只計子代理／只計 shell 的子集（agent.n + shell.n == n）  # noqa: E501
             "agent": _subset([e for e in events if e.get("kind", "agent") == "agent"]),
             "shell": _subset([e for e in events if e.get("kind", "agent") == "shell"])}
 

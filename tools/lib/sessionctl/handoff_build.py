@@ -70,7 +70,7 @@ def wip_tags(runner, repo: Path) -> tuple[list[str] | None, str]:
 def owner_tags(runner, repo: Path, sid: str, head: str | None) -> tuple[list[str] | None, str]:
     """本 owner session 的保全標籤（WP-SW REQ-CTL-54）：`<sid 前 8 碼>-*` 中以 `-halfwork` 或
     `-wip-preserved` 結尾者，附目標 SHA 前 12 碼；目標不是 HEAD 者標「不在 HEAD」（`git stash create` 的 commit
-    不在 HEAD，只活在手寫層時新主控不知道半成品在哪）。`git tag` 失敗 ⇒ `(None, 原因)`。"""
+    不在 HEAD，只活在手寫層時新主控不知道半成品在哪）。`git tag` 失敗 ⇒ `(None, 原因)`。"""  # noqa: E501
     if len(sid) < 8:
         return [], ""
     names, why = git_lines(runner, repo, "tag", "--list", f"{sid[:8]}-*")
@@ -82,7 +82,7 @@ def owner_tags(runner, repo: Path, sid: str, head: str | None) -> tuple[list[str
             continue
         sha, _ = git_lines(runner, repo, "rev-parse", f"{name}^{{commit}}")
         full = sha[0] if sha else ""
-        rows.append(f"{name} → {full[:12] or '量不到 SHA'}" + ("" if full and full == head else "（不在 HEAD）"))
+        rows.append(f"{name} → {full[:12] or '量不到 SHA'}" + ("" if full and full == head else "（不在 HEAD）"))  # noqa: E501
     return rows, ""
 
 

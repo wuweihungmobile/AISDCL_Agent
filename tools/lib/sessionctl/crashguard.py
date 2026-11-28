@@ -10,7 +10,7 @@
 純轉接＋三件事，判準與常數全在本葉；planner 的分派處只寫一行呼叫（LOC 牆）。本檔自身不得拋。
 `alert(loud=True)` 對 `dead_agents==0` 只寫紙（note 檔）＋入通知佇列、不敲桌面（HELM-01），故崩潰告警的
 實際落點是 note＋佇列，不是 toast。
-"""
+"""  # noqa: E501
 from __future__ import annotations
 
 import json
@@ -38,7 +38,7 @@ def _info(exc: BaseException) -> dict:
     frames = traceback.extract_tb(exc.__traceback__)
     last = frames[-1] if frames else None
     try:
-        rel = str(Path(last.filename).resolve().relative_to(_REPO)).replace("\\", "/") if last else ""
+        rel = str(Path(last.filename).resolve().relative_to(_REPO)).replace("\\", "/") if last else ""  # noqa: E501
     except (ValueError, OSError):
         rel = Path(last.filename).name if last else ""
     tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
@@ -107,7 +107,7 @@ def _crashed(entry: str, exc: BaseException, on_crash, state_ref, interval_s: in
             pass
     if stop:
         _trace(EV_LOOP, **common, rearmed=False)
-        _alert(f"哨兵連續 {streak} 次崩潰（{where}）、已停止重排——喚醒鏈斷線，請手動重新武裝", st, plan, alert)
+        _alert(f"哨兵連續 {streak} 次崩潰（{where}）、已停止重排——喚醒鏈斷線，請手動重新武裝", st, plan, alert)  # noqa: E501
         _handback(sid, info)
         return 1
     _trace(EV_CRASHED, **common)

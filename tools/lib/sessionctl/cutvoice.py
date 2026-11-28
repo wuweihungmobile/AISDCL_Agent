@@ -6,7 +6,7 @@
 
 WHY 獨立成檔：`roster.py`／`watch.py`／`briefline.py` 各只能加極少行（DES §21 行數牆），判準與閂鎖
 一律放在這裡；所有函式 fail-open（出聲失敗不得擋回合結束／簡報／判決）。
-"""
+"""  # noqa: E501
 from __future__ import annotations
 
 import json
@@ -42,14 +42,14 @@ def _key(row: dict) -> str:
 
 def _pkg(sid: str, env=None) -> dict:
     """本 sid **最新已封存**包的 `{pkg_text, pkg_path}`（給 `render_cut` 判 `stopped` 是否已記入主控層）；
-    找不到包／沒封存／讀不到 ⇒ `{}`（走「未記處置」句，不拋、不因此推回）。"""
+    找不到包／沒封存／讀不到 ⇒ `{}`（走「未記處置」句，不拋、不因此推回）。"""  # noqa: E501
     try:
         from . import seal  # noqa: PLC0415 — lazy
 
         row = seal.latest_package(sid, env)
         if row is None or not seal.sealed_path(row["path"]).exists():
             return {}
-        return {"pkg_text": Path(row["path"]).read_text(encoding="utf-8"), "pkg_path": str(row["path"])}
+        return {"pkg_text": Path(row["path"]).read_text(encoding="utf-8"), "pkg_path": str(row["path"])}  # noqa: E501
     except Exception:  # noqa: BLE001
         return {}
 
@@ -93,7 +93,7 @@ def watch_text(agents: list[dict], sid: str, transcript, projects=None) -> str:
     """`watch` 判決處置之後的字尾（每次判決都帶、不過閂鎖——主控被叫醒時要看到全貌）；
     有內容時以換行結尾，沒有 ⇒ `""`。"""
     try:
-        text = agentbrief.render_cut(_cut_rows(agents, sid, transcript, projects, full=True), **_pkg(sid))
+        text = agentbrief.render_cut(_cut_rows(agents, sid, transcript, projects, full=True), **_pkg(sid))  # noqa: E501
         return text + "\n" if text else ""
     except Exception:  # noqa: BLE001
         return ""

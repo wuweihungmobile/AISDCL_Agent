@@ -32,14 +32,14 @@ def notify_enabled(marker: dict, env=None) -> bool:
         now is None or str(now).strip().lower() not in OFF_VALUES)
 
 
-def _handback(sid: str, pkg, attempts: list, tail: str = "park_failed", text: str | None = None) -> None:
+def _handback(sid: str, pkg, attempts: list, tail: str = "park_failed", text: str | None = None) -> None:  # noqa: E501
     import resume_route  # noqa: PLC0415
 
     tried = "\n".join(f"- {a.get('route')}（fork={a.get('fork')}）attempted={a.get('attempted')} "
                       f"rc={a.get('rc')} 原因={a.get('reason') or '—'}" for a in attempts)
     body = text or ("## 做了什麼\npark 排程到點，所有續航嘗試都失敗了"
                     "（痕跡 `park_chain_failed`、`park_attempt`，"
-                    f"在 autosdd_session_switch.jsonl）。\n\n## 驗了什麼\n逐次嘗試的實際結果：\n{tried}\n\n"
+                    f"在 autosdd_session_switch.jsonl）。\n\n## 驗了什麼\n逐次嘗試的實際結果：\n{tried}\n\n"  # noqa: E501
                     f"## 卡在哪\n見上列原因；交接包 {pkg}。\n\n"
                     f"## 下一步指令\n`claude -r {sid}` 手動回舊 session，或 "
                     f"`python tools/sessionctl.py handoff --spawn {pkg}`。\n")
@@ -75,7 +75,7 @@ def announce(sid: str, pkg, marker: dict, attempts: list, *, claude: str | None 
              tail: str = "park_failed", handback_text: str | None = None) -> None:
     """handback → 佇列 → 桌面通知（依偏好）。`notify` 是測試縫；`repo`＝呼叫端 job 的 repo
     （缺省＝本檔所在 repo；job 與判準必須同一個根，L1 才不會誤判根不一致）。`title`／`body`／`tail`
-    （handback 檔名尾碼）／`handback_text` 由呼叫端傳入（WP-SW REQ-CTL-52 泛化）；缺省＝失敗鏈字面逐字不變。"""
+    （handback 檔名尾碼）／`handback_text` 由呼叫端傳入（WP-SW REQ-CTL-52 泛化）；缺省＝失敗鏈字面逐字不變。"""  # noqa: E501
     import quota_escalation  # noqa: PLC0415
 
     if se_gate.check("park_announce.announce", repo=repo or _REPO, pkg=pkg, sid=sid,

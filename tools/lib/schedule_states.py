@@ -13,13 +13,13 @@ next_run}`，量不到的欄位為 `None`（空 `NextRunTime` 回 `""`＝排程�
   macOS 上 GC 因此誠實地不動作）。
 · 無載具平台：`[]`（量到了、真的沒有工作）。
 唯讀：不 Register／Unregister、不寫任何檔。
-"""
+"""  # noqa: E501
 from __future__ import annotations
 
 _PS = (
     "Get-ScheduledTask | Where-Object {{ $_.TaskName -like '{pat}*' }} | ForEach-Object {{ "
     "$i = $_ | Get-ScheduledTaskInfo; "
-    "$lr = if ($i.LastRunTime -and $i.LastRunTime.Year -gt 2000) {{ $i.LastRunTime.ToString('o') }} else {{ '' }}; "
+    "$lr = if ($i.LastRunTime -and $i.LastRunTime.Year -gt 2000) {{ $i.LastRunTime.ToString('o') }} else {{ '' }}; "  # noqa: E501
     "$nr = if ($i.NextRunTime) {{ $i.NextRunTime.ToString('o') }} else {{ '' }}; "
     "(($_.TaskName, $_.State, $lr, $i.LastTaskResult, $nr) -join [char]9) }}\n"
 )

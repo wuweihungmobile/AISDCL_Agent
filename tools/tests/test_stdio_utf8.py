@@ -137,8 +137,9 @@ class WpSwStdioNoneTest(unittest.TestCase):
         for p in (tools, lib):
             if p not in sys.path:
                 sys.path.insert(0, p)
-        from lib.sessionctl import acctswitch  # noqa: PLC0415
         import quota_halt_marker  # noqa: PLC0415
+
+        from lib.sessionctl import acctswitch  # noqa: PLC0415
 
         tmp = Path(tempfile.mkdtemp(prefix="wpsw95_"))
         self.addCleanup(shutil.rmtree, tmp, True)

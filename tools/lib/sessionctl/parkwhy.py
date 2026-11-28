@@ -9,7 +9,7 @@ stale=true reading=null`——量不到卻不說為什麼，根因只能靠推�
 
 取證來源：`quota_gate.MEASURE_NOTE`（`pace_state` 最近一次補量的 `{won, reason}` 旁記，行程內、不入判準）
 與 `ruling_for` 拋出的例外。純函式、不呼叫網路（紅線 1 不受影響）。
-"""
+"""  # noqa: E501
 from __future__ import annotations
 
 import re
@@ -48,13 +48,13 @@ def valid(why) -> bool:
 def classify(*, state=None, exc: BaseException | None = None, note: dict | None = None,
              expected_account: str | None = None) -> str:
     """回 `why`（量得到且帳號可讀 ⇒ `""`）。`state`＝`pace_state` 的讀數；`exc`＝量測路徑拋出的例外；
-    `note`＝`quota_gate.MEASURE_NOTE`；`expected_account`＝標記登記時的基準帳號。"""
+    `note`＝`quota_gate.MEASURE_NOTE`；`expected_account`＝標記登記時的基準帳號。"""  # noqa: E501
     if exc is not None:
         if isinstance(exc, AttributeError) and (sys.stderr is None or sys.stdout is None):
             return "stdio_none"
         return f"measure_exception:{type(exc).__name__}"
     if state is not None and getattr(state, "axes", ()):
-        return "account_unreadable" if expected_account and not getattr(state, "account_key", None) else ""
+        return "account_unreadable" if expected_account and not getattr(state, "account_key", None) else ""  # noqa: E501
     note = note or {}
     if note.get("won") is False:
         return "claim_lost"

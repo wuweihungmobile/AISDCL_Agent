@@ -65,7 +65,7 @@ def _precheck(marker: dict, env, now: datetime, S: dict) -> str:
 
 
 def _other_session(marker: dict, env, now: datetime, S: dict) -> str:
-    """WP-SW REQ-CTL-52：同專案另一 session 有 AI 回合 ⇒ 不提前（`hold`，探針下一巡邏照常）；讀不到＝沒人在動。"""
+    """WP-SW REQ-CTL-52：同專案另一 session 有 AI 回合 ⇒ 不提前（`hold`，探針下一巡邏照常）；讀不到＝沒人在動。"""  # noqa: E501
     from . import othersession, park_cli  # noqa: PLC0415 — 惰性：park_cli 反向呼叫本套件
 
     sid = str(marker.get("sid") or "")
@@ -123,8 +123,8 @@ def tick(args, now: datetime | None = None, S: dict | None = None, env=None) -> 
             parkwhy.reset_note()
             try:
                 snap = park_reset.ruling_for(sid, S, now, env, default_est=False)
-            except Exception as err:  # 量測路徑拋例外 ⇒ 仍是「量不到」，但要具名（REQ-CTL-51）；照舊往外走 EV_ERROR
-                switch.trace(parkprobe.EV_PROBE, sid=sid, reason=parkprobe.REASON_UNMEASURED, reading=None,
+            except Exception as err:  # 量測路徑拋例外 ⇒ 仍是「量不到」，但要具名（REQ-CTL-51）；照舊往外走 EV_ERROR  # noqa: E501
+                switch.trace(parkprobe.EV_PROBE, sid=sid, reason=parkprobe.REASON_UNMEASURED, reading=None,  # noqa: E501
                              parked_pct=marker.get(parkprobe.MK_PARKED_PCT), recovered=False,
                              why=parkwhy.classify(exc=err))
                 raise

@@ -56,7 +56,7 @@ def after_handoff(rest: list[str], rc: int, env: Mapping | None = None) -> int:
 
 def summarize_and_gc(pkg, acker: str, env=None, *, table=..., backend=None) -> None:
     """WP-SW REQ-CTL-53／58：ack 原輸出之後印「封存後事件」摘要，再 GC 舊哨兵殘骸；兩者共用同一次範圍化列舉
-    （摘要先印＝顯示 GC 前的舊哨兵現況）。任何例外只印一行警告，ack 的 rc 不變。"""
+    （摘要先印＝顯示 GC 前的舊哨兵現況）。任何例外只印一行警告，ack 的 rc 不變。"""  # noqa: E501
     try:
         from . import ackevents, othersession, parkearly, sentgc  # noqa: PLC0415
 
@@ -64,6 +64,6 @@ def summarize_and_gc(pkg, acker: str, env=None, *, table=..., backend=None) -> N
             table = sentgc.job_table(env, repo_root=park_cli._REPO, backend=backend)  # noqa: SLF001
         print(ackevents.summary(pkg, acker, env, table=table))
         sentgc.sweep(acker, env, repo_root=park_cli._REPO, table=table, backend=backend,  # noqa: SLF001
-                     min_idle_s=othersession.SENTINEL_INTERVAL_SECONDS + parkearly.CHILD_TIMEOUT_SECONDS)
+                     min_idle_s=othersession.SENTINEL_INTERVAL_SECONDS + parkearly.CHILD_TIMEOUT_SECONDS)  # noqa: E501
     except Exception as exc:  # noqa: BLE001 — 不得讓已成功的 ack 變 rc≠0
         print(f"⚠️ ack 後摘要／GC 失敗（不影響接手）：{type(exc).__name__}: {exc}", file=sys.stderr)

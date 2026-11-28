@@ -6,7 +6,7 @@
 保持不變。內容四項：①owner 在封存戳之後的事件列（前綴白名單、升冪、至多 40 列）②owner 舊哨兵排程現況（取自
 `sentgc.job_table` 同一次列舉，空值如實寫空）③舊視窗行程是否還在（驗身分，驗不到寫量不到）④本次 ack 撤銷 armed
 park 標記的事實。不寫檔、不改任何狀態。
-"""
+"""  # noqa: E501
 from __future__ import annotations
 
 import json
@@ -16,7 +16,7 @@ from pathlib import Path
 
 ACK_SUMMARY_BUDGET_S = 2.0
 ACK_SUMMARY_MAX_ROWS = 40
-_PREFIXES = ("park_", "keepwarm_", "watch_", "account_switch", "park_early_", "sentinel_", "handoff_")
+_PREFIXES = ("park_", "keepwarm_", "watch_", "account_switch", "park_early_", "sentinel_", "handoff_")  # noqa: E501
 
 
 def _epoch(raw) -> float | None:
@@ -70,7 +70,7 @@ def _window(owner: str, proc_fn) -> str:
         state, detail = (proc_fn or _default_proc)(owner)
     except Exception as exc:  # noqa: BLE001
         return f"量不到：{type(exc).__name__}"
-    return {"alive": f"仍在（pid {detail}，身分已驗）", "dead": "已不在（行程表無此 session 視窗）"}.get(
+    return {"alive": f"仍在（pid {detail}，身分已驗）", "dead": "已不在（行程表無此 session 視窗）"}.get(  # noqa: E501
         state, f"量不到：{detail}")
 
 
@@ -109,10 +109,10 @@ def summary(pkg, acker_sid: str, env=None, *, table=None, proc_fn=None, now=None
     elif not mine:
         out.append(f"② 舊哨兵排程：（排程器無 AutoSDD_Sentinel_{owner} 工作）")
     for r in mine:
-        out.append(f"② 舊哨兵排程 {r['name']}：State={r.get('state')}、LastTaskResult={r.get('last_result')}、"
+        out.append(f"② 舊哨兵排程 {r['name']}：State={r.get('state')}、LastTaskResult={r.get('last_result')}、"  # noqa: E501
                    f"LastRunTime={r.get('last_run')}、NextRunTime={r.get('next_run')}")
     out.append(f"③ 舊視窗行程：{_window(owner, proc_fn)}")
-    cancelled = [r for r in rows if r.get("event") == "park_acked_cancel" and r.get("acker") == acker_sid]
+    cancelled = [r for r in rows if r.get("event") == "park_acked_cancel" and r.get("acker") == acker_sid]  # noqa: E501
     out.append("④ 本次 ack 撤銷了 owner 的 armed park 標記（park_acked_cancel）" if cancelled
                else "④ 本次 ack 未撤銷 park 標記")
     return "\n".join(out)

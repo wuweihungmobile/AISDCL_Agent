@@ -8,7 +8,6 @@ WHY：2026-11-28 10:21:52 舊哨兵在 pythonw 下崩潰，排程器自報 `Last
 from __future__ import annotations
 
 import ast
-import json
 import os
 import sys
 import tempfile

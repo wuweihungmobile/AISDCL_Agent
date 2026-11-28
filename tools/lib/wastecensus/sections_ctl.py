@@ -58,7 +58,7 @@ def m_w1_dual(sessions: list[dict], extra: dict | None = None) -> dict:
             "upper_bound": dict(sv.m_w1(sessions), label=UPPER_BOUND,
                                 gt_30min=over_30(lambda _e: False)),
             "credential_spans": dict(kinds),
-            # WP-SW REQ-CTL-56：TH-2 升級觸發改以「只計子代理」口徑判讀（shell 事件不是無看管的子代理）
+            # WP-SW REQ-CTL-56：TH-2 升級觸發改以「只計子代理」口徑判讀（shell 事件不是無看管的子代理）  # noqa: E501
             "th2_basis": "agent.gt_30min", "th2_gt_30min": corrected["agent"]["gt_30min"]}
 
 
