@@ -20,7 +20,7 @@ from lib import platform_utils
 
 from .. import fakeclaude
 from ..driver import EnvMissing
-from ..sandbox import REPO, Sandbox
+from ..sandbox import REPO, Sandbox, real_autosdd
 from . import CaseContext, case
 from .control_real import _REAL_TRACE, NEW_ACCT, OLD_ACCT, OWNER, regrant
 from .control_sched import run_nostd, sandbox_tick_argv, trace_events
@@ -173,7 +173,7 @@ def rv_ctl31(ctx: CaseContext) -> None:
     sb = ctx.sandbox(probe_hooks=False)
     src_t = _PROJECTS / f"{OWNER}.jsonl"
     src_sub = _PROJECTS / OWNER / "subagents"
-    src_pkg = Path.home() / ".autosdd" / "handoff" / f"{OWNER}_20261126T154649Z"
+    src_pkg = real_autosdd("handoff", f"{OWNER}_20261126T154649Z")
     for p in (src_t, src_sub / "agent-aee3d937b179d8639.jsonl", src_pkg.with_suffix(".md")):
         if not p.is_file():
             raise EnvMissing(f"真實素材不在本機：{p}")
