@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9823,
+    "test_adr_xplat001_c1c2_lock.py": 9835,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -747,7 +747,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_selfimproving_schedule_gate.py": 1225,
     "test_selfimproving_schedule_model.py": 627,
     "test_selfimproving_schedule_patrol.py": 805,
-    "test_selfimproving_verify.py": 1103,
+    "test_selfimproving_verify.py": 1135,
     "test_sentinel_tick_e2e_r145.py": 466,
     "test_session_brief.py": 1570,
     "test_sessionctl_ackhook.py": 350,
@@ -3428,6 +3428,12 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "牆鐘賽跑）：test_selfimproving_verify.py +33（砍樹閘門、起得晚的回歸鎖）加本檔 +12。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/06_quality/CrossPlatform_R218_TestHygiene_Evidence.md。"),
+    ("R214", 191992, 192036, +44,  # round-label-ok r218flk5b
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE "
+     "的R214 名冊列承接] 同標籤第七十九列（FLK5 二次：pre-push 再紅，成因是掛住探針之前的瞬間"
+     "探針與 git apply 也吃 2 s 而先逾時）：test_selfimproving_verify.py +32（只有被測的"
+     "那次探針吃 2 s、瞬間步驟改吃寬限）加本檔自身漂移。逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；證據＝R218_TestHygiene 證據檔 K 項。"),
 )
 
 
@@ -3529,7 +3535,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (63480, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (63524, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3627,6 +3633,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "第七十六列（r218flk4）+44＝63196。"
         "第七十七列（r218wpci）+239＝63435。"
         "第七十八列（r218flk5）+45＝63480。"
+        "第七十九列（r218flk5b）+44＝63524。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -4307,6 +4314,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "FLK5：逾時砍樹測試等到孫行程心跳才砍、不跟牆鐘賽跑的回歸鎖："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok r218flk5b
+     "FLK5 二次：只有被測的探針吃 2 s 逾時、瞬間步驟改吃寬限的回歸鎖："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -4482,10 +4493,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 425
+_REPIN_LOG_FROZEN_PREFIX_LEN = 426
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "956c04480028738213955023de5ba02569809eeca5eb89edde10f6cb29b966d3")
+    "1081e19d80c4d49d055b08eb7ade8bb1cd87ba1223177a437fec87a950eefbd8")
 
 
 def repin_log_history_digest(
@@ -4752,6 +4763,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "453bb2c358a1", "648af6b20f1b", "DEF-200-657"),  # round-label-ok r218flk4ledger
     ("R214", "648af6b20f1b", "1a0f9639e844", "DEF-200-658"),  # round-label-ok r218wpciledger
     ("R214", "1a0f9639e844", "956c04480028", "DEF-200-659"),  # round-label-ok r218flk5ledger
+    ("R214", "956c04480028", "1081e19d80c4", "DEF-200-659"),  # round-label-ok r218flk5bledger
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

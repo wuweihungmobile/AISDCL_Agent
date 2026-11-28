@@ -322,12 +322,18 @@ class TestVerify(P2TestCase):
                     self.assertTrue(lines[-1].startswith("| OBS") and "PROBE-TIMEOUT" in lines[-1])
 
     #: FLK5（DEF-200-659）：逾時砍樹前等孫行程第一筆心跳的上界（遠短於 `_HANG` 的 600 s）
-    HB_GATE_SECONDS = 20
+    HB_GATE_SECONDS = 60
+    #: 非被測那次逾時的探針與 `git apply` 的牆鐘：2 s 只約束要掛住的那個探針；[b][c] 之前
+    #: 還有瞬間探針與補丁套用，負載下它們自己跑超過 2 s 會被誤判逾時（DEF-200-659 二次）
+    QUICK_STEP_SECONDS = 60
+    _HANG_CALL = {"hang": 1, "hang_fixed": 2, "hang_mutated": 3}  # 掛住的是第幾次探針執行
 
     def _run_hang(self, probes: str, late: float = 0.0):
         """跑一次逾時探針；回 (R, p, obj, s0, s1)。`late`＝探針起跑前先睡幾秒（模擬負載下直譯器
-        起得晚）。砍樹經閘門：逾時那一刻先等到孫行程心跳非空才呼叫真 `_kill_tree`，觀測不再跟
-        2 s 牆鐘賽跑（負載下兩層直譯器啟動可超過 2 s，s0＝0 而鑑別力不成立）；耗時扣掉閘門等待。"""
+        起得晚）。兩處把觀測從牆鐘賽跑中拿掉：①砍樹經閘門，逾時那一刻先等孫行程心跳非空才呼叫真
+        `_kill_tree`；②只有被測的那一次探針吃 2 s，其前的瞬間探針與 `git apply` 改吃
+        `QUICK_STEP_SECONDS`（否則負載下它們先逾時、掛住的探針根本沒跑，s0＝0）。耗時斷言扣掉
+        閘門等待與瞬間步驟耗時，「掛住的那步在逾時被砍、不是等滿 600 s」的鑑別力不變。"""
         tmp = fx.new_dir("hb")
         tmp.mkdir()
         hb, pidfile = tmp / "hb.txt", tmp / "pid.txt"
@@ -349,6 +355,8 @@ class TestVerify(P2TestCase):
             except OSError:
                 return 0
         real, waited = si_runner._kill_tree, [0.0]
+        real_probe, real_apply = si_runner.run_probe, si_sandbox.apply_patch
+        real_reverse, nth = si_sandbox.reverse_apply, [0]
 
         def gated_kill(proc):
             t = time.monotonic()
@@ -356,8 +364,31 @@ class TestVerify(P2TestCase):
                 time.sleep(0.05)
             waited[0] += time.monotonic() - t
             return real(proc)
+
+        def timed(fn, *a, **k):  # 瞬間步驟的耗時不計入「掛住那步 15 s 內被砍」的斷言
+            t = time.monotonic()
+            try:
+                return fn(*a, **k)
+            finally:
+                waited[0] += time.monotonic() - t
+
+        def probe(argv, **k):
+            script = fx2.PROBE_SCRIPTS_BY_KIND[probes]
+            if len(argv) > 1 and str(argv[1]).endswith(script):
+                nth[0] += 1
+                if nth[0] == self._HANG_CALL[probes]:
+                    return real_probe(argv, **k)
+            return timed(real_probe, argv, **{**k, "timeout": max(k["timeout"],
+                                                                   self.QUICK_STEP_SECONDS)})
+
+        def quick(fn):
+            return lambda root, patch_path, timeout=None: timed(fn, root, patch_path,
+                                                                self.QUICK_STEP_SECONDS)
         t0 = time.monotonic()
-        with mock.patch.object(si_runner, "_kill_tree", gated_kill):
+        with mock.patch.object(si_runner, "_kill_tree", gated_kill), \
+                mock.patch.object(si_runner, "run_probe", probe), \
+                mock.patch.object(si_sandbox, "apply_patch", quick(real_apply)), \
+                mock.patch.object(si_sandbox, "reverse_apply", quick(real_reverse)):
             rc, out, err = self.M(R, "verify", p, "--json")
         self.assertEqual(rc, 0, out + err)
         self.assertLess(time.monotonic() - t0 - waited[0], 15)
@@ -368,9 +399,10 @@ class TestVerify(P2TestCase):
         return R, p, obj, s0, size()
 
     def test_DEF_200_659_tree_kill_is_judged_even_when_the_grandchild_starts_after_the_wall(self):
-        # 探針先睡 3 s（＞2 s 逾時）才生孫行程：把「負載下起得晚」變成確定輸入；舊載具必得 s0＝0
-        *_, s0, s1 = self._run_hang("hang", late=3.0)
-        self.assertGreater(s0, 0, "載具沒等到孫行程心跳，砍樹鑑別力不成立")
+        # 探針腳本開頭先睡 3 s（＞2 s 逾時）：把「負載下起得晚」變成確定輸入。選 hang_mutated＝
+        # 最前面還有兩個瞬間探針（也各睡 3 s），舊載具下它們先逾時、掛住的探針根本沒跑，s0＝0
+        *_, s0, s1 = self._run_hang("hang_mutated", late=3.0)
+        self.assertGreater(s0, 0, "載具沒讓掛住的探針跑到、或沒等到孫行程心跳，砍樹鑑別力不成立")
         self.assertEqual(s1, s0)
 
     def _reap(self, pidfile: Path, hb: Path) -> None:
