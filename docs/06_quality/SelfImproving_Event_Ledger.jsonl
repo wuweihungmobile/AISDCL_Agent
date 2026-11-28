@@ -214,3 +214,4 @@
 {"seq":214,"t":"2026-11-27T21:50:41+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-27T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:50 落在黑窗 ['21:00-01:30']"}
 {"seq":215,"t":"2026-11-28T01:30:03+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-27T21:00:00+08:00","reason":"quota-band","detail":"額度帶 QUOTA_VERDICT=CONTINUE acct=none win=none wk=none cap=2 measured_at=none expires_at=2026-11-28T01:45:02+08:00 vid=bf"}
 {"seq":216,"t":"2026-11-28T10:15:04+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-27T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
+{"seq":217,"t":"2026-11-28T13:00:04+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-27T21:00:00+08:00","reason":"dirty-tree","detail":"工作樹有非 SI 自有改動：docs/04_planning/AutoSDD_improving_112.md, docs/06_quality/AutoSDD_Defect_Log.md, docs/06_quality/CrossPla"}
