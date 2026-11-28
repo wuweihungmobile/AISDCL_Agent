@@ -114,7 +114,7 @@ def register_once(ctx: CaseContext, name: str, exe: str, args: str, delay_s: flo
         f"$a = New-ScheduledTaskAction -Execute {_q(exe)} -Argument {_q(args)}{wd}; "
         f"$t = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddSeconds({delay_s:.0f})); "
         "$p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive; "
-        "$s = New-ScheduledTaskSettingsSet -WakeToRun -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries; "
+        "$s = New-ScheduledTaskSettingsSet -WakeToRun -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries; "  # no-window-ok: 載具由呼叫端傳入、只准沙盒名稱任務（上方 ctx.check 擋）；呼叫端皆帶 -WindowStyle Hidden 或轉原 pythonw Action（判準窗取 4 行，註解須在窗末行）
         f"try {{ Register-ScheduledTask -TaskName {_q(name)} -Action $a -Trigger $t -Principal $p -Settings $s -Force -ErrorAction Stop | Out-Null }} "
         "catch { Write-Output ('ERR: ' + $_.Exception.Message); exit 1 }", 90)
     ctx.check(rc == 0, f"Register-ScheduledTask 失敗 rc={rc}：{out[-300:]}")
