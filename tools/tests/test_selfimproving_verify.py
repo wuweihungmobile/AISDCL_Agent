@@ -290,26 +290,7 @@ class TestVerify(P2TestCase):
                  ("c", "hang_mutated", (True, True, None), 1, 1))
         for label, probes, flags, n_patched, n_mutated in cases:
             with self.subTest(label):
-                tmp = fx.new_dir("hb")
-                tmp.mkdir()
-                hb, pidfile = tmp / "hb.txt", tmp / "pid.txt"
-                src = self.held(probes=probes)
-                m = json.loads((src / "manifest.json").read_text(encoding="utf-8"))
-                m["probes"][0]["argv"] = [a.replace("{heldout}/hb", str(hb)).replace(
-                    "{heldout}/pidfile", str(pidfile)) for a in m["probes"][0]["argv"]]
-                (src / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
-                R, p = self.fresh(heldout=src)
-                fx.set_params(R, probe_timeout_seconds=2)
-                self.addCleanup(self._reap, pidfile, hb)
-                t0 = time.monotonic()
-                rc, out, err = self.M(R, "verify", p, "--json")
-                self.assertEqual(rc, 0, out + err)
-                self.assertLess(time.monotonic() - t0, 15)
-                obj = json.loads(out)
-                self.assertEqual((obj["verdict"], obj["reasons"]), ("NE", ["PROBE-TIMEOUT"]))
-                s0 = hb.stat().st_size if hb.exists() else 0
-                time.sleep(1.5)
-                s1 = hb.stat().st_size if hb.exists() else 0
+                R, p, obj, s0, s1 = self._run_hang(probes)
                 self.assertGreater(s0, 0)
                 self.assertEqual(s1, s0)
                 doc = json.loads(verify_files(R, p)[0].read_text(encoding="utf-8"))
@@ -339,6 +320,58 @@ class TestVerify(P2TestCase):
                     lines = out.rstrip("\n").split("\n")
                     self.assertEqual(lines[-2], "obs-draft:")
                     self.assertTrue(lines[-1].startswith("| OBS") and "PROBE-TIMEOUT" in lines[-1])
+
+    #: FLK5（DEF-200-659）：逾時砍樹前等孫行程第一筆心跳的上界（遠短於 `_HANG` 的 600 s）
+    HB_GATE_SECONDS = 20
+
+    def _run_hang(self, probes: str, late: float = 0.0):
+        """跑一次逾時探針；回 (R, p, obj, s0, s1)。`late`＝探針起跑前先睡幾秒（模擬負載下直譯器
+        起得晚）。砍樹經閘門：逾時那一刻先等到孫行程心跳非空才呼叫真 `_kill_tree`，觀測不再跟
+        2 s 牆鐘賽跑（負載下兩層直譯器啟動可超過 2 s，s0＝0 而鑑別力不成立）；耗時扣掉閘門等待。"""
+        tmp = fx.new_dir("hb")
+        tmp.mkdir()
+        hb, pidfile = tmp / "hb.txt", tmp / "pid.txt"
+        src = self.held(probes=probes)
+        m = json.loads((src / "manifest.json").read_text(encoding="utf-8"))
+        m["probes"][0]["argv"] = [a.replace("{heldout}/hb", str(hb)).replace(
+            "{heldout}/pidfile", str(pidfile)) for a in m["probes"][0]["argv"]]
+        (src / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+        if late:
+            script = src / fx2.PROBE_SCRIPTS_BY_KIND[probes]
+            script.write_bytes(b"import time\ntime.sleep(%r)\n" % late + script.read_bytes())
+        R, p = self.fresh(heldout=src)
+        fx.set_params(R, probe_timeout_seconds=2)
+        self.addCleanup(self._reap, pidfile, hb)
+
+        def size() -> int:
+            try:
+                return hb.stat().st_size
+            except OSError:
+                return 0
+        real, waited = si_runner._kill_tree, [0.0]
+
+        def gated_kill(proc):
+            t = time.monotonic()
+            while size() == 0 and time.monotonic() - t < self.HB_GATE_SECONDS:
+                time.sleep(0.05)
+            waited[0] += time.monotonic() - t
+            return real(proc)
+        t0 = time.monotonic()
+        with mock.patch.object(si_runner, "_kill_tree", gated_kill):
+            rc, out, err = self.M(R, "verify", p, "--json")
+        self.assertEqual(rc, 0, out + err)
+        self.assertLess(time.monotonic() - t0 - waited[0], 15)
+        obj = json.loads(out)
+        self.assertEqual((obj["verdict"], obj["reasons"]), ("NE", ["PROBE-TIMEOUT"]))
+        s0 = size()
+        time.sleep(1.5)
+        return R, p, obj, s0, size()
+
+    def test_DEF_200_659_tree_kill_is_judged_even_when_the_grandchild_starts_after_the_wall(self):
+        # 探針先睡 3 s（＞2 s 逾時）才生孫行程：把「負載下起得晚」變成確定輸入；舊載具必得 s0＝0
+        *_, s0, s1 = self._run_hang("hang", late=3.0)
+        self.assertGreater(s0, 0, "載具沒等到孫行程心跳，砍樹鑑別力不成立")
+        self.assertEqual(s1, s0)
 
     def _reap(self, pidfile: Path, hb: Path) -> None:
         try:

@@ -84,3 +84,13 @@
 - **重現**：舊版測試在 Windows 以 `mock.patch.object(sys, "platform", "darwin")` 單跑 T① 測試 ⇒ `+ ['T1']` 同形紅；E2E 以 sitecustomize 的 atexit 在子行程 stderr 尾端注入一行、照舊合併解析 ⇒ `JSONDecodeError: Expecting value: line 1 column 1 (char 0)` 同形紅。
 - **修法（測試密閉，不 skip、不改產品）**：T① 案在宿主平台以 mock 釘成 darwin 的前提下顯式帶 `platform="linux"／"win32"`，另加一條「宿主 darwin、不帶參數 ⇒ 缺席」斷言；E2E `_cli` 記下 `self.stdout`，判決 JSON 一律經 `_json()` 只從 stdout 取，失敗訊息仍用合併輸出。
 - **回歸鎖**：`test_json_verdict_survives_trailing_stderr`（atexit 注入 stderr 尾行，三平台都能重現 mac 形態；先斷言注入確實出現，載具失效即紅）。紅綠自證：把 `_cli` 改回以合併輸出當判決來源 ⇒ 該案紅、還原綠；舊 T① 案在 mock darwin 下紅、新案在 mock darwin 與原生平台皆綠。
+
+## K 項：DEF-200-659 逾時砍樹測試的心跳觀測跟 2 s 牆鐘賽跑（FLK5）
+
+- **症狀**：pre-push 並行全套唯一紅 `test_selfimproving_verify.TestVerify.test_AT_217_1_E_2_probe_timeout_kills_the_tree [c]`，`assertGreater(s0, 0)` 得 `0 not greater than 0`；單跑兩次皆綠。
+- **s0 量的是什麼**：探針（`_HANG` 系列）起一個孫行程，每 0.1 s 往心跳檔追加 1 byte；s0＝`verify` 回來當下心跳檔大小，用來證明「被砍之前孫行程確實活著」，之後 1.5 s 不再長大才算整棵樹被砍。
+- **重現與量測**：載具包住 `runner.run_probe`／`_kill_tree`（真砍樹照呼叫），記錄逾時那一刻 pidfile 在不在、心跳幾 byte；HEAD 版測試原封不動。閒置：逾時當下心跳 18～43 byte。60 支燒機＋6 條 CIM 迴圈 8 次：降到 9～41 byte，全綠。與並行根層全套同跑 25 次：99 次砍樹中 13 次逾時當下心跳檔還不存在（其中 8 次連 pidfile 都還沒寫，即孫行程尚未生出），3 次自然轉紅（[c] 兩次、[a] 一次），訊息與 pre-push 逐字相同；其餘幾次靠 `taskkill` 自身延遲讓孫行程搶寫一筆而僥倖綠。
+- **成因**：觀測跟逾時牆鐘賽跑。`probe_timeout_seconds=2` 必須涵蓋探針與孫行程兩層 Python 直譯器的啟動；負載下啟動可超過 2 s，逾時砍樹發生在第一筆心跳之前。產品端 `run_probe` 的逾時與 `taskkill /T` 砍樹沒有缺陷。
+- **修法（結構正解，只改測試）**：新 helper `_run_hang` 以 `mock.patch.object` 包住 `runner._kill_tree`：逾時那一刻先等心跳檔非空（上界 `HB_GATE_SECONDS=20`，遠短於探針的 600 s）才呼叫真砍樹；耗時斷言扣掉閘門等待，「15 s 內回來」的鑑別力不變。產品碼、逾時值、斷言都沒動，沒加 retry／skip。
+- **回歸鎖**：`test_DEF_200_659_tree_kill_is_judged_even_when_the_grandchild_starts_after_the_wall`：探針先睡 3 s（大於 2 s 逾時）才生孫行程，把「負載下起得晚」變成確定輸入。紅綠自證：`HB_GATE_SECONDS=0`（等同舊載具）⇒ `AssertionError: 0 not greater than 0 : 載具沒等到孫行程心跳，砍樹鑑別力不成立`；還原 ⇒ 新案與 AT-217-1-E-2 皆綠。
+- **同一 AT 在壓力下另見的兩種紅（不屬本列，未修，交主控裁決）**：①沙盒樹 manifest 與 `app.sandbox` 不符（`+ sha256:dee23c85…`），全套加載具壓力下 25 次見 2 次、三支載具並行加燒機見 1 次。可疑點：測試把 `probe_timeout_seconds` 設 2，而 `_three_steps` 的 `apply_patch`／`reverse_apply` 也用同一個值；壓力下單次 `git apply` 量到 1.3～2.75 s，`reverse_apply` 的失敗回傳值又被忽略。12 次插樁沒有抓到 `reverse_apply` 回 False，所以成因尚未確認。②三支載具並行加 60 支燒機時，NFR-P2-2 的「整體小於 15 秒」得 15.9～17.4 s。這個壓力遠大於 pre-push，門檻是規格值，不動。
