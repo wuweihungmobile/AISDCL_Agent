@@ -543,6 +543,14 @@ class QuotaSeriesLatchTests(_Fence):
         self.assertEqual(events,
                          ["quota", "keepwarm"])
 
+    def test_def_200_663_unknown_account_flip_is_not_a_new_series(self) -> None:
+        """DEF-200-663。WHY：acct 量不到（None）與已知帳號互翻不是換帳號，不得重發；兩個已知帳號
+        不同才是真換帳號（`keepwarm.quota_latch`）。"""
+        p = _plan("close")
+        self.assertEqual(self._events(([("PARK", "R", None)], p), ([("PARK", "R", "a1")], p),
+                                      ([("PARK", "R", None)], p), ([("PARK", "R", "a2")], p)),
+                         ["quota", "keepwarm", "keepwarm", "quota"])
+
     def test_at_qw_89_raw_halt_still_outranks_raw_prepare(self) -> None:
         """AT-QW-89。WHY：原始讀數序列內 prepare＜halt，升級照樣再觸發。"""
         self.assertEqual(self._events(([("WAIT_RESET", "R", None)], None),

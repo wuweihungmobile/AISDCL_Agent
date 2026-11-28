@@ -554,6 +554,14 @@
 | MU-CTL-76 | `othersession.active` 把 `driver_after` 迴圈改回**單次呼叫**（只看窗口最早一筆的 `kind`），或拿掉 `since` 推進、或拿掉 `OTHER_SESSION_SCAN_MAX_STEPS` 上限 | AT-CTL-109（`human(t1)→assistant(t2)`、`human→human→assistant` 交錯夾具必紅）、AT-CTL-110（④④′④″）、AT-CTL-114（迴圈 AST）、E2E-CTL-28（對照組：另一 session 檔先人類提示後 assistant 回覆） |
 | MU-CTL-75 | `sentgc` 拿掉「`State != Running` 且 `LastRunTime` 夠舊」判準，或拿掉沙盒範圍化（`job_table` 不濾名稱） | AT-CTL-136（E／F／G）、AT-CTL-140、E2E-CTL-34（階段 1、真實清單前後逐字相同）、E2E-CTL-29 |
 
+**8.6 勘誤（2026-11-29，WP-SW 第四棒實測；只增不改，上表既有列逐字不變）**：下列為「實際咬住該變異而轉紅的 AT」，以本列為準。
+
+| MU | 上表指定 | 實測 | 以此為準 |
+|---|---|---|---|
+| MU-CTL-65 | AT-CTL-133、E2E-CTL-33 | AT-133 未紅（其只做純比對） | AT-CTL-134（AST 掃第四列呼叫帶 `park=`）、E2E-CTL-33 |
+| MU-CTL-69 | AT-CTL-143 | 原先指定的 AT-CTL-102 不紅（只查無內聯字面）；AT-CTL-143（planner 行數不超基線＋6）紅 | AT-CTL-143 |
+| MU-CTL-71 | AT-CTL-144、E2E-CTL-35 | AT-CTL-144 改釘 `MIN_TESTS` 下限（見 DES §24.15 第 12 項） | AT-CTL-144（`MIN_TESTS` 下限）、`RatchetDriftWarningTest` |
+
 ### 8.7 交卷判準（Developer 與 QA；W-SW 收尾）
 1. 每包交卷附當回合真跑輸出：本節對應 AT 的 pytest／unittest 行、`check_loc_budget.py --json`、ruff（只 lint 改到的檔）、修前 oracle 的紅（貼修前碼同夾具的失敗輸出）與修後的綠。
 2. E2E-CTL-25～35 以 `python tools/realverify.py run --family control` 入 `docs/06_quality/RealVerify_Result_Ledger.md`；排程類 E2E 貼排程器自報的 `NextRunTime`／`LastTaskResult` 值；租約結束後 `Get-ScheduledTask` 0 殘留（貼輸出）。未入帳＝未結（根 CLAUDE.md 〈換 session 的 SOP〉）。

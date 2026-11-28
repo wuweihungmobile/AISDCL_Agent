@@ -3307,7 +3307,7 @@ _CONSOLE_CARRIERS = ("powershell.exe", "pwsh.exe", "cmd.exe", "python.exe")
 #: 理由見 `test_the_repo_wide_criterion_knows_the_gui_carrier_symbol`。
 _GUI_CARRIER_LITERAL = "pythonw.exe"
 _GUI_CARRIER_SYMBOL = "quiet_python"
-_ACTION_EXEMPT_RE = re.compile(r"#\s*no-window-ok:\s*(\S.*)$")
+_ACTION_EXEMPT_RE = re.compile(r"#\s*no-window-ok:\s*(\S.*)$", re.M)
 #: 掃描面：活躍的 `.ps1`／`.py`。`.md` 一律不掃——文件裡的指令是給人讀的說明，
 #: 判它就是要求文件與程式碼用同一組判準，而那會把「說明一個危險形態」也判成違規。
 _ACTION_SCAN_TREES = ("tools", ".claude", "AutoClaude/tools")
@@ -3551,6 +3551,10 @@ class TestNightlyTaskActionsAreWindowless(unittest.TestCase):
         bare = {"x.ps1": "New-ScheduledTaskAction -Execute 'cmd.exe' "
                          "-Argument \"/c z\"  # no-window-ok:\n"}
         self.assertTrue(windowless_action_problems(bare))
+        # DEF-200-664：豁免註解在多行窗的非末行（`re.M`）一樣有效。
+        mid = {"x.ps1": "New-ScheduledTaskAction -Execute 'cmd.exe'  # no-window-ok: 要給人看\n"
+                        "    -Argument \"/c z\"\n"}
+        self.assertEqual(windowless_action_problems(mid), [])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

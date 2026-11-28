@@ -145,7 +145,7 @@ def _row4(args, now: datetime, view: Path, source: Path, marker, new, idle_new, 
 
 
 def main(argv: list[str]) -> int:
-    parser =argparse.ArgumentParser(description="哨兵判定重放（舊判準 vs 新判準；as-of --now）")
+    parser = argparse.ArgumentParser(description="哨兵判定重放（舊判準 vs 新判準；as-of --now）")
     parser.add_argument("--sid", required=True, help="要重放的 session id")
     parser.add_argument("--now", help="重放時刻（ISO 8601，缺時區＝本機時區；預設現在）")
     args = parser.parse_args(argv)

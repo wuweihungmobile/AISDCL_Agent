@@ -351,12 +351,23 @@ def quota_latch(sid: str, action: str, reset: str, *, acct: str | None = None,
     並出聲（寧可再吵一次，也不靜默吞掉額度事件；PRD 原則 5）。"""
     path, rank = latch_path(sid), _ACTION_RANK.get(action, 1)
     row = _read_latch(path)
-    if (row.get("acct") == (acct or None) and row.get("action") in _ACTION_RANK
+    # 帳號「量不到」(None) 與已知帳號互為相容（DEF-200-663：none↔帳號翻轉不是換帳號，不得重發）；
+    # 兩個都已知且不同才是真換帳號。重寫閂鎖時保留已知帳號，翻轉才不會把它洗掉。
+    acct_known, row_acct = acct or None, row.get("acct")
+    acct_compat = acct_known is None or row_acct is None or acct_known == row_acct
+    acct = acct_known or row_acct
+    if (acct_compat and row.get("action") in _ACTION_RANK
             and isinstance(row.get("reset"), str) and _same_reset(row["reset"], reset)):
         latched_rank = _ACTION_RANK[row["action"]]
         grown = (isinstance(n, int) and not isinstance(n, bool)
                  and isinstance(row.get("n_latched"), int) and n > row["n_latched"])
         if latched_rank >= rank and not grown:
+            if row_acct is None and acct is not None:  # 首次得知帳號：補記，不重發
+                try:
+                    path.write_text(json.dumps({**row, "acct": acct}), encoding="utf-8",
+                                    newline="\n")
+                except OSError:
+                    pass  # 只是補記帳號；寫不進就維持原閂鎖（下次照樣不重發）
             return False
         if latched_rank > rank:  # 新派工重判：動作不降（閂鎖記該窗最高動作）
             action = row["action"]

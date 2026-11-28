@@ -86,7 +86,8 @@ def owner_tags(runner, repo: Path, sid: str, head: str | None) -> tuple[list[str
     return rows, ""
 
 
-def _unknown(why: str) -> str:    return f"量不到：{why}"
+def _unknown(why: str) -> str:
+    return f"量不到：{why}"
 
 
 def _quote(text: str) -> str:
