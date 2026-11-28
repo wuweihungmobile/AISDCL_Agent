@@ -397,3 +397,160 @@
 1. **AT-CTL-32** 的 `rosterscope.cut_kind` 實作在 `tools/lib/sessionctl/agentbrief.py::cut_kind`（名稱以實作為準；AT 的判準與樣本不變）。
 2. `agentbrief.STOPPED_RECENT_SECONDS`＝24 小時（`stopped` 只認近期被 TaskStop 者），見 Control_Handover DES §23。
 3. REQ-CTL-20 三處出聲掛 `cutvoice`（`roster.stop_message`、`watch`、`briefline`），REQ-CTL-47 的 `ackhook` 掛在 `tools/sessionctl.py` 入口層（`ackhook.after_handoff`），不在 `handoff.py` 內。
+---
+
+## 8. WP-SW 增修（r4；2026-11-28；只增不改，§1～§7 逐字不變）
+
+> 🔒 本節為凍結稿**之後**的增修（PRD 修訂表 v2.1.30、§16.6 2026-11-28 列；設計＝DES §24）。依主控裁示，REQ-CTL-49 起新增、不改 §1～§7 既有條文、不放寬任何鎖；頂部 `REQ 48／AT 92／E2E 24／MU 49` 為**凍結當時計數**，本節自帶計數：**REQ 11（49～59）／AT 53（93～145）／E2E 11（25～35；RV-CTL25～35）／MU 22（50～71）**，自檢＝AT-CTL-145。**既有 AT／E2E 的受影響處**（REQ-CTL-20 的字樣斷言、AT-CTL-30、E2E-CTL-12 的「四處同文」比對範圍）一律「換新字樣、舊字樣改反向斷言保留」，見 REQ-CTL-55／54。
+> 上游證據＝Architect＋SA 報告（sid 4290bf58 scratchpad `q34_arch_report.md`，下稱 **ARCH-Q34**；§6 缺口 G-1～G-5、TH-A～D）。暴露證據（根 CLAUDE.md〈守衛面准入〉）：G-1＝(b) 排程器自報 `AutoSDD_Sentinel_406454ea-…` 的 `LastTaskResult=1`、`NextRunTime` 空白；TH-A＝(a)＋(b)（見 REQ-CTL-52）；TH-B＝(b) `autosdd_session_switch.jsonl` 第 1379、1381 行；G-2＝(a) 掌舵者據 406454ea 逐字稿第 10412 行提問題 3；G-5＝(b)。
+> 載具約定（本節 E2E 共用）：**`sw_pythonw` 載具**＝以真 `.venv\Scripts\pythonw.exe` 起行程、`creationflags=DETACHED_PROCESS|CREATE_NO_WINDOW`、`close_fds=True`、**不指定 std 三個 handle**（讓它與排程器起的行程同樣沒有 std handle）；載具**先**以同形態起一支 `pythonw -I -c "<把 sys.stderr is None 寫入檔>"`，確認真的得到 `None` 才算有效載具（得不到＝FAIL，不 skip：載具必須能觸發被測 bug）；行程結局由載具以 `Popen.wait` 取 rc、由痕跡與排程器取證。真排程一律用 SideEffect 租約前綴（`AutoSDD_RVsbx_`；用完拆；結束後 `Get-ScheduledTask` 0 殘留）。**PowerShell 呼叫仍遵守鐵律（不接管線讀 rc）**；macOS 上以 `AUTOSDD_*` 排程後端替身取代 pythonw／schtasks 行（標 ENV，不 skip）。
+
+### 8.1 需求（REQ）
+
+| REQ | 內容 | DES | PRD 座標 |
+|---|---|---|---|
+| REQ-CTL-49 | **stdio SSOT 對 `None` 串流改綁 `os.devnull`**（G-1①，主控定：devnull、不另開日誌檔）：`tools/_stdio_utf8.py::reconfigure_stdio_utf8` 對 `sys.stdout`／`sys.stderr` 為 `None` 者，改綁 `open(os.devnull, "w", encoding="utf-8", errors="replace")`（行程內每個串流名一個；冪等：重複呼叫不重複開檔）；其餘三條分支（有 `.reconfigure`／有 `.buffer`／皆無的測試替身）**逐字不變**；本修法只改變「直接 `.write`／`.flush` 會 `AttributeError`」這一點（`print()` 對 `None` 本來就 no-op）。**不准只改 `acctswitch.py:229` 一行**（壓制：`tools/lib/quota_gate.py` 的 `sys.stderr.write` 站點〔693、853、855、882、1081、1105、1125、1146 行，現查〕在 pythonw 下同樣會炸）；診斷由 REQ-CTL-50 承擔，本條不寫任何日誌檔。入口前提：排程入口（REQ-CTL-50 清單）在進入點呼叫本函式 | §24.1 D-SW-1 | §4.5.6 R-4.5.6-4（b）；§4.1.7 R-4.1.7-4 |
+| REQ-CTL-50 | **排程入口未捕捉例外必留痕＋告警＋重排**（G-1②）：新葉 `tools/lib/sessionctl/crashguard.py` 的 `run(entry, body, *, on_crash, state_ref)` 包住每個「由排程器（schtasks／launchd）起的 Python 入口」：`body` 拋任何 `Exception` ⇒ ①落痕跡 `sentinel_crashed`（哨兵與續跑 tick：`entry∈{sentinel-tick,resume-tick}`）或 `park_job_crashed`（`park --fire`、oldwin 到點 job：`entry` 填入口名），欄位 `exc_type`、`file`（相對 repo）、`line`、`tb`（精簡 traceback，≤`CRASH_TB_MAX_CHARS`）、`sid`、`task`、`streak`；②走**既有**告警管道 `quota_escalation.alert(loud=True)`（`sentinel_crashed` 一律 loud；告警文字寫例外型別＋檔名行號；不新增通知原語）；③**仍重排下一次巡邏**（哨兵：沿用 `_register_and_record(plan, state, now+SENTINEL_INTERVAL_SECONDS, SENTINEL_TICK)`；狀態塊讀不出 ⇒ 只告警、不重排、不二次拋）；④`crash_streak` 寫進狀態塊，連續 `CRASH_STREAK_MAX`（3）次崩潰 ⇒ 不再重排、落 `sentinel_crash_loop`、`alert(loud=True)`（避免每 15 分鐘無限崩潰）；任一次正常 tick 把 streak 歸零；⑤`park --fire` 崩潰 ⇒ `park_job_crashed` ＋標記走既有失敗鏈（`park_chain` 結算 `failed`、`park_announce.announce`，不讓標記留 `armed` 而一次性排程已耗盡）；⑥rc：重排或告警成功後回 1（讓排程器 `LastTaskResult` 如實為非 0，**但 `NextRunTime` 必須非空**）；⑦crashguard 自身不得拋（內部再包一層，最壞退化為只落痕跡）。**排程入口清單**住 `crashguard.ENTRIES`（`session_resume_planner.py` 的 `--sentinel-tick`、`--resume-tick`；`tools/sessionctl.py park --fire`；`oldwin_sched.job_argv` 的到點 job；Developer 以 `park_cli.job_argv`／`oldwin_sched.job_argv`／planner 註冊腳本三個站點普查，**新增排程入口而未入表＝鎖紅**）。planner 對每個入口分派僅增 ≤2 行呼叫 | §24.2 D-SW-2 | §4.5.6 R-4.5.6-4（b）（c） |
+| REQ-CTL-51 | **armed park 期間提前探針：量得到，量不到必須具名原因**（TH-B 行為規格）：①排程器（pythonw）起的哨兵 tick 內，`parkearly.tick` 的探針必須取得**新鮮額度讀數**（`reading` 非 `null`、`stale=false`）；②量不到時，`park_early_probe` 痕跡必須帶 `why`，值域**封閉**：`no_credential`｜`claim_lost`（名額被搶且 `await_winner` 逾時）｜`http_error:<status>`｜`timeout`｜`measure_exception:<Type>`｜`stale_cache`｜`account_unreadable`｜`stdio_none`；`reading=null` 而無 `why`＝違規；③**換帳號且新帳號判決為 `CONTINUE` ⇒ 兩個巡邏間隔內（`2×SENTINEL_INTERVAL_SECONDS`＋`CHILD_TIMEOUT_SECONDS` 上界）提前接手**（`park_early_recovered`＋`fire_early` 子行程）；④未量到讀數時**不得**判恢復（fail-closed 方向不變，不放寬 `parkprobe.evaluate`）。**待實作驗證（Developer 先查、結果入帳 DES §24.3；本條只規定行為，不預設根因）**：疑點 ①與 G-1 同源——`pythonw` 下量測路徑（`quota_gate.pace_state`→`quota_meter.measure_detail`）內有 `sys.stderr.write`／`print(file=sys.stderr)` 拋例外被 `parkearly.tick` 的 `except Exception`（`parkearly.py:117`）吞成 `park_early_error`／被 `settled_quota` 判成量不到；②`claim_refresh_slot()`（`quota_gate.py:591`）一個 TTL 只放行一個補量者，哨兵 tick 若永遠搶輸（keepwarm／hook 先搶）且 `await_winner` 等不到 ⇒ 結構性 `unmeasured`；③pythonw 子行程環境缺 `HOME`／`USERPROFILE` 或 `CLAUDE_CONFIG_DIR` ⇒ 憑證讀不到；④舊帳號憑證失效而新帳號憑證尚未寫入 `quota_burn`／快取（逐字稿 10:12 前 `quota_burn.jsonl` 無讀數）。驗證法＝以 `sw_pythonw` 載具真跑 `pace_state`（先修 REQ-CTL-49 與否各一次）取原因 | §24.3 D-SW-3 | §4.5.11【v2.1.26 註記】；§4.1.7 R-4.1.7-2／3 |
+| REQ-CTL-52 | **park 到點與提前到點前置：同專案另一 session 在動 ⇒ 不 spawn**（TH-A 升格）：新葉 `tools/lib/sessionctl/othersession.py::active(project_dir, own_sid, now)`＝同專案 `project_dir` 直下 `*.jsonl`（子代理檔不算）中 `stem != own_sid` 者，其 `transcript_activity.newest_conversation_at(quota_limits.session_transcripts(path))` 在 `now − N` 之後（**N＝`SENTINEL_INTERVAL_SECONDS`，現值 900 秒；現查 `grep -n "^SENTINEL_INTERVAL_SECONDS" tools/session_resume_planner.py`**）⇒ 回該 sid、行號與時刻；**判準只重用 `transcript_activity` 的對話記錄尺，不開第二家**（不看 mtime、不看合成記錄）。消費點兩處：①`park_fire.run` 在 `live_driver`（同 sid）判準之後、F4 選路與 spawn／resume 之前；②`parkearly._precheck`（回 `other_session`，且 `parkearly.tick` 不 `fire_early`）。處置：**②直接不提前**（探針下一巡邏照常）；**①以既有重排原語延後**（`oldwin_park._rearm`＋`park_yield.rearm_fields` 同路，延後 `N`、同標記至多 `OTHER_SESSION_MAX_DEFERS`＝3 次、計數欄 `other_session_defers` 住標記），**用盡 ⇒ 終局 `skip("other_session")`**。WHY 延後而非直接終局 skip（偏離主控裁示字面，理由寫進報告「偏離」）：終局 skip 會把標記結算成 `skipped`、交接包再無人接，而同專案常有與本交棒無關的無人窗口（SelfImproving 每日巡邏等）在到點瞬間有對話記錄——直接終局 skip 會把全自動接手整批吞掉。兩處皆落痕跡 `park_other_session`（欄位 `other_sid`、`other_at`、`line`、`action∈{defer,skip,hold}`）。**不新增 spawn 站點、不動 `.claude/**`**；fail 方向＝量不到（目錄讀不動）一律回「沒人在動」（維持現行行為，不替系統增加無證據的攔阻） | §24.4 D-SW-4 | §4.5.11；§1.2 CI-1(c)；§15.5 紅線 1 豁免四條件（不新增讀額度端點） |
+| REQ-CTL-53 | **`handoff --ack` 成功輸出附「封存後事件」摘要**（G-5）：`ackhook.after_handoff` 在 ack 成功（rc 0）後，呼叫新葉 `tools/lib/sessionctl/ackevents.py::summary(pkg, acker_sid, env)`，把結果印在 ack 原輸出**之後**（原輸出與 rc 逐字不變）。內容（唯讀、零 token、≤`ACK_SUMMARY_BUDGET_S`＝2 秒；任一項量不到寫「量不到：原因」）：①該 owner sid 在**封存戳（`<包 stem>.sealed` 的時刻）之後**於 `autosdd_session_switch.jsonl` 的事件列，限前綴 `park_*`／`keepwarm_*`／`watch_*`／`account_switch`／`park_early_*`／`sentinel_*`／`handoff_*`，依時間升冪、每列＝本機時間＋事件名＋精簡欄位，至多 `ACK_SUMMARY_MAX_ROWS`（40）列、超出寫「已截斷 N 列」；②owner 的舊哨兵排程現況（`AutoSDD_Sentinel_<owner sid>`：`LastTaskResult`、`NextRunTime`，取自排程器自報，空值如實寫空）；③舊視窗行程是否還在（取自 `holder`／行程表，驗身分，驗不到寫量不到）；④若 owner 有 `armed` park 標記被本次 ack 撤銷，列出該事實。**不寫檔、不改任何狀態；`summary` 內任何例外只印一行警告、ack 的 rc 不變**（沿用 `on_ack` 的不致死契約） | §24.5 D-SW-5 | §4.5.4（交接包完整性）；§4.5.11 |
+| REQ-CTL-54 | **交接包機械層第 3／4 欄完整性**（G-5 另半）：①第 3 欄含 `git worktree list`——**現查已落地**（`handoff_build.py` 的 `_git_sections` 第 96～98 行；AT-CTL-30 已斷言），本條只**重申並鎖住**（AT-CTL-120）；②第 4 欄（標題 `wip-preserved 標籤` **不改**，`MECH_HEADINGS` 長度與前 13 項逐項不變）除 HEAD 上的 `*-wip-preserved` 之外，**另列本 owner session 的保全標籤**：`git tag --list "<sid 前 8 碼>-*"` 中以 `-halfwork` 或 `-wip-preserved` 結尾者，每列附目標 SHA 前 12 碼與「不在 HEAD」標記；`git tag` 失敗 ⇒ 「量不到：原因」，不影響其他欄。WHY：406454ea 的 `406454ea-20261126-flk5-halfwork`（stash create 的 commit `dc65a475`）只活在手寫層、機械層第 4 欄只看 `--points-at HEAD`，新主控得靠讀手寫層才知道半成品在哪 | §24.5 D-SW-6 | §4.3（可重啟點條件 1） |
+| REQ-CTL-55 | **名冊訊息分三段，不再寫「由主控決定」**（G-2；只改文字、不新增任何推回）：`agentbrief.render_cut(rows, *, pkg_text=None, pkg_path=None)` 依 `status` 分三段標題：①「被額度切斷」（`cut`）②「主控已停止（TaskStop）」（`stopped`）③「殘局（擁有者已不在、非燒額度中）」（`residue`）；總標題不再含「由主控決定」。`stopped` 一列的處置行：本 sid **最新已封存包**（`.sealed` 存在且擁有者＝本 sid）的**主控層**（`## ` 六節，不含機械層）出現該代理 id 前 8 碼，或其描述的首個詞元（以空白、`｜`、全形標點切；長度≥3 且含英數）⇒「主控已停止並已記入交接包 `<路徑>`（處置見主控層〈未完成〉）」；否則「主控已停止、交接包未記處置 ⇒ 下一棒依第 12 欄重派」。`cut` 與 `residue` 列的處置行不變（沿用 `_ACTIONS`）；**第 12 欄（`render_rows`／`_block`）的「建議處置」逐字不變**（那是交接包本身）。`cutvoice.stop_text`／`watch_text`／`brief_text` 三處負責找包並傳入 `pkg_text`／`pkg_path`（找不到包／讀不到 ⇒ 傳 `None`，走「未記處置」句，**不拋、不因此推回**）。每支代理每種被切只提示一次的閂鎖行為（`cutvoice._latch_path`）不變 | §24.6 D-SW-7 | §1.2 CI-1(e)；§16.6 2026-11-22「監督掌控」列 |
+| REQ-CTL-56 | **M-W1 修正版加「只計子代理」口徑**（G-4；量測，不動任何閘）：`tools/lib/wastecensus/supervision.py::stop_events` 每筆事件加 `kind`：`agent`＝`src=="B"`（`turn_duration.pendingBackgroundAgentCount>0`），或 Stop 出聲含「支背景代理」；`shell`＝出聲只含「個背景 shell」而不含「支背景代理」；出聲兩者皆含 ⇒ `agent`。`m_w1` 回傳**既有鍵逐字不變**，新增 `agent`＝`{n,total_hours,gt_30min,gt_60min,max_min,never_returned}` 與 `shell`＝同形一組；`agent.n + shell.n == n`（不變式）。`STOP_VOICE` 常數不動。M-C 系列的 W1 引用處（`sections_ctl.py`、DES TH-2 升級觸發的判讀）改讀 `agent` 子集；DES §13 TH-2 的觸發條件「M-W1 修正版 14 天內 >30 分 ≥1 筆」註明**以 `agent.gt_30min` 為準** | §24.7 D-SW-8 | §9 可觀測性；§4.4.3 |
+| REQ-CTL-57 | **哨兵重放加「真 tick 同輸入」一列**（G-3）：`tools/probe/sentinel_decide_replay.py` 在既有「舊／新判準／D3 單獨」三列之後加第四列「真 tick 同輸入」：以 `--now` 為準還原 `halt=`（帳號感知：標記 `account` 對快取 `account_key` 的**純比對**，不呼叫 `acctswitch.reconcile`、不寫任何檔）、`park=`（以痕跡 `park_armed`／`park_cancelled`／`park_acked_cancel` 摺到 `--now` 的 as-of 標記狀態；當前磁碟標記與 as-of 不同時兩者並列）、`stale=`（`switch.stale_for`）、`superseded_by=`，餵 `planner.sentinel_decide`，印判決與理由；該列標題固定附「（不重現排程器 stdio 環境：pythonw `sys.stderr is None`；崩潰類缺陷此列看不見）」。探針為量測用，**不接閘門 rc**；既有三列輸出與 rc 逐字不變 | §24.8 D-SW-9 | §4.5.6（哨兵判定） |
+| REQ-CTL-58 | **舊哨兵殘骸 GC**：由 `handoff --ack` 成功後（`ackhook.after_handoff`，在 REQ-CTL-53 摘要之後）呼叫新葉 `tools/lib/sessionctl/sentgc.py::sweep(acker_sid, env)`：列舉名稱前綴 `AutoSDD_Sentinel_` 的排程工作物件，對**同時滿足**①`NextRunTime` 為空（排程器自報）②對應 sid ≠ `acker_sid`③`LastTaskResult≠0` 或任務書顯示 `state∈{abandoned,disarmed,superseded}`者，經**既有**移除站點（planner 的 `_schtasks_remove` 同一條路；Developer 現查 `sched_isolation`／`se_gate` 的 SITES，**不新增排程原語**）拆除，落痕跡 `sentinel_gc`（`task`、`reason`、`next_run=""`、`last_result`）。**NextRunTime 非空者一律不動**（活著的哨兵由它自己的 idle／SUPERSEDED／decide 收）；`sessionctl status` 保持唯讀（只顯示「過期哨兵」，不 GC）；GC 失敗只出聲、不影響 ack rc；每次 ack 至多拆 `SENTGC_MAX_PER_ACK`（5）個。此設計同時處理 406454ea 現存殘骸（下次任何 ack 即清）。WHY 掛在 ack：ack 是「新 session 已接手、舊 session 的舊物該退場」的唯一機器可驗事件，且那一刻 owner 已不需要哨兵 | §24.9 D-SW-10 | §4.5.6 R-4.5.6-4（c）；§4.5.8 |
+| REQ-CTL-59 | **連動面與工程約束**：①LOC：`session_resume_planner.py`（`guardrail_cli` tier，現值 1666 行、SPECIAL_FILES 逐檔天花板現查 `python AutoClaude/tools/check_loc_budget.py --json`）對每個排程入口分派增量 ≤2 行，總增量 ≤6 行、判準與判斷全在 `crashguard.py`；`park_cli.py` 現 403 行（貼牆）**增量 0**（`park --fire` 的包裝落 `crashguard.run` 由 `tools/sessionctl.py` 入口層呼叫）；`agentbrief.py`（現 346）、`park_fire.py`（80）、`parkearly.py`（168）、`ackhook.py`（53）、`supervision.py`（252）、`sentinel_decide_replay.py`（131）各增量依 DES §24.10 表現查；②四個新葉 `crashguard.py`、`othersession.py`、`ackevents.py`、`sentgc.py`＋四個新測試檔的 Root_Layout §3 登記、`tools/tests` 棘輪重釘（`_TREE_FILE_FLOORS` 等 12 道鎖與重釘儀式）、compat-ci `paths`、CI paths 覆蓋鎖**同一個 commit 收齊**；③`tools/lib/realverify/cases/control.py` 新增 RV-CTL25～35 並登記 `docs/06_quality/RealVerify_Protocol/cases.json`；④**不放寬任何既有鎖**；`.claude/**` 零改動；⑤`engine-bridge` CLI 閉包（記憶〈tools/lib 新增被 quota_policy／transcript_activity 頂層 import 的模組〉）：`othersession.py` 只被 `park_fire`／`parkearly` 惰性 import、不被 `quota_policy`／`transcript_activity` 頂層 import ⇒ 不動 engine-bridge 閉包三處（AT-CTL-143 以 import 圖斷言）；⑥本節 REQ 的 DEF 號由主控合入時登記（G-1 P2） | §24.10 | §11.1～§11.9；§16.6 結案格 |
+
+### 8.2 PRD 追溯（只增）
+| REQ | PRD 座標 |
+|---|---|
+| 49、50 | §4.5.6 R-4.5.6-4（b）（c）；§4.1.7 R-4.1.7-4；修訂表 v2.1.30；§16.6 2026-11-28 列 |
+| 51 | §4.5.11【v2.1.26 註記】（park 等待期間額度提前恢復）；§4.1.7 R-4.1.7-2／3；§16.6 同列 |
+| 52 | §4.5.11；§1.2【v2.1.26 註記】CI-1(c)；§15.5 紅線 1（不新增額度端點讀取）；§16.6 同列 |
+| 53、54、58 | §4.5.4（交接包完整性）；§4.5.6 R-4.5.6-4（c）；§4.5.8；§16.6 同列 |
+| 55 | §1.2【v2.1.26 註記】CI-1(e)（停工條款：停了且成果已保全並寫進交接包）；§16.6 2026-11-22「監督掌控」列 |
+| 56、57 | §9 可觀測性；§4.4.3；§16.6 同列 |
+| 59 | §11.1～§11.9；§16.6 結案格 |
+
+### 8.3 驗收測試（AT；縫沿 §3：`NOW`、`FS`、`ENV`、`TR`、`PL`、`PK`、`SCH`、`SP`、`FS-CL`；新增縫 `STDIO`＝把 `sys.stdout`／`sys.stderr` 設為 `None` 的上下文、`PROC`＝行程存活查詢替身）
+
+| AT | REQ | 案例（修前紅者自帶舊實作 oracle 複本，先證夾具確實觸發舊行為） |
+|---|---|---|
+| AT-CTL-93 | 49 | `STDIO` 縫：`sys.stdout`、`sys.stderr` 皆 `None` 時呼叫 `reconfigure_stdio_utf8()` ⇒ 兩者變為可 `.write`／`.flush` 的文字串流、寫入不拋、`encoding=="utf-8"`；**oracle**：舊版（`continue` 分支）下同夾具 `sys.stderr.write("x")` 拋 `AttributeError` |
+| AT-CTL-94 | 49 | 冪等與不外洩：連呼兩次只開一個 devnull 檔（同一物件）；`io.StringIO` 替身（皆無 `.reconfigure`／`.buffer`）⇒ no-op；真 `TextIOWrapper`（`.reconfigure` 路）行為與舊版逐字相同（既有 `test_stdio_utf8.py` 全綠，不改斷言） |
+| AT-CTL-95 | 49 | 重現真缺陷：`STDIO` 縫下 `acctswitch.reconcile` 對沙盒「舊帳號 halt 標記＋新帳號快取」作廢一個標記 ⇒ 不拋、回 1、`account_switch` 痕跡存在、`probe["voiced"]` 與 `probe["last_switch"]` 已存檔；**oracle**：舊 `_stdio_utf8` 下同夾具拋 `AttributeError` 且 `voiced` 未存 |
+| AT-CTL-96 | 49 | 站點普查：`tools/lib/quota_gate.py` 等會被排程入口 import 的模組中，所有裸 `sys.stderr.write`／`sys.stdout.write` 站點在 `STDIO` 縫下逐一呼叫其所在函式的最小夾具不拋（站點清單由 AST 掃描產生；新增站點自動納入） |
+| AT-CTL-97 | 50 | `crashguard.run`：`body` 拋 `AttributeError` ⇒ 痕跡 `sentinel_crashed` 含 `exc_type`／`file`／`line`／`tb`（≤上限）／`sid`／`task`／`streak=1`；`alert` 以 `loud=True` 被呼叫恰一次（假告警縫）；`on_crash` 重排被呼叫恰一次且時刻＝`now+SENTINEL_INTERVAL_SECONDS`；rc 1 |
+| AT-CTL-98 | 50 | 狀態塊讀不出：只告警、不重排、不二次拋、痕跡仍落；`on_crash` 自身拋例外 ⇒ `crashguard` 不拋（退化為只落痕跡） |
+| AT-CTL-99 | 50 | `crash_streak`：連續三次崩潰第三次起不重排、落 `sentinel_crash_loop`、`alert(loud=True)`；中間插一次正常 tick ⇒ streak 歸零；第四次崩潰重新計 1 |
+| AT-CTL-100 | 50 | `park --fire` 入口：`park_fire.run` 拋例外 ⇒ `park_job_crashed` ＋標記結算 `failed`（走 `park_chain`／`park_announce` 既有失敗鏈，假縫斷言被呼叫）、標記不留 `armed`；`refused`（L1）永不進本路 |
+| AT-CTL-101 | 50 | 入口普查：AST／文字掃描 `park_cli.job_argv`、`oldwin_sched.job_argv`、planner 註冊腳本三站點產生的入口，全部列在 `crashguard.ENTRIES`；人為新增未入表入口 ⇒ 本 AT 紅（負控以暫存副本驗） |
+| AT-CTL-102 | 50 | `--sentinel-tick` 分派：planner 對 `_sentinel_tick` 的呼叫經 `crashguard.run`；增量行數≤2（對動工前基線，接 AT-CTL-143） |
+| AT-CTL-103 | 50 | 正常 tick 的行為與痕跡逐字不變（既有 `test_context_budget_guard.py` 哨兵分支與 `test_sessionctl_*` 全綠）；`crashguard.run` 對正常回傳值原樣回傳（rc 不被吞） |
+| AT-CTL-104 | 51 | `Q`／`STDIO` 縫：`measure_detail` 拋 `OSError` ⇒ `park_early_probe` 的 `why=="measure_exception:OSError"`、`reading` 為 `null`、不判恢復；值域封閉（任何 `reading=null` 的痕跡列 `why` 皆在列舉內，負控：缺 `why` ⇒ 紅） |
+| AT-CTL-105 | 51 | 逐值夾具：`no_credential`／`claim_lost`／`http_error:429`／`timeout`／`stale_cache`／`account_unreadable`／`stdio_none` 各一 ⇒ 對應 `why`；`stdio_none` 夾具＝`STDIO` 縫下量測路徑（接 REQ-CTL-49 前紅、後綠） |
+| AT-CTL-106 | 51 | 換帳號時間軸（`NOW` 注入）：park armed、哨兵 tick1（舊帳號標記作廢）、tick2（新帳號快取讀數 weekly 0%、判決 `CONTINUE`）⇒ 第 2 次 tick 內 `fire_early`（`park_early_recovered`），總延遲 ≤`2×SENTINEL_INTERVAL_SECONDS＋CHILD_TIMEOUT_SECONDS` |
+| AT-CTL-107 | 51 | fail-closed 不變：讀數量不到 ⇒ `recovered=False`；判決非 `CONTINUE`（`HALT_WEEKLY`／`WAIT_RESET`）⇒ 不提前（既有 `test_sessionctl_parkprobe.py` 全綠） |
+| AT-CTL-108 | 51 | 待實作驗證欄的**根因探針**：以 `STDIO` 縫＋修前碼重放 `pace_state` ⇒ 在 `try/except` 吞掉處留下例外型別（把「疑點 ①」變成可重現的證據；結果寫入 DES §24.3，不論 ①②③④ 哪個成立皆須有一條紅綠自證的修法） |
+| AT-CTL-109 | 52 | `othersession.active`：同專案另一 sid 於 `now−N` 內有 `assistant`／真人 `user` 記錄 ⇒ 回該 sid＋行號＋時刻；排除：自己、子代理檔、`<synthetic>`、`auto-continuation`／`task-notification` 等機器注入（沿 `newest_conversation_at` 尺） |
+| AT-CTL-110 | 52 | 不誤判：另一 sid 僅有 mtime 新（harness `away_summary`／`cost-state` 寫入）而無對話記錄 ⇒ 回 `None`（接 MU-CTL-57）；另一 sid 最後記錄早於 `now−N` ⇒ `None`；目錄讀不動 ⇒ `None` |
+| AT-CTL-111 | 52 | `park_fire.run`：有其他 session 在動 ⇒ 不 spawn／不 resume（替身 claude 0 次）、標記仍 `armed` 且備援重排到 `now+N`、`other_session_defers=1`、痕跡 `park_other_session action=defer`；無其他 session ⇒ 黃金序列逐字不變（既有 park_fire 測試全綠） |
+| AT-CTL-112 | 52 | 延後用盡：連續 `OTHER_SESSION_MAX_DEFERS` 次仍有人在動 ⇒ 終局 `skip("other_session")`、標記 `skipped`、`park_other_session action=skip`；之後再有人 ack／無人在動不重啟標記 |
+| AT-CTL-113 | 52 | `parkearly._precheck` 回 `other_session`、`tick` 不呼叫 `fire_early`、痕跡 `action=hold`；次巡邏另一 session 靜止後照常探針 |
+| AT-CTL-114 | 52 | 單一家判準（原始碼掃描）：`othersession.py` 取時刻只經 `transcript_activity.newest_conversation_at`、不 `stat().st_mtime`、不另寫「合成記錄」詞表；且不被 `quota_policy`／`transcript_activity` 頂層 import |
+| AT-CTL-115 | 53 | `ackevents.summary`：沙盒痕跡含封存戳前後各數筆事件（owner 與他 sid 混合）⇒ 只列 owner、只列封存戳之後、依時間升冪；前綴白名單外的事件不列；超過 40 列 ⇒ 「已截斷 N 列」 |
+| AT-CTL-116 | 53 | 舊哨兵排程現況：假排程讀取縫回 `LastTaskResult=1`、`NextRunTime=""` ⇒ 輸出逐字含兩值（空值寫空，不寫成「已排程」）；讀取縫拋／回空結構 ⇒ 「量不到：原因」 |
+| AT-CTL-117 | 53 | 舊視窗行程：`PROC` 縫回「活（pid、建立時間相符）」「已死」「驗不到」三態 ⇒ 輸出三種字樣；驗身分失敗不當成活 |
+| AT-CTL-118 | 53 | 唯讀與不致死：`summary` 執行前後沙盒目錄樹逐檔 digest 相同；`summary` 拋例外 ⇒ ack 原輸出與 rc 0 不變、只多一行警告；超過預算 ⇒ 截斷印已得部分，不阻塞 |
+| AT-CTL-119 | 53 | ack 原輸出逐字不變（既有 `test_sessionctl_ackhook.py` 與 handoff ack 測試全綠）；撤 park 事實（REQ-CTL-47 的 `park_acked_cancel`）出現在摘要④ |
+| AT-CTL-120 | 54 | 第 3 欄含 `git worktree list` 行（重申 AT-CTL-30）；`git worktree list` rc≠0 ⇒ 該行「量不到：原因」、其餘欄不受影響 |
+| AT-CTL-121 | 54 | 第 4 欄：沙盒真 git 倉庫建 HEAD 上的 `x-wip-preserved`、非 HEAD 的 `<sid8>-20261126-flk5-halfwork`（指向 stash create commit）、他 sid 的 `<other8>-…-halfwork`、無關標籤 ⇒ 列出前兩者（後者附目標 SHA 前 12 碼與「不在 HEAD」）、不列後兩者；無標籤 ⇒ 「（HEAD 上無）」；`git tag` 失敗 ⇒ 「量不到：原因」 |
+| AT-CTL-122 | 54 | `MECH_HEADINGS` 長度 13、逐項與修改前相等（含第 4 項標題字面）；`build_mechanical` 輸出 13 個編號節；AT-SC-34 全綠 |
+| AT-CTL-123 | 55 | `render_cut` 三段：cut／stopped／residue 夾具各一 ⇒ 三個標題各出現一次且順序固定；任一輸出**不含**「由主控決定」；僅有 stopped ⇒ 只出現「主控已停止（TaskStop）」段 |
+| AT-CTL-124 | 55 | stopped＋已封存包主控層含代理 id 前 8 碼 ⇒「主控已停止並已記入交接包 `<路徑>`」；以 406454ea 形狀（id 只在機械層第 12 欄、主控層只寫「FLK5」）⇒ 以描述首詞元 `FLK5` 命中同一句 |
+| AT-CTL-125 | 55 | stopped＋包未提及（或無已封存包、包讀不到）⇒「主控已停止、交接包未記處置 ⇒ 下一棒依第 12 欄重派」；機械層文字（第 12 欄）出現代理 id **不算**已記處置（只看主控層） |
+| AT-CTL-126 | 55 | cut／residue 列的處置行與舊版逐字相同；第 12 欄 `render_rows`／`_block` 輸出與舊版逐字相同（8 支 `usage_limit` 形狀，接 E2E-CTL-12） |
+| AT-CTL-127 | 55 | 無新推回：`roster.stop_message`／Stop 守衛的 `decision` 欄位與舊版一致（`systemMessage` 只增改文字，不出現 `decision:block`）；閂鎖（每代理每種只提示一次）行為不變 |
+| AT-CTL-128 | 55 | 舊字樣斷言反向保留：既有 REQ-CTL-20 相關測試（`test_sessionctl_agentbrief.py`／`test_sessionctl_visibility.py` 中對「被切斷／停止／未收尾」「由主控決定」的斷言）改為「新三段標題在、舊句不在」，不刪斷言數量 |
+| AT-CTL-129 | 56 | `stop_events` 分類表驅動：①出聲「仍有 2 支背景代理」⇒ `agent`；②出聲「（1 個背景 shell）」⇒ `shell`；③兩者皆含 ⇒ `agent`；④`turn_duration.pending>0` 無出聲 ⇒ `agent`；⑤`pending==0` 無出聲 ⇒ 無事件 |
+| AT-CTL-130 | 56 | `m_w1` 向下相容：既有鍵（`n`、`n_hook_voiced`、`total_hours`、`gap_min`、`gt_60min`、`never_returned`）值與修改前逐值相同；新增 `agent`／`shell` 兩組；`agent.n+shell.n==n` |
+| AT-CTL-131 | 56 | `credential` 縫對兩子集一致作用（有憑證的事件兩邊都不算）；`gt_30min` 只計 `gap_s>1800` |
+| AT-CTL-132 | 56 | 不接閘門：`waste_census --supervision-metrics` rc 與輸出格式除新增欄位外不變；`sections_ctl` 的 W1 引用改讀 `agent` 子集（既有 `test_waste_census_ctl.py` 全綠，新增子集斷言） |
+| AT-CTL-133 | 57 | 重放第四列：以 406454ea 形狀夾具（park armed、halt 標記舊帳號、快取新帳號、`--now` 在標記作廢前）⇒ 列印判決＝`patrol`（park 讓路）；`--now` 在 `park_acked_cancel` 之後 ⇒ 判決改變且 as-of 標記狀態列為 `cancelled` |
+| AT-CTL-134 | 57 | 唯讀與不呼叫 `reconcile`：把 `acctswitch.reconcile` 換成拋例外的替身 ⇒ 重放照常完成；沙盒目錄 digest 不變；標題固定附「不重現排程器 stdio 環境」字樣 |
+| AT-CTL-135 | 57 | 既有三列輸出與 rc 逐字不變（既有 `sentinel_decide_replay` 測試全綠）；磁碟標記與 as-of 還原不同時兩者並列 |
+| AT-CTL-136 | 58 | `sentgc.sweep`：假排程列舉縫＝{A：`NextRunTime` 空、`LastTaskResult=1`、sid≠acker；B：`NextRunTime` 非空；C：`NextRunTime` 空、sid＝acker；D：`NextRunTime` 空、`LastTaskResult=0` 且任務書 `state=waiting`} ⇒ 只拆 A（及 `state∈{abandoned,disarmed,superseded}` 的 D 變體）；B／C／D 原樣；痕跡 `sentinel_gc` 欄位齊全 |
+| AT-CTL-137 | 58 | 移除只經既有站點：原始碼掃描 `sentgc.py` 不含 `Unregister-ScheduledTask`／`schtasks /delete`／`launchctl bootout` 字面（只呼叫既有移除函式）；`sched_isolation`／`se_gate` 的 SITES 登記無新增 |
+| AT-CTL-138 | 58 | 上限與不致死：>5 個殘骸一次 ack 只拆 5 個（餘下下次）；移除函式拋例外 ⇒ ack rc 不變、只出聲、其餘殘骸照處理 |
+| AT-CTL-139 | 58 | `status` 唯讀：`sessionctl status` 前後排程狀態不變；殘骸被 GC 後 `status` 的「過期哨兵」列消失 |
+| AT-CTL-140 | 58 | 前綴嚴格：非 `AutoSDD_Sentinel_` 前綴（`AutoSDD_HandoffSpawn_*`、`AutoClaude*`、租約前綴）一律不碰 |
+| AT-CTL-141 | 58 | 與 REQ-CTL-53 次序：摘要先印（顯示 GC 前的舊哨兵現況），GC 後落 `sentinel_gc`；兩者共用一次排程列舉（只讀一次） |
+| AT-CTL-142 | 59 | 連動面清單一致性：Root_Layout §3 登記四個新葉與四個新測試檔、`_TREE_FILE_FLOORS` 重釘對得上、compat-ci `paths` 覆蓋新檔、`cases.json` 含 RV-CTL25～35（以各自既有鎖為準，本 AT 只斷言「清單完整」） |
+| AT-CTL-143 | 59 | LOC 與 import 圖：對動工前基線，`session_resume_planner.py` 總增量 ≤6 行、每入口 ≤2 行；`park_cli.py` 增量 0；`check_loc_budget.py --json` 無 violation；`othersession.py` 不在 `quota_policy`／`transcript_activity` 的頂層 import 閉包內（engine-bridge 閉包三處不動） |
+| AT-CTL-144 | 59 | 零放寬：`git diff` 對基線不含任何既有 `assert`／鎖常數的減少或放寬（`MIN_TESTS`、棘輪、天花板只准不變或收緊）；`.claude/**` 零差異 |
+| AT-CTL-145 | 59 | 自檢（接 AT-CTL-76 精神）：本節表格計數＝REQ 11（49～59）／AT 53（93～145）／E2E 11（25～35）／MU 22（50～71），每個 REQ 在 AT、MU、E2E 三欄皆有對應（不得有空列）；§8.5 覆蓋表無空列 |
+
+### 8.4 真機 E2E（RealVerify 家族 `control`，id `RV-CTL25`～`RV-CTL35` 對應 `E2E-CTL-25`～`35`；案例程式 `tools/lib/realverify/cases/control.py`；真行程／真排程（SE 租約前綴）／真逐字稿重放，單元測試不算）
+
+| E2E | REQ | 載具與素材（具體座標） | 判準 |
+|---|---|---|---|
+| E2E-CTL-25 | 49、51（stdio 半） | **真 pythonw 行程重現 G-1**：`sw_pythonw` 載具；沙盒 `AUTOSDD_TRACE_DIR`、沙盒 `~/.autosdd`；夾具＝複製真實 `halt_406454ea-91fc-4481-9c11-b28ed7d9e95f.json`（舊帳號 `eaf5241f6fe2`）形狀＋快取新帳號 `34cd3507237f`；以 `pythonw.exe tools/session_resume_planner.py --sentinel-tick --plan <沙盒任務書> --task-name <AutoSDD_RVsbx_ 前綴工作名>` 真跑；**oracle 對照組**＝同夾具於修前碼（`git show` 取修前 `_stdio_utf8.py` 暫存副本，沙盒內覆蓋）重跑 | 修後：rc 0；痕跡 `account_switch`、`sentinel_decided`、`sentinel_rearmed` 皆在；`Get-ScheduledTask` 該租約工作 `NextRunTime` 非空（貼排程器自報值）；對照組＝rc 1、有 `sentinel_woken`、**無** `sentinel_decided`（與 ARCH-Q34 G-1 證據 2 同形，重現 406454ea 10:21:52）；MU-CTL-50 轉紅；租約工作拆除後 0 殘留 |
+| E2E-CTL-26 | 50 | **真壞輸入致真崩潰**（不開測試鉤）：`sw_pythonw` 載具＋沙盒；夾具＝`acct_probe.json` 為合法 JSON 但 `voiced` 為整數（`acctswitch.py:226～231` 的 `pair not in said`／`said.append` 對它拋 `TypeError`），並搭配舊帳號標記使走到作廢分支（Developer 動工時以修前碼先確認此輸入真的拋 uncaught；若否，改用同檔其他真壞輸入並在 DES §24.2 記錄）；真跑 `--sentinel-tick`；另跑 `park --fire` 對壞包路徑的真行程 | rc 1（`LastTaskResult` 非 0）**且** `NextRunTime` 非空（已重排）；痕跡有 `sentinel_crashed`（`exc_type`、`file`、`line`、`tb`）；告警佇列／桌面通知檔有 `loud` 一筆（`alert` 自報）；連跑三次壞輸入 ⇒ 第三次 `sentinel_crash_loop`、`NextRunTime` 為空且已 loud 告警；`park --fire` 崩潰 ⇒ `park_job_crashed`、標記 `failed`；MU-CTL-51／52／53 轉紅；租約 0 殘留 |
+| E2E-CTL-27 | 51 | **真排程：armed park＋真哨兵 tick＋換帳號提前接手**：沙盒 park（`park --at +3h`，備援排程以 `AutoSDD_RVsbx_` 租約）＋真 `sw_pythonw` 哨兵 tick；T5 替身把額度快取換成新帳號 `account_key` 且 weekly 0%（判決 `CONTINUE`）；替身 claude；再一組＝移走沙盒憑證使量測不可得；另以 **406454ea 痕跡第 1379、1381 行**（真實 `reason=unmeasured`、`stale=true`、`reading=null`、無 `why`）作舊形 oracle | 主組：第 2 次 tick 內 `park_early_recovered`、子行程 `park --fire`、替身 claude 恰 1 次呼叫、延遲≤`2×900 s＋600 s`；無憑證組：痕跡 `why=="no_credential"`、不提前；`reading=null` 列一律帶 `why`；舊形列在新判準下判為違規（oracle 轉紅）；`park --status` 與 `Get-ScheduledTask` 憑證一致；MU-CTL-54／55 轉紅 |
+| E2E-CTL-28 | 52 | **真逐字稿時戳平移重放雙駕駛**：以 **4290bf58 逐字稿**（`~/.claude/projects/D--CursorProject-AISDCL-Agent/4290bf58-a5e9-4e64-b118-e9db87ca2af4.jsonl`，首筆約 2026-11-28T10:11:26）前 N 筆記錄（記錄形狀逐字、時戳平移至「現在 −3 分」）作為「另一個 session」；406454ea 的交接包與 park 標記複本放沙盒；真起 `python tools/sessionctl.py park --fire …`（與排程同 argv 的真行程）；對照組＝移除該另一 session 檔；oracle＝修前碼同夾具 | 主組：替身 claude 0 次呼叫、備援重排到 `now+900 s`（排程器 `NextRunTime` 為證）、痕跡 `park_other_session action=defer other_sid=4290bf58-…`；延後用盡組（連跑三次）⇒ 終局 `skip`；對照組＝正常 spawn（替身 claude 1 次）；oracle（修前）＝主組也 spawn 1 次（重現 TH-A）；MU-CTL-56／57 轉紅；租約 0 殘留 |
+| E2E-CTL-29 | 53 | **真 `handoff --ack` 摘要**：把 **`autosdd_session_switch.jsonl` 第 1385～1390 行**（`park_acked_cancel`、watch 額度閂鎖、`account_switch` 等，含 owner 406454ea 的真列）與包 `406454ea-91fc-4481-9c11-b28ed7d9e95f_20261126T154649Z.md`（含 `.sealed`）複製到沙盒；沙盒真排程租約工作當「舊哨兵」（`NextRunTime` 空）；真起一支存活 python 行程當「舊視窗」；真跑 `python tools/sessionctl.py handoff --ack <沙盒包>`（沙盒 `CLAUDE_CODE_SESSION_ID`＝新 sid） | 原 ack 輸出逐字在前、rc 0；其後摘要含 `park_acked_cancel`、`account_switch`（old `eaf5241f6fe2`→new `34cd3507237f`）列（封存戳之前的列不出現）；舊哨兵 `LastTaskResult`／`NextRunTime=` 與排程器自報逐字相等；舊視窗行程「仍在」；沙盒目錄除 `.ack` 與 GC 痕跡外無寫入；MU-CTL-58／59 轉紅 |
+| E2E-CTL-30 | 54 | **真 git 的真 `handoff --build`**：沙盒 git 倉庫，真 `git stash create`＋`git tag 406454ea-20261126-flk5-halfwork <sha>`（目標＝未在 HEAD 的 commit）、HEAD 上另建一 `*-wip-preserved`；真跑 `python tools/sessionctl.py handoff --build --sid 406454ea-91fc-4481-9c11-b28ed7d9e95f` | 第 3 欄含 `git worktree list` 輸出；第 4 欄同時列兩種標籤（halfwork 附 SHA 前 12 碼與「不在 HEAD」）；13 欄標題與順序不變；MU-CTL-60 轉紅 |
+| E2E-CTL-31 | 55 | **真逐字稿重放 FLK5 名冊訊息**：複製 **406454ea 逐字稿第 10288～10414 行**（含第 10306 行 TaskStop、第 10308 行 `git stash create`、第 10364 行 finalize、第 10412 行舊訊息）與 `subagents/agent-aee3d937b179d8639.jsonl`（2.6 MB，`.meta.json`）與包 `406454ea-…_20261126T154649Z.md`（`.sealed` 在）到沙盒 `claude_home`；以第 10412 行同形 Stop payload 真跑 `python .claude/hooks/sessionctl_guard.py`／`roster.stop_message` 路徑（hook 入口，不改 hook）與 `cutvoice.stop_text` | 輸出為三段式、含「主控已停止（TaskStop）」、含「主控已停止並已記入交接包」與沙盒包路徑（以描述首詞元 `FLK5` 命中，主控層第 284／288 行）；**不含**「由主控決定」；`decision` 無 block；把包的主控層 `FLK5` 字樣抽掉重跑 ⇒ 改出「交接包未記處置 ⇒ 下一棒依第 12 欄重派」；MU-CTL-61／62 轉紅 |
+| E2E-CTL-32 | 56 | **真母體量測**：真跑 `python tools/probe/waste_census.py --supervision-metrics --since-days 14`（零 token、只讀真逐字稿）；起點值取自 ARCH-Q34 `w1_detail.txt`（>30 分 29 筆中 shell 17、其餘為子代理；11-22 之後子代理事件 0——母體會漂移，**不當固定斷言**） | 不變式：`agent.n+shell.n==n`、舊鍵值與修前同母體逐值相同；`shell` 子集的所有事件出聲文字不含「支背景代理」；`agent.gt_30min` 為 DES TH-2 判讀值並入帳；rc 0；MU-CTL-63 轉紅（量測型，**不入閘**；承 TCS 第 48 列誠實劃界慣例） |
+| E2E-CTL-33 | 57 | **真哨兵重放對真逐字稿**：真跑 `python tools/probe/sentinel_decide_replay.py --sid 406454ea-91fc-4481-9c11-b28ed7d9e95f --now 2026-11-28T09:52:00+08:00` 與 `--now 2026-11-28T10:22:00+08:00`（以痕跡 `park_armed`／`park_acked_cancel` 摺 as-of 標記） | 09:52 的「真 tick 同輸入」列判決 `patrol`（理由含「park 排程待命…哨兵讓路」，與續航日誌 `sentinel_decided` 一致）；10:22 的列顯示 as-of 標記為 `cancelled` 且與磁碟現值並列；標題含「不重現排程器 stdio 環境」；既有三列與修前逐字相同；MU-CTL-64／65 轉紅（量測型；備援載具：重放探針本身不落任何狀態，無副作用可隔離） |
+| E2E-CTL-34 | 58 | **真排程殘骸 GC**：以 SE 租約前綴（`AutoSDD_RVsbx_` 並用名稱形 `AutoSDD_Sentinel_<沙盒 sid>` 於沙盒命名空間；Developer 現查 `se_gate`／`sandbox_scope` 允許的形態）真註冊一個**無觸發時刻**的哨兵工作物件（以過去時刻單次觸發使 `NextRunTime` 空）與一個 `NextRunTime` 非空的對照工作；真跑 `python tools/sessionctl.py handoff --ack <沙盒包>` | `Get-ScheduledTask` 查：殘骸 0 殘留、對照工作仍在且 `NextRunTime` 逐字不變；痕跡 `sentinel_gc` 恰 1 筆（`next_run=""`）；ack rc 0；`sessionctl status` 的「過期哨兵」列消失；再跑一次 ack 冪等（無第二筆 `sentinel_gc`）；MU-CTL-66／67／68 轉紅；租約 0 殘留 |
+| E2E-CTL-35 | 59 | 接線型（真跑）：`python AutoClaude/tools/check_loc_budget.py --json`（rc 0、無 violation）；`python tools/realverify.py list` 含 `RV-CTL25`～`35`；`tools/tests/test_root_module_layout.py`（落點鎖）；`tools/tests/test_adr_xplat001_c1c2_lock.py`；engine-bridge 引用 `si_repo_support` 的測試（記憶：推送前先跑） | 全綠；缺任一 RV 登記＝FAIL；MU-CTL-69／70／71 轉紅 |
+
+### 8.5 逐功能 E2E 覆蓋表（每個 REQ ≥1 個真機 E2E；不可達者列備援載具與理由）
+
+| REQ | E2E | 真機形態 | 備註 |
+|---|---|---|---|
+| 49 | E2E-CTL-25 | 真 pythonw 行程（真缺陷重現）＋租約排程 | 修前 oracle 對照 |
+| 50 | E2E-CTL-26 | 真 pythonw＋真壞輸入＋真告警自報 | 不開測試鉤；`LastTaskResult≠0` 且 `NextRunTime` 非空 |
+| 51 | E2E-CTL-25（stdio 半）、27 | 真排程＋真哨兵 tick＋真 `park --fire` 子行程 | 換帳號為 T5 替身（沿 E2E-CTL-22 慣例）；**真換帳號（真 `/login`）不可自動化**，備援＝痕跡第 1379／1381 行真形狀重放＋T5 替身，理由：換帳號需人互動登入 |
+| 52 | E2E-CTL-28 | 真 `park --fire` 行程＋真逐字稿（時戳平移） | 時戳平移是為讓真逐字稿落在「現在 −3 分」窗內，記錄形狀逐字 |
+| 53 | E2E-CTL-29 | 真 `handoff --ack` 行程＋真排程租約＋真存活行程 | — |
+| 54 | E2E-CTL-30 | 真 `handoff --build`＋真 git | — |
+| 55 | E2E-CTL-31 | 真逐字稿（406454ea 第 10288～10414 行）＋真 hook 入口 | 互動畫面是否顯示 `systemMessage` 仍屬〔OI-20261120-010〕V-CTL1 目視尾巴，本案不宣稱 |
+| 56 | E2E-CTL-32 | 真母體量測 | 量測型、不入閘（誠實劃界） |
+| 57 | E2E-CTL-33 | 真重放對真逐字稿 | 量測型、不入閘；不重現 pythonw stdio（標題已載明） |
+| 58 | E2E-CTL-34 | 真排程租約殘骸＋真 ack 行程 | — |
+| 59 | E2E-CTL-35 | 真跑 LOC／落點／登記鎖 | — |
+
+### 8.6 突變（MU；每條必須讓指定測試轉紅）
+
+| MU | 突變 | 必紅 |
+|---|---|---|
+| MU-CTL-50 | 還原 `_stdio_utf8` 的 `None` 分支（回到 `continue`） | AT-CTL-93、95、96、E2E-CTL-25 |
+| MU-CTL-51 | 移除 `crashguard.run` 包裝（入口直接呼叫 `body`） | AT-CTL-97、102、E2E-CTL-26 |
+| MU-CTL-52 | `crashguard` 吞例外但不落 `sentinel_crashed`／不呼叫 `alert` | AT-CTL-97、E2E-CTL-26 |
+| MU-CTL-53 | 崩潰後不重排（或 streak 不歸零／永不停止重排） | AT-CTL-97、99、E2E-CTL-26 |
+| MU-CTL-54 | 探針把 `reading=null` 寫成無 `why`（或 `why` 不在封閉值域） | AT-CTL-104、105、E2E-CTL-27 |
+| MU-CTL-55 | 換帳號後不視為快取已冷（`account_changed` 不進 `fire_early` 的 `FORCE_COLD`）或量不到仍判恢復 | AT-CTL-106、107、E2E-CTL-27 |
+| MU-CTL-56 | `park_fire.run` 略過 `othersession` 前置（或只在 `parkearly` 檢查） | AT-CTL-111、113、E2E-CTL-28 |
+| MU-CTL-57 | `othersession` 改用檔案 mtime 判活（不用 `newest_conversation_at`） | AT-CTL-110、114 |
+| MU-CTL-58 | 摘要納入封存戳之前的事件或他 sid 的事件 | AT-CTL-115、E2E-CTL-29 |
+| MU-CTL-59 | `ackevents.summary` 的例外改變 ack rc（不吞） | AT-CTL-118 |
+| MU-CTL-60 | 第 4 欄不列 `*-halfwork`（或改動 `MECH_HEADINGS` 第 4 項標題） | AT-CTL-121、122、E2E-CTL-30 |
+| MU-CTL-61 | `render_cut` 三段併回一句（或 `stopped` 恆寫「由主控決定」） | AT-CTL-123、124、E2E-CTL-31 |
+| MU-CTL-62 | `stopped` 判「已記入」時讀機械層（含第 12 欄）而非主控層 | AT-CTL-125、E2E-CTL-31 |
+| MU-CTL-63 | `stop_events` 把 shell 事件一律歸 `agent` | AT-CTL-129、130、E2E-CTL-32 |
+| MU-CTL-64 | 第四列呼叫 `acctswitch.reconcile`（有寫入） | AT-CTL-134、E2E-CTL-33 |
+| MU-CTL-65 | 第四列省略 `park=`（回到舊輸入） | AT-CTL-133、E2E-CTL-33 |
+| MU-CTL-66 | `sentgc` 也拆 `NextRunTime` 非空的哨兵 | AT-CTL-136、E2E-CTL-34 |
+| MU-CTL-67 | `sentgc` 繞過既有移除站點（自帶 `Unregister-ScheduledTask`） | AT-CTL-137 |
+| MU-CTL-68 | 把 GC 移進 `status`（`status` 有寫入） | AT-CTL-139、E2E-CTL-34 |
+| MU-CTL-69 | `session_resume_planner.py` 內聯 `crashguard` 判準（增量>6 行） | AT-CTL-143 |
+| MU-CTL-70 | 新增排程入口而不入 `crashguard.ENTRIES` | AT-CTL-101、142 |
+| MU-CTL-71 | 放寬既有鎖（`MIN_TESTS` 或棘輪下修） | AT-CTL-144、E2E-CTL-35 |
+
+### 8.7 交卷判準（Developer 與 QA；W-SW 收尾）
+1. 每包交卷附當回合真跑輸出：本節對應 AT 的 pytest／unittest 行、`check_loc_budget.py --json`、ruff（只 lint 改到的檔）、修前 oracle 的紅（貼修前碼同夾具的失敗輸出）與修後的綠。
+2. E2E-CTL-25～35 以 `python tools/realverify.py run --family control` 入 `docs/06_quality/RealVerify_Result_Ledger.md`；排程類 E2E 貼排程器自報的 `NextRunTime`／`LastTaskResult` 值；租約結束後 `Get-ScheduledTask` 0 殘留（貼輸出）。未入帳＝未結（根 CLAUDE.md 〈換 session 的 SOP〉）。
+3. 修復順序（鐵律七，持有面）：W-SW1＝REQ-CTL-49＋50（`_stdio_utf8.py`、`session_resume_planner.py`、`crashguard.py`）→ W-SW2＝REQ-CTL-51（先做根因探針 AT-CTL-108，再修；與 W-SW1 串行，同持有面 planner／`parkearly`）→ W-SW3＝REQ-CTL-52（`park_fire`、`parkearly`、`othersession`；與 W-SW2 同持有面 `parkearly.py`，**串行**）→ W-SW4＝REQ-CTL-53＋54＋58（`ackhook`、`ackevents`、`sentgc`、`handoff_build`）→ W-SW5＝REQ-CTL-55（`agentbrief`、`cutvoice`；與 WP-HOOK（G9 假推回）不同檔，可與 W-SW4 並行）→ W-SW6＝REQ-CTL-56＋57（`supervision`、`sentinel_decide_replay`；非守衛面，可並行）→ 收尾單人窗口＝REQ-CTL-59（落點、棘輪重釘、RV 登記、缺陷登記）。
+4. 守衛面准入（R197）：本節每條守衛面改動的暴露證據已列於本節檔頭；Developer 不得夾帶無暴露證據的新守衛碼；發現新缺陷同輪修，但**不擴大搜尋**（量、不挖）。
