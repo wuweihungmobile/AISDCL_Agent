@@ -1,6 +1,8 @@
 """park 失敗鏈終局的出聲（QuotaWall DES §7.5 第 3 步；S-11、S-17；R218 Q3）。
 
-必達管道：handback（指向痕跡）＋`quota_escalation.notify_queue_path()` 佇列；
+handback（指向痕跡）必達；`quota_escalation.notify_queue_path()` 佇列與桌面通知依偏好（崩潰護欄
+經 `quota_escalation.alert` 時，佇列只在 `AUTOSDD_DESKTOP_NOTIFY` 啟用時入列，
+見 DES §24.15 第 4 條）；
 桌面通知本身照使用者偏好
 （預設關，R82／HELM-01「預設就不敲」是掌舵者直接指令），所以通知與佇列分開：佇列一律寫、`notify()`
 只在「登記時的 `AUTOSDD_DESKTOP_NOTIFY` 原值（標記 `desktop_notify`）為開 ∧ job 轉送值不是關閉值」

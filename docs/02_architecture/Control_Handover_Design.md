@@ -735,6 +735,11 @@ TCS-SessionCtl AT-SC-34「11 欄」→ 13 欄（逐欄斷言）、`handoff_build
   4. **舊帳號憑證已失效且新帳號憑證尚未落入快取**：逐字稿 10:08～10:11 另一實例 `/login`（5387233b）；`quota_burn.jsonl` 首筆 `account=34cd3507237f` 約 10:12——即 10:06:52 的探針發生時帳號尚未換，讀數量不到可能是舊憑證 401。
 - **疑點 4 的取證指令**（唯讀，一行）：`python -X utf8 -c "import json,pathlib; p=pathlib.Path.home()/'.autosdd'/'traces'/'quota_burn.jsonl'; r=[json.loads(l) for l in p.read_text(encoding='utf-8').splitlines() if l.strip()]; print([(x['ts'],[f for f in x['fp'] if f.startswith('account=')]) for x in r if x['ts']>='2026-11-28T10:00'][:3])"`（`quota_burn.jsonl` 路徑＝`quota_gate.burn_ledger_path()`；列欄位 `ts`、`fp`〔含 `account=<指紋>`〕、`pct`；SD 本棒只確認欄位形狀，未以此斷言「10:12 首筆」，該時間仍是 ARCH-Q34 敘述，由本指令驗）。
 - **回填格**：Developer 完成驗證後在此回填「成立的疑點編號、證據（輸出）、修法 commit」。不論哪個成立，皆須有一條紅綠自證的修法與 AT（TCS AT-CTL-104～108）。
+- **回填（Developer 實作棒，2026-11-28；設計預留的回填，非改規格）**：
+  - **疑點 1（與 G-1 同源？）＝否**。以真 `.venv\Scripts\pythonw.exe`（先確認 `sys.stderr is None`）跑 `quota_gate.pace_state`：量測路徑**不拋例外**（無憑證 ⇒ `no-credentials`；同 TTL 第二次 ⇒ `won:false`＝`claim_lost`），且 `quota_gate` 匯入時已觸發 `_stdio_utf8`，故不同源。TH-B 以 D-SW-3 的「具名 `why`＋fail-closed 不變」處理；AT-CTL-104～108、MU-CTL-54／55 紅綠已實跑。
+  - **疑點 2（名額被搶＋贏家失敗 ⇒ 結構性 `unmeasured`）＝機制上成立的成因**：現已具名 `claim_lost`；痕跡第 1379／1381 行當時沒有 `why`，無法回溯判定歷史上實際是疑點 2～4 哪一個，誠實標「未驗」。
+  - **疑點 3**：沙盒 pythonw 載具下 `USERPROFILE`／`HOME` 缺失情境由 `no_credential` 具名值域承接（AT-CTL-104）。**疑點 4**（舊憑證 401）需真換帳號才能重現，不可自動化；備援＝痕跡真形狀重放＋T5 替身（TCS §8.4 E2E-CTL-27 的劃界）。
+  - **E2E-CTL-25 真跑（RealVerify `RV-CTL25`）**：真 pythonw（無 std handle）下，修後 tick 走完判決（`account_switch eaf5241f6fe2→34cd3507237f`、`sentinel_decided`、`sentinel_rearmed`、排程器自報 `NextRunTime` 非空、rc 0）；oracle＝沙盒內換回修前 `_stdio_utf8.py`（`git show a7cba8c2:tools/_stdio_utf8.py`）⇒ rc 1、有 `sentinel_woken`、無 `sentinel_decided`，與 ARCH-Q34 G-1 證據 2 同形。結果入 `RealVerify_Result_Ledger.md`。
 - **不放寬**：`parkprobe.evaluate` 的 fail-closed（量不到不判恢復）、判決非 `CONTINUE` 不提前，逐字不變。
 
 ### 24.4 D-SW-4：TH-A 升格（雙駕駛防護）
@@ -857,3 +862,13 @@ TCS-SessionCtl AT-SC-34「11 欄」→ 13 欄（逐欄斷言）、`handoff_build
 
 ### 24.14 ADR 判斷
 本節**無新架構決策需要 ADR**：①D-SW-1 是 SSOT 內的缺陷修復，②D-SW-2 沿用既有告警管道與重排原語，③D-SW-4 沿用 `park_yield` 重排原語與 `transcript_activity` 尺，④其餘為文字與量測。若主控認為「排程入口一律過 `crashguard`」屬跨專案架構約束，可在 ADR-XPLAT-004 §2.19 後追加一節；本稿不替主控代決。
+
+### 24.15 實作勘誤（Developer 實作棒偏離規格之處與主控裁示；2026-11-28；只增不改，§24.0～§24.14 逐字不變）
+1. **`park_fire` 的 othersession 前置放在 spawned 判準之後**（§24.4 寫在之前）。主控裁示：接受。WHY：剛 spawn 的新 session 本身就是「另一 session 在動」，放前面會讓 AT-WP-70 的精確理由 `spawned` 變 `other_session`；順序只影響理由標籤，兩者皆 skip。
+2. **`_stdio_utf8` 以 `sys.platform` 推 devnull 路徑（不 `import os`）**。主控裁示：接受。WHY：守既有可搬遷契約鎖（`allowed={io,sys}`）；取值與 `os.devnull` 相同（win32 為 `nul`，其餘 `/dev/null`）。
+3. **同戳平手借用 `transcript_activity` 私有 `_records`／`_driver_kind`／`_epoch`**。主控裁示：附條件接受。條件與落地：只集中在 `othersession` 一處、註解指向單一判準 `_driver_kind`；`test_sessionctl_othersession.py::TranscriptActivityPrivateInterfaceLockTest` 在其私有介面改名或改簽章時必紅。
+4. **通知佇列只在 `AUTOSDD_DESKTOP_NOTIFY` 啟用時入列**（§24.2、REQ-CTL-50 敘述「通知佇列恰新增一筆」只在該偏好啟用時成立；排程器環境本來就沒有此變數）。主控裁示：接受實況。E2E-CTL-26 斷言 handback（必達紙）＋痕跡，佇列依變數分兩種模式驗（未設＝佇列不增、設＝恰增一筆）；`park_announce` docstring 的「必達管道」字樣訂正為「handback 必達；佇列與桌面通知依偏好」；REQ-CTL-50 的佇列敘述以本列修正。
+5. **`othersession` 以檔案 mtime 預篩**。主控裁示：接受。WHY：專案目錄常有數百個舊逐字稿，逐一全檔掃 `driver_after` 不可行；mtime 只做預篩，判活仍只靠 `driver_after`（AT-CTL-110①：mtime 新而無對話記錄 ⇒ `None`）。
+6. **兩處既有測試夾具隔離**（`test_sessionctl_ackhook.py` patch `summarize_and_gc`、`test_sessionctl_oldwin.py` 一條 fork 測試隔離新前置）。主控裁示：接受。WHY：避免單元測試碰真排程器／真殘骸；舊 fork 測試只釘「活舊窗 ⇒ fork 不關」，與雙駕駛前置無關。
+7. **REQ-CTL-59 落點（本棒補）**：`schedule_states` 由 `tools/lib/schedule_states.py` 改住 `tools/lib/sessionctl/schedstates.py`（`tools/lib/schedule_*.py` 已有兩檔，第三檔撞散落鎖）；`StatesMixin` 薄殼住既有 `schedule_backend_calendar.py` 並惰性委派（`tools/lib` 頂層扁平模組不得在載入時依賴套件匯入路徑）。連動面（Root_Layout 登記、c1c2 重釘、E501 存量）同一批收齊。
+8. **E2E 範圍誠實劃界**：本棒已真跑入帳 RV-CTL25／30／32／33；RV-CTL26／27／28／29／31／34／35 見交卷報告〈未完〉。
