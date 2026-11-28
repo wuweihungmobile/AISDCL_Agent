@@ -132,3 +132,13 @@ def _append_trace(path: Path, record: dict) -> None:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     except OSError:
         pass
+
+class StatesMixin:
+    """三後端共用的唯讀 `job_states`（REQ-CTL-58）；判斷在 `sessionctl/schedstates.py`。"""
+
+    def job_states(self, prefix: str) -> list[dict] | None:
+        from lib.sessionctl import (
+            schedstates,  # noqa: PLC0415 — 只有 sessionctl 呼叫端會走到，`lib` 套件路徑成立
+        )
+
+        return schedstates.states_for(self, prefix)

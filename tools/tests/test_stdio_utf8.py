@@ -175,13 +175,16 @@ class WpSwStdioNoneTest(unittest.TestCase):
 
     def test_at96_every_raw_std_write_site_in_scheduler_closure_resolves(self) -> None:
         """AT-CTL-96：AST 掃排程入口會 import 的模組，所有 `sys.stderr|stdout.write/flush` 與
-        `sys.std* is (not) None` 站點；STDIO 縫下 SSOT 讓每個站點的屬性鏈可解（新增站點自動納入）。"""
+        `sys.std* is (not) None` 站點；STDIO 縫下 SSOT
+        讓每個站點的屬性鏈可解（新增站點自動納入）。"""
         import ast  # noqa: PLC0415
 
         tools = Path(__file__).resolve().parents[1]
-        files = [tools / "lib" / n for n in ("quota_gate.py", "pace_contract.py", "quota_availability.py",
+        files = [tools / "lib" / n for n in ("quota_gate.py", "pace_contract.py",
+            "quota_availability.py",
                                              "apply_lock.py")]
-        files += [tools / "lib" / "sessionctl" / "acctswitch.py", tools / "lib" / "openitems" / "verbs.py",
+        files += [tools / "lib" / "sessionctl" / "acctswitch.py", tools / "lib" / "openitems"
+            / "verbs.py",
                   tools / "selfimproving.py"]
         sites = []
         for path in files:
@@ -189,15 +192,18 @@ class WpSwStdioNoneTest(unittest.TestCase):
                 continue
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
                 if (isinstance(node, ast.Attribute) and node.attr in ("write", "flush")
-                        and isinstance(node.value, ast.Attribute) and isinstance(node.value.value, ast.Name)
-                        and node.value.value.id == "sys" and node.value.attr in ("stdout", "stderr")):
+                        and isinstance(node.value, ast.Attribute) and isinstance(node.value.value,
+                            ast.Name)
+                        and node.value.value.id == "sys" and node.value.attr in ("stdout",
+                            "stderr")):
                     sites.append((path.name, node.lineno, node.value.attr, node.attr))
         self.assertGreaterEqual(len(sites), 8, "掃描面失明：quota_gate 等站點應有數十處")
         with _StdioNone():
             m.reconfigure_stdio_utf8()
             for _file, _line, stream, attr in sites:
                 self.assertTrue(callable(getattr(getattr(sys, stream), attr)), (_file, _line))
-            self.assertIsNotNone(sys.stdout)  # `is not None` 分支站點：改綁後走「寫進 devnull」，rc 不變
+            # `is not None` 分支站點：改綁後走「寫進 devnull」，rc 不變
+            self.assertIsNotNone(sys.stdout)
 
 
 if __name__ == "__main__":

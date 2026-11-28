@@ -743,8 +743,10 @@ class R217ParkGateTest(Base):
         self.assertEqual((rc, resumed), (0, []))
         self.assertEqual(park.read_marker(OLD)["outcome"]["event"], "spawned")
 
-    # WP-SW REQ-CTL-52：夾具目錄裡另有繼任 session（c3d4e5f6）1 分鐘前的 assistant 記錄 ⇒ 新前置會（正確地）延後。
-    # 本測試只釘「活舊窗 ⇒ fork 不關」，與雙駕駛前置無關，故隔離之（前置自有 test_sessionctl_othersession）。
+    # WP-SW REQ-CTL-52：夾具目錄裡另有繼任 session（c3d4e5f6）1 分鐘前的 assistant 記錄 ⇒
+    # 新前置會（正確地）延後。
+    # 本測試只釘「活舊窗 ⇒ fork 不關」，與雙駕駛前置無關，故隔離之（前置自有
+    # test_sessionctl_othersession）。
     @unittest.mock.patch("lib.sessionctl.othersession.active", new=lambda *_a, **_k: None)
     def test_the_park_cli_fire_forks_a_live_window_instead_of_closing_it(self) -> None:
         """`_cmd_fire` 整條：活 `cli` 舊窗 ⇒ 不關（假 api 的 terminate 0 次）、

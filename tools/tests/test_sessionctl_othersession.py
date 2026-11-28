@@ -2,8 +2,10 @@
 """WP-SW REQ-CTL-52（TCS-Control §8；AT-CTL-109～114）：同專案另一 session 在動 ⇒ 不 spawn。
 
 WHY（暴露證據）：掌舵者真機回報「為何還有另一個視窗……多頭馬車」；前置情境在真實逐字稿已發生 2 次。
-判準＝`transcript_activity.driver_after` 迴圈推進 since 直到回 assistant 或 None（單次呼叫只回窗口內最早一筆，
-真實活躍 session 常是人類提示在前，會把正在動的 session 判成沒人在動＝雙駕駛）；只認 AI 回合，真人／`/login` 不算。
+判準＝`transcript_activity.driver_after` 迴圈推進 since 直到回 assistant 或
+None（單次呼叫只回窗口內最早一筆，
+真實活躍 session 常是人類提示在前，會把正在動的 session 判成沒人在動＝雙駕駛）；只認 AI 回合，
+真人／`/login` 不算。
 縫：FS（tmp 專案目錄）、NOW（真時鐘）、`oldwin_park._rearm`（假重排，絕不登記真排程）。
 """
 from __future__ import annotations
@@ -34,13 +36,16 @@ OTHER = "4290bf58-a5e9-4e64-b118-e9db87ca2af4"
 def _rec(kind: str, at: datetime, **over) -> dict:
     stamp = at.astimezone().isoformat()
     if kind == "assistant":
-        return {"type": "assistant", "timestamp": stamp, "message": {"model": "claude-fable-5", "content": []}, **over}
+        return {"type": "assistant", "timestamp": stamp, "message": {"model": "claude-fable-5",
+            "content": []}, **over}
     if kind == "synthetic":
-        return {"type": "assistant", "timestamp": stamp, "message": {"model": "<synthetic>"}, **over}
+        return {"type": "assistant", "timestamp": stamp, "message": {"model": "<synthetic>"},
+            **over}
     if kind == "login":
         return {"type": "user", "timestamp": stamp, "origin": {"kind": "human"},
                 "message": {"content": "<command-name>/login</command-name>"}, **over}
-    return {"type": "user", "timestamp": stamp, "origin": {"kind": kind}, "message": {"content": "hi"}, **over}
+    return {"type": "user", "timestamp": stamp, "origin": {"kind": kind},
+        "message": {"content": "hi"}, **over}
 
 
 class _Dir(unittest.TestCase):
@@ -81,14 +86,17 @@ class _Dir(unittest.TestCase):
 
 class ActiveTest(_Dir):
     def test_at_ctl_109_human_before_assistant_is_found_by_advancing_since(self) -> None:
-        """AT-CTL-109：窗口內 human(t1)→assistant(t2)：單次 driver_after 只回 human，迴圈推進才命中；
+        """AT-CTL-109：窗口內 human(t1)→assistant(t2)：單次 driver_after 只回 human，
+        迴圈推進才命中；
         呼叫次數 human→assistant＝2、human→human→assistant＝3、human 單獨＝2（回 None）。"""
         self.put(OTHER, _rec("human", self.ago(5)), _rec("assistant", self.ago(4)))
         got, n = self.calls()
         self.assertEqual((got["sid"], n), (OTHER, 2))
         self.assertEqual(ta.driver_after(self.proj / f"{OTHER}.jsonl", self.now.timestamp() - 900,
-                                         self.now)["kind"], "human", "夾具真的重現單次呼叫會漏判的形狀")
-        self.put(OTHER, _rec("human", self.ago(6)), _rec("human", self.ago(5)), _rec("assistant", self.ago(4)))
+                                         self.now)["kind"], "human",
+                                             "夾具真的重現單次呼叫會漏判的形狀")
+        self.put(OTHER, _rec("human", self.ago(6)), _rec("human", self.ago(5)), _rec("assistant",
+            self.ago(4)))
         self.assertEqual(self.calls()[1], 3)
         self.put(OTHER, _rec("human", self.ago(5)))
         got, n = self.calls()
@@ -106,20 +114,25 @@ class ActiveTest(_Dir):
         self.assertEqual(got["sid"], OTHER)
 
     def test_at_ctl_110_not_a_driver_cases(self) -> None:
-        """AT-CTL-110：①僅 mtime 新、無對話記錄 ②最後記錄早於 now−N ③human-only（含 /login 本機指令）
+        """AT-CTL-110：①僅 mtime 新、無對話記錄 ②最後記錄早於 now−N ③human-only（含 /login
+        本機指令）
         ④加一筆晚於 human 的 assistant ⇒ 命中 ④′三筆連續 human 無 assistant ⇒ None 且有限呼叫
         ⑤auto-continuation 單獨 ⇒ None；目錄讀不動 ⇒ None。"""
-        self.put(OTHER, {"type": "system", "subtype": "away_summary", "timestamp": self.ago(1).isoformat()})
+        self.put(OTHER, {"type": "system", "subtype": "away_summary",
+            "timestamp": self.ago(1).isoformat()})
         self.assertIsNone(self.calls()[0])  # ① mtime 新（剛寫）但無對話記錄
         self.put(OTHER, _rec("assistant", self.ago(40)))
         self.assertIsNone(self.calls()[0])  # ②
         self.put(OTHER, _rec("human", self.ago(5)), _rec("login", self.ago(4)),
                  {"type": "user", "timestamp": self.ago(3).isoformat(), "origin": {"kind": "human"},
-                  "message": {"content": "<local-command-stdout>Login successful</local-command-stdout>"}})
+                  "message": {"content":
+                               "<local-command-stdout>Login successful</local-command-stdout>"}})
         self.assertIsNone(self.calls()[0])  # ③
-        self.put(OTHER, _rec("human", self.ago(5)), _rec("login", self.ago(4)), _rec("assistant", self.ago(3)))
+        self.put(OTHER, _rec("human", self.ago(5)), _rec("login", self.ago(4)), _rec("assistant",
+            self.ago(3)))
         self.assertEqual(self.calls()[0]["sid"], OTHER)  # ④ 證 human 記錄不是被別的原因擋掉
-        self.put(OTHER, _rec("human", self.ago(5)), _rec("human", self.ago(4)), _rec("human", self.ago(3)))
+        self.put(OTHER, _rec("human", self.ago(5)), _rec("human", self.ago(4)), _rec("human",
+            self.ago(3)))
         got, n = self.calls()
         self.assertEqual((got, n), (None, 4))  # ④′ 推進到底、不死循環
         self.put(OTHER, _rec("auto-continuation", self.ago(2)))
@@ -128,23 +141,27 @@ class ActiveTest(_Dir):
         self.assertIsNone(othersession.active(None, OWN, self.now))
 
     def test_at_ctl_110_scan_cap_stops_at_200_and_leaves_a_trace(self) -> None:
-        """AT-CTL-110 ④″：driver_after 假實作恆回 human、時戳逐次 +1 秒 ⇒ 恰 200 次、None、痕跡 scan_cap。"""
+        """AT-CTL-110 ④″：driver_after 假實作恆回 human、時戳逐次 +1 秒 ⇒ 恰 200 次、None、痕跡
+        scan_cap。"""
         self.put(OTHER, _rec("human", self.ago(5)))
         calls = []
 
         def endless(_path, since, _now):
             calls.append(since)
-            return {"timestamp": datetime.fromtimestamp(since + 1).astimezone().isoformat(), "kind": "human"}
+            return {"timestamp": datetime.fromtimestamp(since + 1).astimezone().isoformat(),
+                "kind": "human"}
 
         got = othersession.active(self.proj, OWN, self.now, driver_after=endless)
         self.assertIsNone(got)
         self.assertEqual(len(calls), othersession.OTHER_SESSION_SCAN_MAX_STEPS)
         rows = [json.loads(x) for x in (self.proj / "_traces" / "autosdd_session_switch.jsonl")
                 .read_text(encoding="utf-8").splitlines()]
-        self.assertEqual([r["action"] for r in rows if r["event"] == "park_other_session"], ["scan_cap"])
+        self.assertEqual([r["action"] for r in rows if r["event"] == "park_other_session"],
+            ["scan_cap"])
 
     def test_p3_same_stamp_human_and_assistant_does_not_skip_the_assistant(self) -> None:
-        """QA P3②：human 與 assistant 恰同一戳（human 在檔案序先）⇒ 推進 since 不得跳過同戳 assistant。"""
+        """QA P3②：human 與 assistant 恰同一戳（human 在檔案序先）⇒ 推進 since 不得跳過同戳
+        assistant。"""
         at = self.ago(3)
         self.put(OTHER, _rec("human", at), _rec("assistant", at))
         self.assertEqual(self.calls()[0]["sid"], OTHER)
@@ -152,9 +169,12 @@ class ActiveTest(_Dir):
         self.assertIsNone(self.calls()[0], "同戳只有 human ⇒ 仍是沒人在動")
 
     def test_at_ctl_114_single_ruler_loop_and_no_mtime_decision(self) -> None:
-        """AT-CTL-114：判活只經 driver_after（迴圈、有上限、只收 assistant）；不用 newest_conversation_at；
-        不以 mtime 判活（只有預篩）；不新寫詞表；不被 quota_policy／transcript_activity 頂層 import。"""
-        src = (_REPO_ROOT / "tools" / "lib" / "sessionctl" / "othersession.py").read_text(encoding="utf-8")
+        """AT-CTL-114：判活只經 driver_after（迴圈、有上限、只收 assistant）；不用
+        newest_conversation_at；
+        不以 mtime 判活（只有預篩）；不新寫詞表；不被 quota_policy／transcript_activity 頂層
+        import。"""
+        src = (_REPO_ROOT / "tools" / "lib" / "sessionctl"
+            / "othersession.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
         self.assertNotIn("newest_conversation_at", src.replace("`newest_conversation_at`", ""))
         loops = [n for n in ast.walk(tree) if isinstance(n, ast.While)]
@@ -162,7 +182,8 @@ class ActiveTest(_Dir):
                         "driver_after 必須在迴圈內被呼叫且 since 在迴圈體內推進")
         self.assertIn("OTHER_SESSION_SCAN_MAX_STEPS", src)
         self.assertIn('rec["kind"] == "assistant"', src)
-        code = "\n".join(ln.split("#")[0] for ln in src.split('"""')[2::2])  # 去掉 docstring 後的程式碼
+        code = "\n".join(ln.split("#")[0]
+            for ln in src.split('"""')[2::2])  # 去掉 docstring 後的程式碼
         for banned in ("synthetic", "origin", "away_summary", "<local-command"):
             self.assertNotIn(banned, code, f"不得另寫詞表：{banned}")
         decide_uses_mtime = [ln for ln in src.splitlines() if "st_mtime" in ln and "max(" not in ln]
@@ -176,7 +197,8 @@ class ActiveTest(_Dir):
 
 def _planner_interval() -> int:
     text = (_REPO_ROOT / "tools" / "session_resume_planner.py").read_text(encoding="utf-8")
-    return int(next(ln for ln in text.splitlines() if ln.startswith("SENTINEL_INTERVAL_SECONDS")).split("=")[1])
+    return int(next(ln for ln in text.splitlines()
+        if ln.startswith("SENTINEL_INTERVAL_SECONDS")).split("=")[1])
 
 
 class ParkFireOtherSessionTest(P.JobTest):
@@ -184,7 +206,8 @@ class ParkFireOtherSessionTest(P.JobTest):
 
     def setUp(self) -> None:
         super().setUp()
-        patch = mock.patch.object(tempfile, "tempdir", str(self.tmp))  # alert 的 note 檔不得落真暫存
+        # alert 的 note 檔不得落真暫存
+        patch = mock.patch.object(tempfile, "tempdir", str(self.tmp))
         patch.start()
         self.addCleanup(patch.stop)
         self.rearms: list = []
@@ -229,7 +252,8 @@ class ParkFireOtherSessionTest(P.JobTest):
         with mock.patch("lib.sessionctl.park_announce.announce") as announce:
             self.assertEqual(self.fire(), 0)
         marker = park.read_marker(P.SID)
-        self.assertEqual((marker["status"], marker["outcome"]["event"]), ("skipped", "other_session"))
+        self.assertEqual((marker["status"], marker["outcome"]["event"]), ("skipped",
+            "other_session"))
         announce.assert_called_once()
         kw = announce.call_args.kwargs
         self.assertIn("他 session 在動", kw["title"])
@@ -246,7 +270,7 @@ class ParkFireOtherSessionTest(P.JobTest):
             self.fire()
         announce.assert_not_called()
 
-    def test_at_ctl_112_real_announce_writes_handback_and_queue_and_status_line_until_ack(self) -> None:
+    def test_at_ctl_112_real_announce_writes_handback_queue_status_line_until_ack(self) -> None:
         import quota_escalation  # noqa: PLC0415
 
         park.write_marker(dict(park.read_marker(P.SID), desktop_notify="1",
@@ -305,13 +329,17 @@ class ParkEarlyHoldTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, \
                 mock.patch.dict(os.environ, {"AUTOSDD_TRACE_DIR": td}):
             proj = Path(td)
-            (proj / f"{OTHER}.jsonl").write_text(json.dumps(_rec("assistant", now - timedelta(minutes=2))) + "\n",
+            (proj / f"{OTHER}.jsonl").write_text(json.dumps(_rec("assistant",
+                now - timedelta(minutes=2))) + "\n",
                                                  encoding="utf-8")
             S = {"transcript": lambda _s: proj / f"{OWN}.jsonl"}
-            self.assertEqual(parkearly._other_session({"sid": OWN}, {}, now, S), "other_session")  # noqa: SLF001
-            rows = [json.loads(x) for x in (proj / "autosdd_session_switch.jsonl").read_text("utf-8").splitlines()]
+            verdict = parkearly._other_session({"sid": OWN}, {}, now, S)  # noqa: SLF001
+            self.assertEqual(verdict, "other_session")
+            rows = [json.loads(x) for x in (proj
+                / "autosdd_session_switch.jsonl").read_text("utf-8").splitlines()]
             self.assertEqual(rows[-1]["action"], "hold")
-            (proj / f"{OTHER}.jsonl").write_text(json.dumps(_rec("assistant", now - timedelta(hours=2))) + "\n",
+            (proj / f"{OTHER}.jsonl").write_text(json.dumps(_rec("assistant",
+                now - timedelta(hours=2))) + "\n",
                                                  encoding="utf-8")
             self.assertEqual(parkearly._other_session({"sid": OWN}, {}, now, S), "")  # noqa: SLF001
 

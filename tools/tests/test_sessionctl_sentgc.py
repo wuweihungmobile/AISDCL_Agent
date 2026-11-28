@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""WP-SW REQ-CTL-58（TCS-Control §8；AT-CTL-136～141）：舊哨兵殘骸 GC（`sentgc`）與唯讀 `job_states`。
+"""WP-SW REQ-CTL-58（TCS-Control §8；AT-CTL-136～141）：舊哨兵殘骸 GC（`sentgc`）與唯讀
+`job_states`。
 
-WHY（暴露證據）：`AutoSDD_Sentinel_406454ea-…`（`NextRunTime` 空、`LastTaskResult=1`）無人 GC；而最危險的錯拆是
-把「tick 進行中、NextRunTime 為空、結果 267009 的活哨兵」拆掉——斷其喚醒鏈（與 R-4.5.6-4（b）相反的無聲斷線）。
+WHY（暴露證據）：`AutoSDD_Sentinel_406454ea-…`（`NextRunTime` 空、`LastTaskResult=1`）無人 GC；
+而最危險的錯拆是
+把「tick 進行中、NextRunTime 為空、結果 267009 的活哨兵」拆掉——斷其喚醒鏈（與 R-4.5.6-4（b）
+相反的無聲斷線）。
 所以判準是四合取，且列舉在沙盒 repo 下於**列舉階段**就濾掉真實殘骸。
-縫：假後端（`job_states`／`disarm` 記錄器；絕不碰真排程器——真殘骸是證據，不准拆）、假 NOW、假任務書狀態。
+縫：假後端（`job_states`／`disarm` 記錄器；絕不碰真排程器——真殘骸是證據，不准拆）、假 NOW、
+假任務書狀態。
 """
 from __future__ import annotations
 
@@ -22,9 +26,8 @@ sys.path.insert(0, str(_REPO_ROOT / "tools"))
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 
 import sandbox_scope  # noqa: E402
-import schedule_states  # noqa: E402
 
-from lib.sessionctl import sentgc  # noqa: E402
+from lib.sessionctl import schedstates, sentgc  # noqa: E402
 
 NOW = datetime(2026, 11, 28, 12, 0, 0).astimezone()
 OLD = (NOW - timedelta(hours=2)).isoformat()
@@ -48,7 +51,8 @@ class _Jobs:
 
     def job_states(self, prefix):
         self.state_calls += 1
-        return None if self.rows is None else [dict(r) for r in self.rows if r["name"].startswith(prefix)]
+        return None if self.rows is None else [dict(r) for r in self.rows
+            if r["name"].startswith(prefix)]
 
     def disarm(self, name: str) -> int:
         self.disarmed.append(name)
@@ -74,13 +78,15 @@ class _Fence(unittest.TestCase):
         import json  # noqa: PLC0415
 
         path = self.tmp / "traces" / "autosdd_session_switch.jsonl"
-        rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+        rows = [json.loads(x)
+            for x in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
         return [r for r in rows if r["event"] == "sentinel_gc"]
 
 
 class SweepTest(_Fence):
     def test_at_ctl_136_only_the_dead_idle_residue_is_removed(self) -> None:
-        """AT-CTL-136：A 拆；B NextRunTime 非空、C sid＝acker、D 結果 0＋任務書 waiting、E 267009＋Running、
+        """AT-CTL-136：A 拆；B NextRunTime 非空、C sid＝acker、D 結果 0＋任務書 waiting、E
+        267009＋Running、
         F 剛跑完（LastRunTime < min_idle_s）、G State／LastRunTime 讀不到、H 267011 ⇒ 原樣。"""
         rows = [
             _row("aaaaaaaa-0001-4000-8000-00000000000a"),                                   # A
@@ -94,7 +100,8 @@ class SweepTest(_Fence):
         ]
         be = _Jobs(rows)
         plan = {"aaaaaaaa-0004-4000-8000-00000000000d": "waiting"}.get
-        self.assertEqual(self.sweep(be, plan=plan), ["AutoSDD_Sentinel_aaaaaaaa-0001-4000-8000-00000000000a"])
+        self.assertEqual(self.sweep(be, plan=plan),
+            ["AutoSDD_Sentinel_aaaaaaaa-0001-4000-8000-00000000000a"])
         self.assertEqual(be.disarmed, ["AutoSDD_Sentinel_aaaaaaaa-0001-4000-8000-00000000000a"])
         (gc,) = self.gc_rows()
         for key in ("task", "reason", "next_run", "last_result", "last_run", "state", "sid"):
@@ -103,7 +110,8 @@ class SweepTest(_Fence):
         # D 變體：任務書 abandoned ＋ State=Ready ＋ LastRunTime 夠舊 ⇒ 也拆
         d = _row("aaaaaaaa-0004-4000-8000-00000000000d", last_result=0)
         be2 = _Jobs([d])
-        self.assertEqual(len(self.sweep(be2, plan={d["name"].removeprefix("AutoSDD_Sentinel_"): "abandoned"}.get)), 1)
+        self.assertEqual(len(self.sweep(be2,
+            plan={d["name"].removeprefix("AutoSDD_Sentinel_"): "abandoned"}.get)), 1)
 
     def test_at_ctl_136_unmeasured_table_does_nothing_and_says_so(self) -> None:
         be = _Jobs(None)
@@ -112,7 +120,8 @@ class SweepTest(_Fence):
         self.assertTrue(any("量不到" in s for s in self.said))
 
     def test_at_ctl_136_launchd_style_rows_without_last_run_are_never_removed(self) -> None:
-        rows = [_row("aaaaaaaa-0009-4000-8000-000000000012", state=None, last_run=None, last_result=None)]
+        rows = [_row("aaaaaaaa-0009-4000-8000-000000000012", state=None, last_run=None,
+            last_result=None)]
         be = _Jobs(rows)
         self.assertEqual(self.sweep(be), [])
         self.assertTrue(any("LastRunTime" in s for s in self.said), "macOS：誠實出聲，不假裝清了")
@@ -138,17 +147,21 @@ class SweepTest(_Fence):
         from lib.sessionctl import roster  # noqa: PLC0415
 
         be = _Jobs([_row("aaaaaaaa-0001-4000-8000-00000000000a")])
-        snap = {"agents": [], "windows": [], "schedules": [], "stale_sentinels": ["x"], "handoffs": []}
+        snap = {"agents": [], "windows": [], "schedules": [], "stale_sentinels": ["x"],
+            "handoffs": []}
         with mock.patch("schedule_backend.select", return_value=be):
             roster.render_snapshot(snap)
         self.assertEqual((be.state_calls, be.disarmed), (0, []))
-        src = (_REPO_ROOT / "tools" / "lib" / "sessionctl" / "roster.py").read_text(encoding="utf-8")
+        src = (_REPO_ROOT / "tools" / "lib" / "sessionctl"
+            / "roster.py").read_text(encoding="utf-8")
         self.assertNotIn("sentgc", src, "GC 不得進 status")
 
     def test_at_ctl_137_removal_goes_only_through_the_existing_disarm_site(self) -> None:
-        src = (_REPO_ROOT / "tools" / "lib" / "sessionctl" / "sentgc.py").read_text(encoding="utf-8")
+        src = (_REPO_ROOT / "tools" / "lib" / "sessionctl"
+            / "sentgc.py").read_text(encoding="utf-8")
         code = "\n".join(src.split('"""')[2::2])
-        for banned in ("Unregister-ScheduledTask", "schtasks /delete", "launchctl bootout", "bootout"):
+        for banned in ("Unregister-ScheduledTask", "schtasks /delete", "launchctl bootout",
+            "bootout"):
             self.assertNotIn(banned, code)
         self.assertIn("backend.disarm(", code)
         tree = ast.parse(src)
@@ -177,10 +190,12 @@ class ScopeTest(_Fence):
         table = sentgc.job_table(os.environ, repo_root=home, backend=be)
         self.assertEqual(sorted(r["name"] for r in table),
                          sorted([f"AutoSDD_Sentinel_{sb}", f"AutoSDD_Sentinel_{sb}-ctl"]))
-        self.assertEqual(self.sweep(be, repo=home), [f"AutoSDD_Sentinel_{sb}", f"AutoSDD_Sentinel_{sb}-ctl"])
+        self.assertEqual(self.sweep(be, repo=home), [f"AutoSDD_Sentinel_{sb}",
+            f"AutoSDD_Sentinel_{sb}-ctl"])
         self.assertNotIn("AutoSDD_Sentinel_406454ea-91fc-4481-9c11-b28ed7d9e95f", be.disarmed)
         real = sentgc.job_table(os.environ, repo_root=_REPO_ROOT, backend=_Jobs(rows))
-        self.assertIn("AutoSDD_Sentinel_406454ea-91fc-4481-9c11-b28ed7d9e95f", [r["name"] for r in real])
+        self.assertIn("AutoSDD_Sentinel_406454ea-91fc-4481-9c11-b28ed7d9e95f", [r["name"]
+            for r in real])
         self.assertTrue(all(r["name"].startswith("AutoSDD_Sentinel_") for r in real))
 
     def test_at_ctl_140_sandbox_with_unreadable_identity_scopes_to_nothing(self) -> None:
@@ -201,7 +216,8 @@ class ScopeTest(_Fence):
         home = self._sandbox(sb)
         pkg = self.tmp / f"{sb}_20261126T154649Z.md"
         pkg.write_text(f"# x <!-- sessionctl-handoff sid={sb} at=x -->\n", encoding="utf-8")
-        pkg.with_suffix(".sealed").write_text((NOW - timedelta(days=1)).isoformat() + "\n", encoding="utf-8")
+        pkg.with_suffix(".sealed").write_text((NOW - timedelta(days=1)).isoformat() + "\n",
+            encoding="utf-8")
         be = _Jobs([_row(sb)])
         out = io.StringIO()
         with redirect_stdout(out), mock.patch("lib.sessionctl.park_cli._REPO", home), \
@@ -219,7 +235,7 @@ class JobStatesTest(unittest.TestCase):
         out = ("AutoSDD_Sentinel_a\tReady\t2026-11-28T10:21:52.0000000+08:00\t1\t\n"
                "AutoSDD_Sentinel_b\tRunning\t\t267011\t2026-11-28T13:00:00.0000000+08:00\n"
                "壞行\n" "Other_x\tReady\t\t0\t\n")
-        rows = schedule_states.parse_rows(out, "AutoSDD_Sentinel_")
+        rows = schedstates.parse_rows(out, "AutoSDD_Sentinel_")
         self.assertEqual([r["name"] for r in rows], ["AutoSDD_Sentinel_a", "AutoSDD_Sentinel_b"])
         self.assertEqual((rows[0]["next_run"], rows[0]["last_result"]), ("", 1))
         self.assertEqual((rows[1]["last_run"], rows[1]["last_result"]), ("", 267011))

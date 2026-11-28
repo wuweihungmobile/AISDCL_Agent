@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""WP-SW REQ-CTL-53／54（TCS-Control §8；AT-CTL-115～122）：ack 之後的「封存後事件」摘要與機械層第 3／4 欄。
+"""WP-SW REQ-CTL-53／54（TCS-Control §8；AT-CTL-115～122）：ack 之後的「封存後事件」
+摘要與機械層第 3／4 欄。
 
-WHY（暴露證據）：交接包封存之後發生的事（keepwarm 主載具被殺、帳號切換、舊哨兵崩潰）新主控只能手翻痕跡；
-機械層第 4 欄只看 `--points-at HEAD`，`406454ea-…-flk5-halfwork`（stash create 的 commit，不在 HEAD）只活在手寫層。
+WHY（暴露證據）：交接包封存之後發生的事（keepwarm 主載具被殺、帳號切換、舊哨兵崩潰）
+新主控只能手翻痕跡；
+機械層第 4 欄只看 `--points-at HEAD`，`406454ea-…-flk5-halfwork`（stash create 的 commit，不在
+HEAD）只活在手寫層。
 縫：FS（tmp 痕跡與交接包）、假 job_table、假行程查詢（PROC）、真 git（沙盒倉庫）。
 """
 from __future__ import annotations
@@ -33,7 +36,8 @@ SEALED = datetime(2026, 11, 26, 23, 47, 36).astimezone()
 
 
 def _ev(event: str, minutes_after: float, sid: str = OWNER, **kw) -> dict:
-    return {"event": event, "at": (SEALED + timedelta(minutes=minutes_after)).isoformat(), "sid": sid, **kw}
+    return {"event": event, "at": (SEALED + timedelta(minutes=minutes_after)).isoformat(),
+        "sid": sid, **kw}
 
 
 class _Fence(unittest.TestCase):
@@ -76,7 +80,8 @@ class SummaryTest(_Fence):
         self.assertNotIn("park_armed", body)
         self.assertNotIn("context_budget_note", body)
         self.assertNotIn("old=x", body)
-        order = [body.index(w) for w in ("keepwarm_verdict", "park_early_probe", "account_switch", "sentinel_crashed")]
+        order = [body.index(w) for w in ("keepwarm_verdict", "park_early_probe", "account_switch",
+            "sentinel_crashed")]
         self.assertEqual(order, sorted(order), "依時間升冪")
 
     def test_at_ctl_115_over_forty_rows_say_how_many_were_cut(self) -> None:
@@ -84,10 +89,12 @@ class SummaryTest(_Fence):
         self.assertIn("已截斷 5 列", self.summary())
 
     def test_at_ctl_116_old_sentinel_state_is_quoted_verbatim_including_empty_values(self) -> None:
-        row = {"name": f"AutoSDD_Sentinel_{OWNER}", "sid": OWNER, "state": "Ready", "last_run": "2026-11-28T10:21:52+08:00",
+        row = {"name": f"AutoSDD_Sentinel_{OWNER}", "sid": OWNER, "state": "Ready",
+            "last_run": "2026-11-28T10:21:52+08:00",
                "last_result": 1, "next_run": ""}
         text = self.summary(table=[row])
-        for needle in ("State=Ready", "LastTaskResult=1", "LastRunTime=2026-11-28T10:21:52+08:00", "NextRunTime="):
+        for needle in ("State=Ready", "LastTaskResult=1", "LastRunTime=2026-11-28T10:21:52+08:00",
+            "NextRunTime="):
             self.assertIn(needle, text)
         self.assertNotIn("已排程", text, "空 NextRunTime 不得美化成已排程")
         self.assertIn("量不到：排程器狀態列舉回 None", self.summary(table=None))
@@ -95,8 +102,10 @@ class SummaryTest(_Fence):
     def test_at_ctl_117_old_window_three_states(self) -> None:
         self.assertIn("仍在（pid 4242", self.summary(proc_fn=lambda _s: ("alive", 4242)))
         self.assertIn("已不在", self.summary(proc_fn=lambda _s: ("dead", None)))
-        self.assertIn("量不到：身分驗不出", self.summary(proc_fn=lambda _s: ("unknown", "身分驗不出")))
-        self.assertIn("量不到：RuntimeError", self.summary(proc_fn=mock.Mock(side_effect=RuntimeError("x"))))
+        self.assertIn("量不到：身分驗不出", self.summary(proc_fn=lambda _s: ("unknown",
+            "身分驗不出")))
+        self.assertIn("量不到：RuntimeError",
+            self.summary(proc_fn=mock.Mock(side_effect=RuntimeError("x"))))
 
     def test_at_ctl_118_read_only_and_never_fatal_through_the_hook(self) -> None:
         self.write_trace(_ev("park_acked_cancel", 70, acker=ACKER))
@@ -126,15 +135,19 @@ class SummaryTest(_Fence):
 
     def test_at_ctl_119_after_handoff_output_and_rc_unchanged(self) -> None:
         """AT-CTL-119：after_handoff 只在 ack 原輸出之後多印；rc 原樣；失敗的 ack 不摘要。"""
-        with mock.patch.object(ackhook, "summarize_and_gc") as gc, mock.patch.object(ackhook, "on_ack"):
-            self.assertEqual(ackhook.after_handoff(["--ack", str(self.pkg)], 0, {"CLAUDE_CODE_SESSION_ID": ACKER}), 0)
+        with mock.patch.object(ackhook, "summarize_and_gc") as gc, mock.patch.object(ackhook,
+            "on_ack"):
+            self.assertEqual(ackhook.after_handoff(["--ack", str(self.pkg)], 0,
+                {"CLAUDE_CODE_SESSION_ID": ACKER}), 0)
             self.assertEqual(ackhook.after_handoff(["--ack", str(self.pkg)], 1, {}), 1)
         gc.assert_called_once()
 
 
 def _git(repo: Path, *args: str) -> str:
-    out = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(repo), *args],
-                         capture_output=True, text=True, encoding="utf-8", check=True, stdin=subprocess.DEVNULL,
+    out = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(repo),
+        *args],
+                         capture_output=True, text=True, encoding="utf-8", check=True,
+                             stdin=subprocess.DEVNULL,
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     return out.stdout.strip()
 
@@ -152,7 +165,8 @@ class MechanicalColumnsTest(unittest.TestCase):
         _git(self.repo, "commit", "-q", "-m", "c1")
         (self.repo / "a.txt").write_text("2", encoding="utf-8")
         self.stash = _git(self.repo, "stash", "create")  # 真 stash create：commit 不在 HEAD
-        (self.repo / "a.txt").write_text("1", encoding="utf-8")  # 工作樹還原回 HEAD 內容（不用毀滅性 git）
+        # 工作樹還原回 HEAD 內容（不用毀滅性 git）
+        (self.repo / "a.txt").write_text("1", encoding="utf-8")
         _git(self.repo, "tag", "406454ea-20261126-flk5-halfwork", self.stash)
         _git(self.repo, "tag", "406454ea-x-wip-preserved")
         _git(self.repo, "tag", "dddddddd-20261126-other-halfwork", self.stash)
@@ -160,7 +174,8 @@ class MechanicalColumnsTest(unittest.TestCase):
 
     def runner(self, argv, cwd=None, **_kw):
         proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", cwd=cwd,
-                              stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                              stdin=subprocess.DEVNULL, creationflags=getattr(subprocess,
+                                  "CREATE_NO_WINDOW", 0))
         return proc.returncode, proc.stdout, None
 
     def test_at_ctl_121_column4_lists_own_halfwork_and_wip_preserved_only(self) -> None:
@@ -173,13 +188,17 @@ class MechanicalColumnsTest(unittest.TestCase):
         self.assertIn("406454ea-x-wip-preserved", joined)
         self.assertNotIn("dddddddd", joined)
         self.assertNotIn("unrelated", joined)
-        _b, _t, tag_text = handoff_build._git_sections(self.runner, self.repo, OWNER)  # noqa: SLF001
+        git_sections = handoff_build._git_sections  # noqa: SLF001
+        _b, _t, tag_text = git_sections(self.runner, self.repo, OWNER)
         self.assertIn("本 owner 保全標籤：406454ea-20261126-flk5-halfwork", tag_text)
-        _b, _t, none_text = handoff_build._git_sections(self.runner, self.repo, "zzzzzzzz-0000")  # noqa: SLF001
+        _b, _t, none_text = git_sections(self.runner, self.repo, "zzzzzzzz-0000")
         self.assertNotIn("本 owner 保全標籤", none_text, "別的 sid 沒有自己的保全標籤 ⇒ 不加列")
         self.assertIn("406454ea-x-wip-preserved", none_text, "HEAD 上的 wip-preserved 照舊列在原處")
-        self.assertEqual(handoff_build.owner_tags(lambda *_a, **_k: (1, "", None), self.repo, OWNER, None)[0], None)
-        self.assertIn("量不到", handoff_build._git_sections(lambda *_a, **_k: (1, "", None), self.repo, OWNER)[2])  # noqa: SLF001
+        self.assertEqual(handoff_build.owner_tags(lambda *_a, **_k: (1, "", None), self.repo,
+            OWNER, None)[0], None)
+        sections = handoff_build._git_sections(  # noqa: SLF001
+            lambda *_a, **_k: (1, "", None), self.repo, OWNER)
+        self.assertIn("量不到", sections[2])
 
     def test_at_ctl_120_worktree_row_present_and_failure_is_localised(self) -> None:
         _b, tree, _t = handoff_build._git_sections(self.runner, self.repo, OWNER)  # noqa: SLF001

@@ -149,6 +149,7 @@ from pathlib import Path
 import endurance_env
 import unattended_authz  # DEF-200-575：`DEFER_WAIT_CAP_SECONDS` 與 planner 牆鐘同源（無第二個數字）
 from schedule_backend_calendar import (
+    StatesMixin,  # WP-SW REQ-CTL-58：三後端共用的唯讀 job_states
     _append_trace,
     _calendar_of,
     _calendar_still_ahead,
@@ -157,7 +158,6 @@ from schedule_backend_calendar import (
     _labels_with_prefix,
     _unsafe_name,
 )
-from schedule_states import StatesMixin  # WP-SW REQ-CTL-58：三後端共用的唯讀 job_states
 
 #: 兩個後端把憑證寫進續航狀態塊的**不同鍵**。刻意不共用 `next_run_time` 一個鍵：
 #: 那個鍵名在 mac 上是一句假話（launchd 不報 next-run），而把 launchd 憑證塞進一個叫

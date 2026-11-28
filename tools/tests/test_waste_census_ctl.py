@@ -107,10 +107,13 @@ class MW1Test(unittest.TestCase):
         self.assertNotEqual(got["corrected"]["n"], got["upper_bound"]["n"])
 
 
-# ───────────────────────────── WP-SW REQ-CTL-57（AT-CTL-133～135）：哨兵重放第四列「真 tick 同輸入」
+# ───────────────────────────── WP-SW REQ-CTL-57（AT-CTL-133～135）：哨兵重放第四列「真 tick
+# 同輸入」
 class ReplayRow4Test(unittest.TestCase):
-    """WHY：重放工具只傳原始 halt 標記、grace、driver，不傳 `park=`／`stale=`、不做帳號比對；真 tick 傳
-    `halt=sentinel_halt(…)`＋`park=`＋`stale=`。主控因此被誤導一次（重放得 arm_reset，真實是 patrol＋崩潰）。"""
+    """WHY：重放工具只傳原始 halt 標記、grace、driver，不傳 `park=`／`stale=`、不做帳號比對；真
+    tick 傳
+    `halt=sentinel_halt(…)`＋`park=`＋`stale=`。主控因此被誤導一次（重放得 arm_reset，真實是
+    patrol＋崩潰）。"""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -126,8 +129,10 @@ class ReplayRow4Test(unittest.TestCase):
         def r(event, at, **kw):
             return {"event": event, "at": at, "sid": "406454ea-91fc-4481-9c11-b28ed7d9e95f", **kw}
 
-        return [r("park_armed", "2026-11-28T08:00:00+08:00", route="H", fire_at="2026-11-28T11:00:00+08:00"),
-                r("account_switch", "2026-11-28T10:21:52+08:00", old="eaf5241f6fe2", new="34cd3507237f"),
+        return [r("park_armed", "2026-11-28T08:00:00+08:00", route="H",
+            fire_at="2026-11-28T11:00:00+08:00"),
+                r("account_switch", "2026-11-28T10:21:52+08:00", old="eaf5241f6fe2",
+                    new="34cd3507237f"),
                 r("park_acked_cancel", "2026-11-28T10:13:43+08:00", acker="4290bf58")]
 
     def test_at_ctl_133_park_as_of_folds_arm_then_cancel(self) -> None:
@@ -136,7 +141,8 @@ class ReplayRow4Test(unittest.TestCase):
         after = datetime.fromisoformat("2026-11-28T10:22:00+08:00")
         self.assertEqual(self.mod._asof_park(rows, before)["status"], "armed")  # noqa: SLF001
         self.assertEqual(self.mod._asof_park(rows, after)["status"], "cancelled")  # noqa: SLF001
-        self.assertIsNone(self.mod._asof_park(rows, datetime.fromisoformat("2026-11-28T07:00:00+08:00")))  # noqa: SLF001
+        early = datetime.fromisoformat("2026-11-28T07:00:00+08:00")
+        self.assertIsNone(self.mod._asof_park(rows, early))  # noqa: SLF001
         self.assertIn("valid_until", self.mod._asof_park(rows, before))  # noqa: SLF001
 
     def test_at_ctl_133_halt_is_account_aware_as_of(self) -> None:
@@ -144,12 +150,15 @@ class ReplayRow4Test(unittest.TestCase):
         before = datetime.fromisoformat("2026-11-28T09:52:00+08:00")
         after = datetime.fromisoformat("2026-11-28T10:22:00+08:00")
         self.assertEqual(self.mod._asof_halt(marker, self.rows(), before), marker)  # noqa: SLF001
-        self.assertIsNone(self.mod._asof_halt(marker, self.rows(), after), "作廢事件之後標記不再是輸入")  # noqa: SLF001
+        self.assertIsNone(
+            self.mod._asof_halt(marker, self.rows(), after),  # noqa: SLF001
+            "作廢事件之後標記不再是輸入")
 
     def test_at_ctl_134_read_only_never_calls_reconcile_and_title_is_fixed(self) -> None:
         code = self.src.split('"""')[2]
         self.assertNotIn("reconcile(", code.replace("不呼叫 `acctswitch.reconcile`", ""))
-        self.assertNotIn("write_text", self.src[self.src.index("def _trace_rows"):self.src.index("def main")])
+        self.assertNotIn("write_text",
+            self.src[self.src.index("def _trace_rows"):self.src.index("def main")])
         self.assertIn("不重現排程器 stdio 環境", self.src)
         self.assertIn("第四列「真 tick 同輸入」", self.src)
 
@@ -161,8 +170,10 @@ class ReplayRow4Test(unittest.TestCase):
 
 # ───────────────────────────── WP-SW REQ-CTL-56（AT-CTL-129～132）：M-W1 只計子代理口徑
 class MW1AgentShellSplitTest(unittest.TestCase):
-    """WHY：w1_detail 第 14～43 行，29 筆 >30 分中 17 筆是「（1 個背景 shell）」；`STOP_VOICE` 同時命中代理與
-    shell，把 shell 也算成無看管子代理。既有鍵逐字不變，另列 agent／shell 子集（agent.n + shell.n == n）。"""
+    """WHY：w1_detail 第 14～43 行，29 筆 >30 分中 17 筆是「（1 個背景 shell）」；`STOP_VOICE`
+    同時命中代理與
+    shell，把 shell 也算成無看管子代理。既有鍵逐字不變，另列 agent／shell 子集（agent.n +
+    shell.n == n）。"""
 
     def evs(self, *voices, pending=False):
         recs = [_assistant(0)]
@@ -180,7 +191,8 @@ class MW1AgentShellSplitTest(unittest.TestCase):
         for text, want in cases:
             with self.subTest(text=text):
                 self.assertEqual(self.evs(text)[0]["kind"], want)
-        self.assertEqual(self.evs(pending=True)[0]["kind"], "agent", "turn_duration.pending>0 無出聲 ⇒ agent")
+        self.assertEqual(self.evs(pending=True)[0]["kind"], "agent",
+            "turn_duration.pending>0 無出聲 ⇒ agent")
         self.assertEqual(self.evs(), [], "pending==0 無出聲 ⇒ 無事件")
 
     def sessions(self):
@@ -199,11 +211,12 @@ class MW1AgentShellSplitTest(unittest.TestCase):
             self.assertIn(key, got["agent"])
         self.assertEqual((got["agent"]["gt_30min"], got["shell"]["gt_30min"]), (1, 1))
 
-    def test_at_ctl_131_credential_applies_to_both_subsets_and_gt30_counts_only_gap_over_1800(self) -> None:
+    def test_at_ctl_131_credential_applies_to_both_subsets_gt30_counts_gap_1800(self) -> None:
         got = sv.m_w1(self.sessions(), credential=lambda _e: True)
         self.assertEqual((got["n"], got["agent"]["n"], got["shell"]["n"]), (0, 0, 0))
         short = [{"sid": "s", "interactive": True,
-                  "recs": [_assistant(0), _stop(1, "本回合結束時仍有 2 支背景代理在跑"), _assistant(31)]}]
+                  "recs": [_assistant(0), _stop(1, "本回合結束時仍有 2 支背景代理在跑"),
+                      _assistant(31)]}]
         self.assertEqual(sv.m_w1(short)["agent"]["gt_30min"], 0, "gap=30 分整不算 >1800 秒")
 
     def test_at_ctl_132_sections_reads_the_agent_subset_for_th2(self) -> None:

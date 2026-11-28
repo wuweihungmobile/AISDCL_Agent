@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """WP-SW REQ-CTL-50（TCS-Control §8；AT-CTL-97～103）：排程入口崩潰護欄 `crashguard`。
 
-WHY：2026-11-28 10:21:52 舊哨兵在 pythonw 下崩潰，排程器自報 `LastTaskResult=1`、`NextRunTime` 空白，
-崩潰沒有任何痕跡與告警。本檔鎖「未捕捉例外必留痕＋告警＋重排；連續 3 次停止並 loud；正常 tick 歸零」。
+WHY：2026-11-28 10:21:52 舊哨兵在 pythonw 下崩潰，排程器自報 `LastTaskResult=1`、
+`NextRunTime` 空白，
+崩潰沒有任何痕跡與告警。本檔鎖「未捕捉例外必留痕＋告警＋重排；連續 3 次停止並 loud；正常 tick
+歸零」。
 縫：FS（tmp 圍籬）、NOW、假告警／假重排；真告警行為（HELM-01：只寫紙＋入佇列、不敲桌面）另斷言。
 """
 from __future__ import annotations
@@ -20,7 +22,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "tools"))
 sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 
-import test_sessionctl_park as P  # noqa: E402  # 模組引用而非 from-import：避免把對方的 TestCase 帶進本檔重跑
+# 模組引用而非 from-import：避免把對方的 TestCase 帶進本檔重跑
+import test_sessionctl_park as P  # noqa: E402
 
 from lib.sessionctl import crashguard, park  # noqa: E402
 
@@ -75,13 +78,15 @@ class _Fence(P._Fence):
             self.rearms.append((st, at, info))
             return 0
 
-        return crashguard.run("sentinel-tick", body or boom, state_ref=ref, now=now, alert=self.alert,
+        return crashguard.run("sentinel-tick", body or boom, state_ref=ref, now=now,
+            alert=self.alert,
                               on_crash=rearm if on_crash == "default" else on_crash)
 
 
 class RunTest(_Fence, unittest.TestCase):
     def test_at_ctl_97_crash_leaves_trace_alerts_once_and_rearms_once(self) -> None:
-        """AT-CTL-97：AttributeError ⇒ 痕跡欄位齊全、alert(loud) 恰一次、重排恰一次且時刻＝now＋900、rc 1。"""
+        """AT-CTL-97：AttributeError ⇒ 痕跡欄位齊全、alert(loud) 恰一次、
+        重排恰一次且時刻＝now＋900、rc 1。"""
         ref = _Ref(_state())
         rc = self.crash(ref)
         self.assertEqual(rc, 1)
@@ -110,7 +115,8 @@ class RunTest(_Fence, unittest.TestCase):
         self.assertEqual(len(self.events("sentinel_crashed")), 2)
 
     def test_at_ctl_99_three_crashes_stop_rearm_loop_and_cleared_resets(self) -> None:
-        """AT-CTL-99：連續三次崩潰第三次起不重排、落 crash_loop(rearmed=false)、alert 恰一次、handback 存在；
+        """AT-CTL-99：連續三次崩潰第三次起不重排、落 crash_loop(rearmed=false)、alert 恰一次、
+        handback 存在；
         中間正常 tick ⇒ streak 歸零並落 cleared；第四次崩潰重新計 1。"""
         ref = _Ref(_state())
         self.crash(ref)
@@ -126,7 +132,8 @@ class RunTest(_Fence, unittest.TestCase):
         self.assertIn("--arm-sentinel --session-id " + SID, hand)
         for head in ("## 做了什麼", "## 驗了什麼", "## 卡在哪", "## 下一步指令"):
             self.assertIn(head, hand)
-        self.assertEqual(crashguard.run("sentinel-tick", lambda: 0, state_ref=ref, alert=self.alert), 0)
+        self.assertEqual(crashguard.run("sentinel-tick", lambda: 0, state_ref=ref,
+            alert=self.alert), 0)
         self.assertEqual(ref.state["crash_streak"], 0)
         self.assertEqual(len(self.events("sentinel_crash_cleared")), 1)
         crashguard.run("sentinel-tick", lambda: 0, state_ref=ref, alert=self.alert)
@@ -165,7 +172,8 @@ class RunTest(_Fence, unittest.TestCase):
 
     def test_at_ctl_99_real_alert_writes_note_and_queue_but_never_a_toast(self) -> None:
         """AT-CTL-99④：真 alert（HELM-01）：dead_agents==0 ⇒ note 含例外型別、通知佇列恰新增一筆、
-        桌面通知縫 0 次（不斷言 toast）。佇列需 AUTOSDD_DESKTOP_NOTIFY 已設（queue_notify 的前置）。"""
+        桌面通知縫 0 次（不斷言 toast）。佇列需 AUTOSDD_DESKTOP_NOTIFY 已設（queue_notify
+        的前置）。"""
         import quota_escalation  # noqa: PLC0415
 
         with mock.patch.object(quota_escalation, "notify") as toast:
@@ -180,7 +188,8 @@ class RunTest(_Fence, unittest.TestCase):
     def test_at_ctl_103_normal_return_value_passes_through(self) -> None:
         """AT-CTL-103：正常回傳值原樣回傳（rc 不被吞）；SystemExit 不攔。"""
         for rc in (0, 1, 7):
-            self.assertEqual(crashguard.run("sentinel-tick", lambda rc=rc: rc, alert=self.alert), rc)
+            self.assertEqual(crashguard.run("sentinel-tick", lambda rc=rc: rc, alert=self.alert),
+                rc)
         with self.assertRaises(SystemExit):
             crashguard.run("sentinel-tick", lambda: sys.exit(5), alert=self.alert)
         self.assertEqual(self.traces(), [])
@@ -191,7 +200,8 @@ class ParkFireCrashTest(P.JobTest):
 
     def setUp(self) -> None:
         super().setUp()
-        patch = mock.patch.object(tempfile, "tempdir", str(self.tmp))  # alert 的 note 檔不得落真暫存
+        # alert 的 note 檔不得落真暫存
+        patch = mock.patch.object(tempfile, "tempdir", str(self.tmp))
         patch.start()
         self.addCleanup(patch.stop)
     def test_at_ctl_100_park_fire_crash_settles_failed_and_announces(self) -> None:
@@ -225,7 +235,8 @@ class StaticTest(unittest.TestCase):
     TOOLS = _REPO_ROOT / "tools"
 
     def test_at_ctl_101_every_scheduled_entry_is_listed_in_entries(self) -> None:
-        """AT-CTL-101：三站點（park_cli.job_argv／oldwin_sched.job_argv／planner 註冊腳本）產生的入口旗標
+        """AT-CTL-101：三站點（park_cli.job_argv／oldwin_sched.job_argv／planner 註冊腳本）
+        產生的入口旗標
         都列在 `crashguard.ENTRIES`；人為新增未入表入口 ⇒ 紅（負控）。"""
         listed = {flag for (_file, flag) in crashguard.ENTRIES.values()}
         park_cli = (self.TOOLS / "lib" / "sessionctl" / "park_cli.py").read_text(encoding="utf-8")
@@ -245,10 +256,12 @@ class StaticTest(unittest.TestCase):
             return set(re.findall(r'"(--[a-z]+-tick)"', text))
 
         self.assertEqual(entries_of(planner) - listed, set())
-        self.assertEqual(entries_of(planner + '\n"--ghost-tick"') - listed, {"--ghost-tick"}, "負控")
+        self.assertEqual(entries_of(planner + '\n"--ghost-tick"') - listed, {"--ghost-tick"},
+            "負控")
 
     def test_at_ctl_102_planner_dispatch_goes_through_crashguard_within_loc_budget(self) -> None:
-        """AT-CTL-102：兩個 tick 分派都經 crashguard，且 planner 沒有內聯判準（無 crash_streak 字面）。"""
+        """AT-CTL-102：兩個 tick 分派都經 crashguard，且 planner 沒有內聯判準（無 crash_streak
+        字面）。"""
         text = (self.TOOLS / "session_resume_planner.py").read_text(encoding="utf-8")
         tree = ast.parse(text)
         main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")

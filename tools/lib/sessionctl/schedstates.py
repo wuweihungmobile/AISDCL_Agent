@@ -2,8 +2,8 @@
 
 `schedule_backend.list_jobs` 只回名稱，判不了「還在跑嗎／多久沒跑／上次結果」；舊哨兵殘骸 GC 與 ack 摘要需要
 排程器**自報**的 `State`／`LastRunTime`／`LastTaskResult`／`NextRunTime`。三個後端各掛同一個 mixin（類別宣告
-行改 `(StatesMixin)`、`schedule_backend.py` 零增行：該檔 tier 餘裕只有 2 行，DES §24.10 預先指示「逼近上限就抽到
-同目錄新檔」）。
+行改 `(StatesMixin)`；mixin 薄殼住 `schedule_backend_calendar.py`、惰性委派到本檔——`tools/lib` 頂層扁平模組
+不得在載入時依賴套件匯入路徑，落點依 Root_Layout §2：判斷邏輯在 `sessionctl/`）。
 
 回 `list[dict] | None`（`None`＝量不到，與 `list_jobs` 同義）；每筆 `{name, state, last_run, last_result,
 next_run}`，量不到的欄位為 `None`（空 `NextRunTime` 回 `""`＝排程器自報「沒有下次」）：
@@ -58,10 +58,3 @@ def states_for(backend, prefix: str) -> list[dict] | None:
         return None
     proc = planner.run_powershell(_PS.format(pat=planner._ps_single_quote(prefix)))  # noqa: SLF001
     return None if proc.returncode != 0 else parse_rows(proc.stdout, prefix)
-
-
-class StatesMixin:
-    """三個後端共用的唯讀 `job_states`（判斷全在本檔）。"""
-
-    def job_states(self, prefix: str) -> list[dict] | None:
-        return states_for(self, prefix)

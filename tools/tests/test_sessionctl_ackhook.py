@@ -72,8 +72,10 @@ class AckFenceTestCase(unittest.TestCase):
         self.backend = FakeBackend()
         self.backend.jobs.add(LABEL)
         self.S = {"backend": self.backend}
-        # WP-SW REQ-CTL-53／58：`after_handoff` 現在會在 ack 之後列舉真排程器並 GC 舊哨兵殘骸；本檔測的是
-        # park 撤銷（on_ack），不得讓單元測試碰真排程器（真殘骸 `AutoSDD_Sentinel_*` 是證據，不准拆）。
+        # WP-SW REQ-CTL-53／58：`after_handoff` 現在會在 ack 之後列舉真排程器並 GC 舊哨兵殘骸；
+        # 本檔測的是
+        # park 撤銷（on_ack），不得讓單元測試碰真排程器（真殘骸 `AutoSDD_Sentinel_*` 是證據，
+        # 不准拆）。
         # 摘要／GC 另由 test_sessionctl_ackevents／test_sessionctl_sentgc 以假後端釘住。
         self.summarize = mock.patch.object(ackhook, "summarize_and_gc")
         self.summarize_mock = self.summarize.start()
@@ -201,7 +203,8 @@ class AfterHandoffTest(AckFenceTestCase):
         self.summarize_mock.assert_not_called()
 
     def test_wpsw_a_successful_ack_runs_the_summary_and_gc_after_the_cancel(self) -> None:
-        """WP-SW：ack 成功（rc 0）才摘要＋GC，且在撤 park 之後（摘要④要看得到撤銷事實）；rc 原樣。"""
+        """WP-SW：ack 成功（rc 0）才摘要＋GC，且在撤 park 之後（摘要④要看得到撤銷事實）；rc
+        原樣。"""
         self.arm()
         env = {"CLAUDE_CODE_SESSION_ID": ACKER}
         with mock.patch.object(park_cli, "_backend", return_value=self.backend), \

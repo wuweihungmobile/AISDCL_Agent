@@ -657,7 +657,8 @@ class StatusLineCompatTest(unittest.TestCase):
 
 
 class WpSwUnmeasuredWhyTest(_EarlyFence, unittest.TestCase):
-    """WP-SW REQ-CTL-51（AT-CTL-104～108）：提前探針量不到必帶具名原因（封閉值域）；fail-closed 不變。
+    """WP-SW REQ-CTL-51（AT-CTL-104～108）：提前探針量不到必帶具名原因（封閉值域）；fail-closed
+    不變。
     WHY：痕跡第 1379、1381 行 `unmeasured reading=null` 無原因，根因只能靠推理。"""
 
     def whys(self) -> list:
@@ -685,9 +686,11 @@ class WpSwUnmeasuredWhyTest(_EarlyFence, unittest.TestCase):
         empty = _state(axes=())
         cases = [
             ({"state": empty, "note": {"won": True, "reason": "no-credentials"}}, "no_credential"),
-            ({"state": empty, "note": {"won": True, "reason": "no-credentials-darwin"}}, "no_credential"),
+            ({"state": empty, "note": {"won": True, "reason": "no-credentials-darwin"}},
+                "no_credential"),
             ({"state": empty, "note": {"won": False, "reason": ""}}, "claim_lost"),
-            ({"state": empty, "note": {"won": True, "reason": "http-429-unmeasured"}}, "http_error:429"),
+            ({"state": empty, "note": {"won": True, "reason": "http-429-unmeasured"}},
+                "http_error:429"),
             ({"state": empty, "note": {"won": True, "reason": "http-503"}}, "http_error:503"),
             ({"state": empty, "note": {"won": True, "reason": "meter-unreachable"}}, "timeout"),
             ({"state": empty, "note": {}}, "stale_cache"),
@@ -701,7 +704,8 @@ class WpSwUnmeasuredWhyTest(_EarlyFence, unittest.TestCase):
                 self.assertTrue(not got or parkwhy.valid(got))
         with mock.patch.object(sys, "stderr", None):
             self.assertEqual(parkwhy.classify(exc=AttributeError("write")), "stdio_none")
-        self.assertEqual(parkwhy.classify(exc=AttributeError("write")), "measure_exception:AttributeError")
+        self.assertEqual(parkwhy.classify(exc=AttributeError("write")),
+            "measure_exception:AttributeError")
         # tick 層：no_credential 取自 `pace_state` 補量旁記（MEASURE_NOTE），tick 先清再讀
 
         def fake_pace(_now):
@@ -731,8 +735,10 @@ class WpSwUnmeasuredWhyTest(_EarlyFence, unittest.TestCase):
         self.assertEqual((self.spawned, self.recovered_events()), ([], []))
 
     def test_at_ctl_108_pythonw_root_cause_note(self) -> None:
-        """AT-CTL-108：根因探針的程式面證據——補量旁記 `MEASURE_NOTE` 由 `pace_state` 寫（won／reason），
-        量測路徑在 `STDIO` 縫（stderr 為 None、SSOT 已綁 devnull）下不拋；真 pythonw 重放見 E2E-CTL-25。"""
+        """AT-CTL-108：根因探針的程式面證據——補量旁記 `MEASURE_NOTE` 由 `pace_state`
+        寫（won／reason），
+        量測路徑在 `STDIO` 縫（stderr 為 None、SSOT 已綁 devnull）下不拋；真 pythonw 重放見
+        E2E-CTL-25。"""
         import quota_gate  # noqa: PLC0415
 
         import _stdio_utf8  # noqa: PLC0415
