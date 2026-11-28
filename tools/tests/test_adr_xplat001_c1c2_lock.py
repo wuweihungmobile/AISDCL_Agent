@@ -651,7 +651,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 276,
     "test_dev_platform_provenance.py": 921,
-    "test_dev_start.py": 6798,
+    "test_dev_start.py": 6802,
     "test_dev_start_ps1_lastexitcode.py": 497,
     "test_doc_env_prefix_platform_parity_r60.py": 331,
     "test_doc_loc_baseline_freshness_r60.py": 7189,
@@ -3451,10 +3451,10 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "補進 test_sessionctl_crashguard.py）：加本檔自身漂移。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/06_quality/CrossPlatform_R218_TestHygiene_Evidence.md。"),
-    ("R214", 193745, 193769, +24,  # round-label-ok r218wpsw3
+    ("R214", 193745, 193773, +28,  # round-label-ok r218wpsw3
      "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE "
      "的R214 名冊列承接] 同標籤第八十二列（WP-SW 合入窗口：DEF-200-663／664 修復鎖）："
-     "test_sessionctl_watch.py +8、test_check_hooks_liveness.py +4，加本檔自身漂移 +12。"
+     "watch +8、hooks_liveness +4、dev_start +4（效能護欄改倍數），加本檔自身漂移 +12。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/06_quality/CrossPlatform_R218_TestHygiene_Evidence.md。"),
 )
@@ -3558,7 +3558,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (65257, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (65261, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3658,7 +3658,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "第七十八列（r218flk5）+45＝63480。"
         "第七十九列（r218flk5b）+44＝63524。"
         "第八十列（r218wpsw）+1630＝65154。第八十一列（r218wpsw2）+79＝65233。"
-        "第八十二列（r218wpsw3）+24＝65257。"
+        "第八十二列（r218wpsw3）+28＝65261。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -4529,7 +4529,7 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 _REPIN_LOG_FROZEN_PREFIX_LEN = 429
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "5910fa5ea1c71d2ff04fb86f1d5f57e950e9363d73761b3f2a6f134a5fe97dae")
+    "c1cb0cb4987bb786c49813553654dc1293f37a924cd021f8b50076c45cd6a1bf")
 
 
 def repin_log_history_digest(
@@ -4799,7 +4799,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "956c04480028", "1081e19d80c4", "DEF-200-659"),  # round-label-ok r218flk5bledger
     ("R214", "1081e19d80c4", "42b85c6e9654", "DEF-200-660"),  # round-label-ok r218wpswledger
     ("R214", "42b85c6e9654", "81b6487bd43d", "DEF-200-660"),  # round-label-ok r218wpsw2ledger
-    ("R214", "81b6487bd43d", "5910fa5ea1c7", "DEF-200-663"),  # round-label-ok r218wpsw3ledger
+    ("R214", "81b6487bd43d", "c1cb0cb4987b", "DEF-200-663"),  # round-label-ok r218wpsw3ledger
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

@@ -6717,12 +6717,16 @@ class TestStrayVenvScan(DevStartTestCase):
 
     def test_find_stray_venvs_perf_guard_on_real_repo(self) -> None:
         """效能護欄：對真實 repo 樹跑一次不得暴衝——不斷言結果內容（他機可能真有雜散
-        venv），只釘 CPU 時間上界（非牆鐘：並行全套下牆鐘 4.1 s 會拉到 8.8 s，守的是演算法
-        暴衝而非機器忙不忙；2026-09-15 基準見檔頭 docstring：約 6370 目錄、0.18 秒）。"""
-        start = time.process_time()
+        venv），只釘「相對同樹原生 os.walk 的倍數」：絕對秒數隨 repo 內 agent worktree 數與
+        機器負載漂移（實測 59k 目錄、單跑 3.6 s、並行全套 8.8 s），倍數兩者皆不隨之變
+        （實測 1.7 倍；上界 8 倍＋0.5 s 抓演算法暴衝；2026-09-15 基準：約 6370 目錄、0.18 秒）。"""
+        base_start = time.perf_counter()
+        sum(1 for _ in os.walk(dev_start.ROOT))
+        base = time.perf_counter() - base_start
+        start = time.perf_counter()
         self.stray_venv.find_stray_venvs(dev_start.ROOT)
-        elapsed = time.process_time() - start
-        self.assertLess(elapsed, 5.0, f"find_stray_venvs 對真實 repo 耗時 {elapsed:.2f}s，超過上界")
+        elapsed = time.perf_counter() - start
+        self.assertLess(elapsed, 8 * base + 0.5, f"find_stray_venvs {elapsed:.2f}s/基準{base:.2f}s")
 
     def test_cli_main_returns_zero_on_clean_repo(self) -> None:
         """B2（SD 1d）CLI 入口：乾淨 repo 根 rc=0（`main()` 不接 sys.argv，見其
