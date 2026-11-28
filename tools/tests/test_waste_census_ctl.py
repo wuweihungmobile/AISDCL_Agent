@@ -107,6 +107,59 @@ class MW1Test(unittest.TestCase):
         self.assertNotEqual(got["corrected"]["n"], got["upper_bound"]["n"])
 
 
+# ───────────────────────────── WP-SW REQ-CTL-56（AT-CTL-129～132）：M-W1 只計子代理口徑
+class MW1AgentShellSplitTest(unittest.TestCase):
+    """WHY：w1_detail 第 14～43 行，29 筆 >30 分中 17 筆是「（1 個背景 shell）」；`STOP_VOICE` 同時命中代理與
+    shell，把 shell 也算成無看管子代理。既有鍵逐字不變，另列 agent／shell 子集（agent.n + shell.n == n）。"""
+
+    def evs(self, *voices, pending=False):
+        recs = [_assistant(0)]
+        for n, text in enumerate(voices):
+            recs.append(_stop(1 + 100 * n, text))
+            recs.append(_assistant(51 + 100 * n))
+        if pending:
+            recs += [_rec(300, "system", sub="turn_duration", pending=2), _assistant(360)]
+        return sv.stop_events(recs)
+
+    def test_at_ctl_129_classification_table(self) -> None:
+        cases = [("本回合結束時仍有 2 支背景代理在跑", "agent"),
+                 ("本回合結束時仍有 背景任務在跑：（1 個背景 shell）", "shell"),
+                 ("本回合結束時仍有 1 支背景代理在跑：x；另有 1 個背景 shell", "agent")]
+        for text, want in cases:
+            with self.subTest(text=text):
+                self.assertEqual(self.evs(text)[0]["kind"], want)
+        self.assertEqual(self.evs(pending=True)[0]["kind"], "agent", "turn_duration.pending>0 無出聲 ⇒ agent")
+        self.assertEqual(self.evs(), [], "pending==0 無出聲 ⇒ 無事件")
+
+    def sessions(self):
+        return [{"sid": "s1", "interactive": True, "recs": [
+            _assistant(0), _stop(1, "本回合結束時仍有 2 支背景代理在跑"), _assistant(51),
+            _stop(100, "本回合結束時仍有 背景任務在跑：（1 個背景 shell）"), _assistant(190)]}]
+
+    def test_at_ctl_130_old_keys_unchanged_and_subsets_sum_to_n(self) -> None:
+        got = sv.m_w1(self.sessions())
+        for key in ("n", "n_hook_voiced", "total_hours", "gap_min", "gt_60min", "never_returned"):
+            self.assertIn(key, got)
+        self.assertEqual((got["n"], got["n_hook_voiced"], got["gt_60min"]), (2, 2, 1))
+        self.assertEqual(got["agent"]["n"] + got["shell"]["n"], got["n"])
+        self.assertEqual((got["agent"]["n"], got["shell"]["n"]), (1, 1))
+        for key in ("n", "total_hours", "gt_30min", "gt_60min", "max_min", "never_returned"):
+            self.assertIn(key, got["agent"])
+        self.assertEqual((got["agent"]["gt_30min"], got["shell"]["gt_30min"]), (1, 1))
+
+    def test_at_ctl_131_credential_applies_to_both_subsets_and_gt30_counts_only_gap_over_1800(self) -> None:
+        got = sv.m_w1(self.sessions(), credential=lambda _e: True)
+        self.assertEqual((got["n"], got["agent"]["n"], got["shell"]["n"]), (0, 0, 0))
+        short = [{"sid": "s", "interactive": True,
+                  "recs": [_assistant(0), _stop(1, "本回合結束時仍有 2 支背景代理在跑"), _assistant(31)]}]
+        self.assertEqual(sv.m_w1(short)["agent"]["gt_30min"], 0, "gap=30 分整不算 >1800 秒")
+
+    def test_at_ctl_132_sections_reads_the_agent_subset_for_th2(self) -> None:
+        dual = sc.m_w1_dual(self.sessions())
+        self.assertEqual(dual["th2_basis"], "agent.gt_30min")
+        self.assertEqual(dual["th2_gt_30min"], dual["corrected"]["agent"]["gt_30min"])
+
+
 # ───────────────────────────────────────────────────────── M-C1（AT-CTL-71）
 class MC1Test(unittest.TestCase):
     def rows(self, event: str, n: int, at0: float = 0.0) -> list[dict]:

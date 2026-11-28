@@ -72,6 +72,12 @@ def _pending_turn(r: dict) -> bool:
     return r["type"] == "system" and r.get("sub") == "turn_duration" and (r.get("pending") or 0) > 0
 
 
+def _voice_kind(content: str) -> str:
+    """WP-SW REQ-CTL-56：Stop 出聲含「支背景代理」⇒ `agent`（兩者皆含也算 agent）；只含「個背景 shell」⇒ `shell`。
+    `STOP_VOICE` 同時命中兩者（W1 把背景 shell 也算成無看管，w1_detail 29 筆 >30 分中 17 筆其實是 shell）。"""
+    return "agent" if "支背景代理" in content or "個背景 shell" not in content else "shell"
+
+
 def stop_events(recs: list[dict]) -> list[dict]:
     """回合結束時仍有背景工作的事件：A＝Stop hook 出聲（含「仍有 N 支背景代理」）、B＝harness 自記
     的 turn_duration.pendingBackgroundAgentCount>0（與 A 相距 <10 秒者併入 A）。每筆帶到主控下一筆
@@ -80,11 +86,11 @@ def stop_events(recs: list[dict]) -> list[dict]:
     for i, r in enumerate(recs):
         if r["type"] == "attachment" and r.get("hook_event") == "Stop" \
                 and STOP_VOICE in r.get("content", ""):
-            ev.append({"i": i, "t": r["t"], "src": "A"})
+            ev.append({"i": i, "t": r["t"], "src": "A", "kind": _voice_kind(r.get("content", ""))})
     for i, r in enumerate(recs):
         if _pending_turn(r):
             if not any(abs(e["t"] - r["t"]) < HOOK_MERGE_S for e in ev):
-                ev.append({"i": i, "t": r["t"], "src": "B"})
+                ev.append({"i": i, "t": r["t"], "src": "B", "kind": "agent"})  # pendingBackgroundAgentCount>0＝子代理
     ev.sort(key=lambda e: e["t"])
     for e in ev:
         nxt = next((r for r in recs[e["i"] + 1:] if _is_real_assistant(r)), None)
@@ -105,8 +111,18 @@ def m_w1(sessions: list[dict], credential: NoCredential = _no_credential) -> dic
     return {"n": len(events), "n_hook_voiced": len(voiced),
             "total_hours": round(sum(gaps) / 60, 1), "gap_min": quantiles(gaps),
             "gt_60min": sum(1 for g in gaps if g > 60),
-            "never_returned": sum(1 for e in events if e["gap_s"] is None)}
+            "never_returned": sum(1 for e in events if e["gap_s"] is None),
+            # WP-SW REQ-CTL-56：既有鍵逐字不變；另列只計子代理／只計 shell 的子集（agent.n + shell.n == n）
+            "agent": _subset([e for e in events if e.get("kind", "agent") == "agent"]),
+            "shell": _subset([e for e in events if e.get("kind", "agent") == "shell"])}
 
+
+def _subset(events: list[dict]) -> dict:
+    gaps = [e["gap_s"] / 60 for e in events if e["gap_s"] is not None]
+    return {"n": len(events), "total_hours": round(sum(gaps) / 60, 1),
+            "gt_30min": sum(1 for g in gaps if g > 30), "gt_60min": sum(1 for g in gaps if g > 60),
+            "max_min": round(max(gaps), 1) if gaps else 0.0,
+            "never_returned": sum(1 for e in events if e["gap_s"] is None)}
 
 # ───────────────────────── M-W2／M-F1：冷重寫（依喚醒者分）
 def cold_wakes(recs: list[dict]) -> list[dict]:

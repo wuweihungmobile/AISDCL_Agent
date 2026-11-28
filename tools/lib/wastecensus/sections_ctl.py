@@ -53,10 +53,13 @@ def m_w1_dual(sessions: list[dict], extra: dict | None = None) -> dict:
                    if e["gap_s"] is not None and e["gap_s"] > 1800
                    and not cred(dict(e, sid=s["sid"])))
 
-    return {"corrected": dict(sv.m_w1(sessions, covered), gt_30min=over_30(covered)),
+    corrected = dict(sv.m_w1(sessions, covered), gt_30min=over_30(covered))
+    return {"corrected": corrected,
             "upper_bound": dict(sv.m_w1(sessions), label=UPPER_BOUND,
                                 gt_30min=over_30(lambda _e: False)),
-            "credential_spans": dict(kinds)}
+            "credential_spans": dict(kinds),
+            # WP-SW REQ-CTL-56：TH-2 升級觸發改以「只計子代理」口徑判讀（shell 事件不是無看管的子代理）
+            "th2_basis": "agent.gt_30min", "th2_gt_30min": corrected["agent"]["gt_30min"]}
 
 
 # ───────────────────────────────────────────────────────── M-C1（A4 回歸率）
