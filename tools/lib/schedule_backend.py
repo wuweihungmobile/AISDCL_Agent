@@ -147,6 +147,7 @@ from pathlib import Path
 # 理由是本檔 `count_loc` 落地當回合為 395/400（餘裕 5），而那正是 ROOT-TOOLS
 # `override_reason` 指定的動作（「破線後不是調高預算，而是拆職責／抽共用模組」）。
 import endurance_env
+from schedule_states import StatesMixin  # WP-SW REQ-CTL-58：三後端共用的唯讀 job_states
 import unattended_authz  # DEF-200-575：`DEFER_WAIT_CAP_SECONDS` 與 planner 牆鐘同源（無第二個數字）
 from schedule_backend_calendar import (
     _append_trace,
@@ -297,7 +298,7 @@ def _planner():
 # 🔴 本類別**一行新知識都沒有**：四個方法全部把工作交回 planner 既有的實作，body 與
 # 搬家前逐字相同。這是刻意的——本包的驗收條件之一是「Windows 那一側行為零改變」，而
 # 「順手改一下」正是那種零改變宣稱最常破掉的地方。
-class SchtasksBackend:
+class SchtasksBackend(StatesMixin):
     """Windows 排程載具。憑證＝`NextRunTime` 這個**值**（rc 在這一側沒有鑑別力）。"""
 
     name = "schtasks"
@@ -387,7 +388,7 @@ class SchtasksBackend:
 
 
 # ─────────────────────────────────────────────────────────── macOS：launchd
-class LaunchdBackend:
+class LaunchdBackend(StatesMixin):
     """macOS 排程載具。憑證＝rc(113/0) ＋ descriptor 回讀 ＋ plist 落地路徑（見檔頭）。"""
 
     name = "launchd"
@@ -849,7 +850,7 @@ def _relaunch_cmds(dom: str, task_name: str, plist: str) -> str:
 
 
 # ─────────────────────────────────────────────────── 其餘平台：明說沒有載具
-class NoCarrierBackend:
+class NoCarrierBackend(StatesMixin):
     """Linux 等：**明說做不到**，不假裝。武裝一律 rc=1，且訊息說得出替代方案。"""
 
     name = "none"

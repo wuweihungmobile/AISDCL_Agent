@@ -67,8 +67,26 @@ def wip_tags(runner, repo: Path) -> tuple[list[str] | None, str]:
             why)
 
 
-def _unknown(why: str) -> str:
-    return f"量不到：{why}"
+def owner_tags(runner, repo: Path, sid: str, head: str | None) -> tuple[list[str] | None, str]:
+    """本 owner session 的保全標籤（WP-SW REQ-CTL-54）：`<sid 前 8 碼>-*` 中以 `-halfwork` 或
+    `-wip-preserved` 結尾者，附目標 SHA 前 12 碼；目標不是 HEAD 者標「不在 HEAD」（`git stash create` 的 commit
+    不在 HEAD，只活在手寫層時新主控不知道半成品在哪）。`git tag` 失敗 ⇒ `(None, 原因)`。"""
+    if len(sid) < 8:
+        return [], ""
+    names, why = git_lines(runner, repo, "tag", "--list", f"{sid[:8]}-*")
+    if names is None:
+        return None, why
+    rows = []
+    for name in (n.strip() for n in names):
+        if not name.endswith(("-halfwork", WIP_SUFFIX)):
+            continue
+        sha, _ = git_lines(runner, repo, "rev-parse", f"{name}^{{commit}}")
+        full = sha[0] if sha else ""
+        rows.append(f"{name} → {full[:12] or '量不到 SHA'}" + ("" if full and full == head else "（不在 HEAD）"))
+    return rows, ""
+
+
+def _unknown(why: str) -> str:    return f"量不到：{why}"
 
 
 def _quote(text: str) -> str:
@@ -76,7 +94,7 @@ def _quote(text: str) -> str:
     return "\n".join(f"> {ln}" for ln in text.splitlines()) or ">"
 
 
-def _git_sections(runner, repo: Path) -> tuple[str, str, str]:
+def _git_sections(runner, repo: Path, sid: str = "") -> tuple[str, str, str]:
     branch, why_b = git_lines(runner, repo, "rev-parse", "--abbrev-ref", "HEAD")
     head, why_h = git_lines(runner, repo, "rev-parse", "HEAD")
     sync, why_s = git_lines(runner, repo, "rev-list", "--left-right", "--count", "@{u}...HEAD")
@@ -97,8 +115,12 @@ def _git_sections(runner, repo: Path) -> tuple[str, str, str]:
     tree += "\n- worktree（`git worktree list`）：" + (
         _unknown(why_wt) if trees is None else "\n" + "\n".join(f"  - {t}" for t in trees))
     tags, why_w = wip_tags(runner, repo)
+    own, why_o = owner_tags(runner, repo, sid, head[0] if head else None)
     tag_text = (_unknown(why_w) if tags is None
                 else "\n".join(f"- {t}" for t in tags) or "（HEAD 上無）")
+    extra = [f"- 本 owner 保全標籤：{_unknown(why_o)}"] if own is None else [
+        f"- 本 owner 保全標籤：{t}" for t in own]
+    tag_text = "\n".join([tag_text, *extra])
     return "\n".join(parts), tree, tag_text
 
 
@@ -177,7 +199,7 @@ def build_mechanical(session_id: str, transcript: Path | None, *, repo: Path, no
     第 13 欄的交接包目錄＝`chain_base`，缺則取 `package` 所在目錄（W4）；`oi_fn`＝OI 摘要注入縫。"""
     runner = runner or default_runner
     plat = platform_name or sys.platform
-    branch_head, tree, tags = _git_sections(runner, repo)
+    branch_head, tree, tags = _git_sections(runner, repo, session_id)
     humans = transcript_activity.human_prompts(transcript)
     tail = transcript_activity.assistant_tail(transcript)
     agents, why_roster = None, ""
