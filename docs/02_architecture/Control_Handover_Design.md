@@ -680,3 +680,171 @@ TCS-SessionCtl AT-SC-34「11 欄」→ 13 欄（逐欄斷言）、`handoff_build
 5. **提前到點改以子行程觸發（W6，2026-11-24；取代 §8.3 步驟 4、§11 I-10、TCS AT-CTL-61 的「行程內 `_cmd_fire(early=True)`」寫法）**：`session_resume_planner.py` 對 `--sentinel-tick` 無條件設 `AUTOSDD_UNATTENDED=1`，而 `park_fire`、`handoff.spawn`、`spawn_resume` 在該旗標下一律拒絕開窗；照原寫法行程內呼叫，真行程 smoke 實證 spawn 0 次。實作改為 `parkearly.fire_early` 以**與 park 排程相同的 argv** 起乾淨環境的 `park --fire` 子行程（仍走 Q3 同一條 fire 路，不新增 spawn 站點）；early 與「強制視為快取已冷」改由環境變數 `AUTOSDD_PARK_EARLY`／`AUTOSDD_PARK_FORCE_COLD` 傳遞（常數住 `park.py`），不用 opts。`_precheck` 不再以 `UNATTENDED` 擋（哨兵 tick 內恆為真）。**不採**「放寬 planner 對哨兵 tick 強制 `UNATTENDED`」的替代案：那是守衛面，且無暴露證據（R197 守衛面准入）。AT-CTL-61 的判準語意（early 僅停用 §7.3 分支 A 的重排、`early=False` 黃金序列逐字不變）不變，只是觸發載具由函式參數改為子行程環境變數；機械物＝`tools/tests/test_sessionctl_parkprobe.py`＋真行程 smoke（反例 3＋正例 1，`SMOKE_VERDICT=pass n=25`）。
 6. **哨兵任務書檔名要去 `PLAN_PREFIX` 才是 park 標記的 sid 鍵**：任務書檔名＝`autosdd_resume_plan_<sid>.md`、park 標記以裸 sid 為鍵。W6 探針與既有 QW §7.6 的 `on_patrol(plan.stem, …)` 都改為去前綴後的裸 sid——後者原本在真行程永遠讀不到標記（Q3 單元測試以裸 sid 當檔名，未能抓到）；缺陷登記 DEF-200-646。
 7. **W5 實作對照（2026-11-25；主控裁示：以下偏離全數採納，原條文不改）**：①新增葉模組 `switchfacts.py`（事實讀取）——不拆會成 `handoff→switchplan→seal→handoff`、`watch→controlfacts→supervise→watch` 兩個 import 環；Root_Layout §3 模組數 +1 於 W8 收尾同步。②`handoff.advise_once` 呼叫 `switchplan.advise_hook`（由命中文字解析 reason／ctx／K）再轉 `on_advise`，`on_advise` 簽名同 §15。③`switch_due` 不經 `watch.decide`／ORDER，走 `watch_wake.due_merge`＋`switchplan.merge`（守 `watch.py` 行數牆）；它只勝過「無事」與保溫族，其餘判決不變。④`park.fire_route` 增 `prefer_fresh` 參數（AT-CTL-44：見 R2 的 `prefer_fresh` 即走 FRESH），`park_cli` 淨 +1 行。⑤`control_cold_wake_exempt` 只在「封存失效而放行」落痕跡，「監督 shell 放行」不落（避免每次 Stop 洗版）。⑥量測口徑：M-C1 歷史封存時刻取逐字稿內 `handoff --finalize` 呼叫時刻（`.sealed` 會被覆寫）；M-W1 歷史憑證只取「看管中」出聲與現存心跳檔；重放的近似項印在 `--replay-plan` 輸出末行。⑦真 `claude -p`（E2E-CTL-14）、換帳號替身與 `cases.json` 登記屬 W7；W5 以 `switch-plan` 對真逐字稿截斷複本的真行程為備援證據。主控親驗（主樹 998b8804）：ruff 0、LOC rc 0、sessionctl* 1020、waste* 123、context_budget_guard 871、c1c2 187、platform_neutral 177、doc_loc_r60 286、defect_crossref 276 皆 OK。
+---
+
+## 24. WP-SW 增修：換帳號接手全自動化與子代理掌控訊息（r4；2026-11-28；只增不改，§0～§23 逐字不變）
+
+> 🔒 本節是凍結稿**之後**的增修，上游＝PRD 修訂表 v2.1.30、§16.6 2026-11-28 列；驗收＝`TCS-Control-20261122.md` §8（REQ-CTL-49～59）。角色＝SD（WP-SW）。輸入＝Architect＋SA 報告 ARCH-Q34（sid 4290bf58 scratchpad `q34_arch_report.md`）與主控裁示八條。本節**不改** §0～§23 任一行；§13 理論洞清單 TH-1～TH-8 不變，新增 TH-A～D 的處置見 §24.11。
+> 與其他工作包**不重疊**（鎖持有面，鐵律七）：WP-FENCE＝柵欄與 `unacked_pkg` 類（`sid-1_20261125T223155Z.md` 那件）、WP-HOOK＝G9 假推回（`.claude/hooks/**`）、CLOSE＝缺陷帳本結案；本節**零改動 `.claude/**`、零改動缺陷帳本、零動排程**，持有面全在 `tools/`：`_stdio_utf8.py`、`session_resume_planner.py`（只增呼叫行）、`tools/lib/sessionctl/**`、`tools/lib/wastecensus/supervision.py`、`tools/probe/sentinel_decide_replay.py`。與 WP-HOOK 不同檔、可並行（REQ-CTL-55 只改 `agentbrief.py`／`cutvoice.py` 的文字）。
+
+### 24.0 決策總表
+
+| 決策 | 問題（證據） | 決定 | 判準／實作住哪 | REQ |
+|---|---|---|---|---|
+| D-SW-1 | G-1：pythonw `sys.stderr is None`，`acctswitch.py:229` 的 `.write` 拋 `AttributeError`，哨兵 tick 無聲死亡（`LastTaskResult=1`、`NextRunTime` 空白） | 消除成因：stdio SSOT 對 `None` 串流改綁 `os.devnull`；**不改** `acctswitch.py` 一行（那是壓制） | `tools/_stdio_utf8.py::reconfigure_stdio_utf8`（SSOT，被 hook 與全部入口匯入） | 49 |
+| D-SW-2 | G-1 另一面：本次死因只能靠實驗反推，因為崩潰沒有任何痕跡與告警（與 R-4.5.6-4（b）相反） | 排程入口一律過 `crashguard.run`：未捕捉例外 ⇒ `sentinel_crashed`／`park_job_crashed` 痕跡＋`alert(loud=True)`＋仍重排；連續 3 次停止重排 | 新葉 `tools/lib/sessionctl/crashguard.py`；planner 只增分派呼叫 | 50 |
+| D-SW-3 | TH-B：提前探針 2/2 `unmeasured`、`reading=null` 無原因 | 先寫「行為」：量得到，量不到必須具名 `why`（封閉值域）；根因 Developer 先驗證是否與 D-SW-1 同源 | `parkearly.py`／`parkprobe.py` 的痕跡欄位；根因結果回填 §24.3 | 51 |
+| D-SW-4 | TH-A（升格）：到點／提前到點不看「同專案另一 session 在動」 | 新葉 `othersession.active` 判準重用 `transcript_activity.newest_conversation_at`；提前＝不提前、到點＝延後（用盡終局 skip） | `tools/lib/sessionctl/othersession.py`；呼叫點 `park_fire.run`、`parkearly._precheck` | 52 |
+| D-SW-5 | G-5：接手時沒有「封存之後發生了什麼」 | `handoff --ack` 成功後印摘要（唯讀、零 token） | 新葉 `tools/lib/sessionctl/ackevents.py`；掛點 `ackhook.after_handoff` | 53 |
+| D-SW-6 | G-5 另半：機械層第 4 欄不列 `*-halfwork` | 第 4 欄加列本 owner 的保全標籤（標題不改）；第 3 欄 worktree 現查已落地，只鎖住 | `handoff_build.py::_git_sections`／`wip_tags` | 54 |
+| D-SW-7 | G-2：名冊訊息把三類狀態併成一句「由主控決定」 | 三段式文字；`stopped` 看主控層是否提到該代理 | `agentbrief.render_cut`＋`cutvoice` 三處傳入包 | 55 |
+| D-SW-8 | G-4：M-W1 把背景 shell 算成無看管 | `stop_events` 加 `kind`，`m_w1` 加 `agent`／`shell` 子集 | `tools/lib/wastecensus/supervision.py` | 56 |
+| D-SW-9 | G-3：哨兵重放不帶 `park=`／`stale=`／帳號比對，主控被誤導 | 加第四列「真 tick 同輸入」，唯讀、不呼叫 `reconcile` | `tools/probe/sentinel_decide_replay.py` | 57 |
+| D-SW-10 | 舊哨兵殘骸（無觸發時刻）無人 GC | ack 時掛 `sentgc.sweep`：只拆 `NextRunTime` 空且非本 sid 的殘骸；`status` 維持唯讀 | 新葉 `tools/lib/sessionctl/sentgc.py`；掛點 `ackhook.after_handoff` | 58 |
+
+### 24.1 D-SW-1：為什麼是 devnull、為什麼是 SSOT 而不是 `acctswitch.py:229`
+
+- **成因鏈**（程式座標，現查）：`_sentinel_tick`（`session_resume_planner.py:1428`）→ `ruling_io.sentinel_halt`（`:1488`）→ `compose` → `acctswitch.reconcile`（`:223` 寫完 `account_switch` 痕跡後 `:229` 直接 `sys.stderr.write`）。排程器以 pythonw 起行程且不繼承 std handle ⇒ `sys.stderr is None`；`_stdio_utf8.py:72～73` 對 `None` 只 `continue`。⇒ `AttributeError` 未捕捉。
+- **為什麼不是改 `:229`**：同一族站點不只一處（`quota_gate.py` 的 `sys.stderr.write`：693、853、855、882、1081、1105、1125、1146 行；`pace_contract.py`、`quota_availability.py`、`apply_lock.py` 另有同形站點，是否落在排程入口的 import 閉包內由 AT-CTL-96 的 AST 掃描判定，SD 未逐一驗證）。改一行＝壓制；SSOT 一處正解＝消除成因（根 CLAUDE.md〈修復不留後遺症〉順序：消除成因＞型別／結構層正解＞有文件依據的決策＞壓制）。
+- **為什麼 devnull、不另開日誌檔**（主控定）：①`print(file=None)` 本來就是 no-op，語意只改變「直接 `.write` 會炸」；②日誌檔需要路徑、輪替、清理、編碼與權限決策，新增一整塊狀態面；③診斷由 D-SW-2 的結構化痕跡承擔（比散文 stderr 好稽核）。**取捨**：stderr 內容在 pythonw 下仍看不到——這是現況（`se_gate.py:44` 的註解早已寫明「pythonw：stderr None 靜默」），本決策不倒退、也不假裝解決。
+- **射程**：只有「沒有繼承 std handle」的行程（pythonw 排程入口、`DETACHED_PROCESS` 子行程）。hook 與前景指令都有管線，行為不變；`io.StringIO` 等測試替身（無 `.reconfigure`／`.buffer`）仍 no-op。
+- **入口前提**：排程入口在進入點呼叫 `reconfigure_stdio_utf8`（planner、`tools/sessionctl.py` 現查已匯入；Developer 以 REQ-CTL-50 入口清單逐一確認）。
+- **持有面**：`tools/_stdio_utf8.py`（被 `.claude/hooks/**` 匯入，但本節不改 hook；`tools/tests/test_stdio_utf8.py` 既有斷言全綠＝不改行為的證據）。
+
+### 24.2 D-SW-2：排程入口崩潰護欄（`crashguard`）
+
+- **設計**：`crashguard.run(entry, body, *, on_crash, state_ref)`＝`try: return body() except Exception as exc: …`。**純轉接＋三件事**（落痕跡、`quota_escalation.alert(loud=True)`、呼叫注入的 `on_crash` 重排），判準與常數全在本葉；planner 分派處只寫 `return crashguard.run("sentinel-tick", lambda: _sentinel_tick(args), on_crash=…)`（單行，每入口 ≤2 行，總增量 ≤6 行）。
+- **痕跡欄位**（稽核分形，承 R-4.5.6-4（c））：`sentinel_crashed`／`park_job_crashed`／`sentinel_crash_loop` 三個互異事件名；`exc_type`、`file`（相對 repo）、`line`、`tb`（≤`CRASH_TB_MAX_CHARS`）、`sid`、`task`、`entry`、`streak`。
+- **告警管道**：沿用既有 `quota_escalation.alert(reason, state, loud=True, plan=…)`；不新增通知原語、不新增 Windows toast 路徑。注意該函式既有文字標題是「需要你動手」（`quota_escalation.py` 的 `alert` 內 note 內容）；崩潰告警的 `reason` 字串自帶「哨兵崩潰（<例外型別> @ <檔>:<行>）、已自動重排」，由 Developer 確認此標題不致誤導（若會誤導，只加 `reason` 前綴，不改 `alert` 簽名；那是 §13 界外的文字面，不為此擴大守衛）。
+- **為什麼連續 3 次停止重排**：沒有上限的「崩潰→重排」＝每 15 分鐘一次無聲空轉直到天荒地老（與根 CLAUDE.md 鐵律六同族：等待機制自己壞掉）；3 次是「瞬時環境問題 vs 結構性崩潰」的最小分辨量，常數 `CRASH_STREAK_MAX` 住 `crashguard.py`、只准不變或下修。streak 寫進狀態塊（既有 `_write_relay_best_effort` 路，不新增檔案）。
+- **`park --fire` 崩潰**：標記走既有失敗鏈（`park_chain` 結算 `failed`＋`park_announce.announce`），不新增第二條失敗出口（QW §7.5 單一失敗鏈）。`refused`（L1）永不進本路。
+- **rc 語意**：重排成功後仍回 1，讓排程器 `LastTaskResult` 如實為非 0，**同時 `NextRunTime` 非空**——兩者合讀＝「崩潰過但仍活著」，與 G-1 的「`LastTaskResult=1` 且 `NextRunTime` 空白＝死了」可區分；這是 ARCH-Q34 G-1 證據 1 的反面。
+- **入口清單 `crashguard.ENTRIES`**：`session_resume_planner.py` 的 `--sentinel-tick`、`--resume-tick`（`_resume_tick` 內部已有 R97 的 try/except，保留；`crashguard` 是外層兜底）、`tools/sessionctl.py park --fire`、`oldwin_sched.job_argv` 的到點 job。Developer 以 `park_cli.job_argv`／`oldwin_sched.job_argv`／planner 註冊腳本三站點普查；新增排程入口而未入表＝AT-CTL-101 紅。
+- **持有面**：`tools/lib/sessionctl/crashguard.py`（新）、`tools/session_resume_planner.py`（守衛面，只增行）、`tools/sessionctl.py`（薄殼，`park --fire` 分派處增 1 行）。
+
+### 24.3 D-SW-3：TH-B 行為規格與「待實作驗證」欄
+
+- **規格只寫行為**（TCS REQ-CTL-51）：armed park 期間，排程器（pythonw）起的探針必須取得新鮮讀數；量不到必須落具名原因；換帳號且判決 `CONTINUE` ⇒ 兩個巡邏間隔內提前接手。**根因由 Developer 查，不預設**。
+- **證據**（ARCH-Q34 §6 TH-B）：`autosdd_session_switch.jsonl` 第 1379 行（09:51:52）、第 1381 行（10:06:52）`park_early_probe reason=unmeasured stale=true reading=null`；`quota_burn.jsonl` 在 11-26 晚至 11-28 10:12 之間無讀數；M-C3「探針 2 次、unmeasured 2（1.0）」。
+- **待實作驗證（疑點，皆唯讀可驗；SD 只唯讀看了呼叫鏈，未實跑）**：
+  1. **與 G-1 同源？**量測路徑 `parkearly.tick`（`:90`）→ `park_reset.ruling_for`（`park_reset.py:33`）→ `gather` → `quota_gate.pace_state`（`quota_gate.py:896`）→ `quota_meter.measure_detail`（`quota_meter.py:751`）。若鏈內任一處在 pythonw 下 `sys.stderr.write`（`quota_gate.py` 有多處），例外會被 `parkearly.tick` 的 `except Exception`（`:117`）吞成 `park_early_error`（落 `EV_ERROR`）或被 `settled_quota` 判量不到。**驗法**：以 `sw_pythonw` 載具真跑 `pace_state`，修 D-SW-1 前後各一次，取例外型別（TCS AT-CTL-108）。痕跡第 1379／1381 行是 `park_early_probe`（不是 `park_early_error`），所以它更像「走完了但量不到」而非「例外被吞」——此推理支持疑點 2～4 優先，但**不排除** `measure_detail` 內部以 `(None, reason)` 吞例外。
+  2. **補量名額**：`claim_refresh_slot()`（`quota_gate.py:591`）每個 TTL 只放行一個補量者；哨兵 tick 若永遠搶輸（keepwarm、hook 先搶）而 `await_winner`（`quota_gate.py:617～619`）在 `QUOTA_SYNC_TIMEOUT_SECONDS` 內等不到 ⇒ 結構性 `unmeasured`。**驗法**：讀 `refresh_stamp_path()` 戳記時刻與哨兵 tick 時刻的相對位置（痕跡 09:51:52 與 10:06:52 對照）。
+  3. **pythonw 環境缺憑證面**：排程器起的行程環境缺 `USERPROFILE`／`HOME`／`CLAUDE_CONFIG_DIR` ⇒ `measure_detail` 找不到憑證檔 ⇒ `no_credential`。**驗法**：`sw_pythonw` 載具內印 `os.environ` 子集。
+  4. **舊帳號憑證已失效且新帳號憑證尚未落入快取**：逐字稿 10:08～10:11 另一實例 `/login`（5387233b）；`quota_burn.jsonl` 首筆 `account=34cd3507237f` 約 10:12——即 10:06:52 的探針發生時帳號尚未換，讀數量不到可能是舊憑證 401。
+- **回填格**：Developer 完成驗證後在此回填「成立的疑點編號、證據（輸出）、修法 commit」。不論哪個成立，皆須有一條紅綠自證的修法與 AT（TCS AT-CTL-104～108）。
+- **不放寬**：`parkprobe.evaluate` 的 fail-closed（量不到不判恢復）、判決非 `CONTINUE` 不提前，逐字不變。
+
+### 24.4 D-SW-4：TH-A 升格（雙駕駛防護）
+
+- **升格理由**（寫進規格 WHY；§13 TH-A 的升級觸發條件已成立）：①問題 4 是掌舵者明令設計的演算法，前置情境在真實逐字稿已發生 **2 次**（4290bf58 開於 10:11:26、ack 10:13:43，2.3 分；814608d1 開於 11-22 15:14:14、ack 15:16:41，2.5 分；ARCH-Q34 TH-A）；②G-1／TH-B 修好後提前探針才會真的 fire，**發生率隨之上升**（修了 TH-B 反而放大 TH-A）；③掌舵者真機回報（暴露證據 (a)）：交接包 `C:\Users\wuwei\.autosdd\handoff\65389f03-4a29-43f2-8228-61cb3c884a4e_20261121T095211Z.prompts.md` **第 13 行**：「為何還有另一個視窗, 問同樣的問題? 是否沒有執行自動關閉機制? 這也會導致混淆或多頭馬車!」。三者同時成立，依〈守衛面准入〉暴露三取一，**不是理論洞**。
+- **判準**：`othersession.active(project_dir, own_sid, now)`：`project_dir` 直下 `*.jsonl`（`<sid>/subagents/` 不是另一個 session）、`stem != own_sid`、`newest_conversation_at(session_transcripts(path))` 在 `now − N` 之後。`N＝SENTINEL_INTERVAL_SECONDS`（現值 900 秒；現查 `tools/session_resume_planner.py:251`）。**重用**：對話記錄尺住 `tools/lib/transcript_activity.py`（`newest_conversation_at`，`:110`）——不開第二家、不看 mtime（DEF-200-560：harness `away_summary`／每小時 `cost-state` 會讓 mtime 一直在動）。掃描骨架與 `sentinel_lifecycle_arm.superseding_since` 的目錄走法一致，但**門檻不同**：後者要「24 回合且 600 秒」才算接手（拆哨兵、不可逆），本判準要的是「此刻有人在動」（只決定延後／不提前，可逆），故不套用 `MIN_TURNS`／`MIN_SPAN`。
+- **處置分兩處**：
+  1. `parkearly._precheck` 回 `other_session` ⇒ 不提前（探針下一巡邏照常；無狀態改動）。
+  2. `park_fire.run`（排程到點的 job 本體）：在 `live_driver`（同 sid）之後、`handoff._duplicate_refusals` 之前加：有其他 session 在動 ⇒ **延後**（重排原語＝`oldwin_park._rearm`＋`park_yield.rearm_fields`，同 `park_yield` 的 rearm 路徑；計數欄 `other_session_defers` 住標記，不與 `park_yield.RESCHEDULES_KEY` 共用，避免兩種延後互相吃額度），至多 `OTHER_SESSION_MAX_DEFERS`（3）次，**用盡終局 `skip("other_session")`**。
+- **為什麼延後而非終局 skip**（偏離主控裁示字面「skip（理由 `other_session`）並落痕跡」；已列報告「偏離」）：終局 skip 走 `finish(0, "skipped", reason)`，標記結算成 `skipped`，交接包再無人接手。但同專案常有與本交棒無關的 session（SelfImproving 每日無人窗口、其他視窗）在到點瞬間有對話記錄——直接終局 skip 會把全自動接手整批吞掉，與本節目標（全自動）相反。延後 3 次（≈45 分鐘）仍有人在動時，才判定「真的有人在接手」而終局 skip；`other_session` 這個理由字串與痕跡 `park_other_session` 仍照裁示落下。若主控認為應直接終局，改 `OTHER_SESSION_MAX_DEFERS＝0` 即可（一個常數，AT-CTL-112 以參數化涵蓋）。
+- **fail 方向**：目錄讀不動／逐字稿讀不到 ⇒ 回「沒人在動」（維持現行行為；不替系統增加無證據的攔阻）。
+- **與既有防線的關係**：`.ack` 已存在 ⇒ `skip("acked")`（雙駕駛防線）不變；`live_driver`（同 sid）不變；本判準補的是「**別的 sid**」。
+- **不新增 spawn 站點、不動 `.claude/**`、不新增讀額度端點**（PRD §15.5 紅線 1 不受影響）。
+- **持有面**：`tools/lib/sessionctl/othersession.py`（新）、`park_fire.py`、`parkearly.py`（W-SW2 與 W-SW3 同持有面 `parkearly.py`，串行）。
+
+### 24.5 D-SW-5／D-SW-6／D-SW-10：ack 摘要、機械層第 3／4 欄、舊哨兵 GC
+
+- **ack 摘要**（`ackevents.summary`）：資料源＝`autosdd_session_switch.jsonl`（`switch.trace` 寫的那份，路徑取自既有 `trace_dir`）、`<包 stem>.sealed` 時刻、排程器自報（Windows：`Get-ScheduledTask … | Get-ScheduledTaskInfo` 的 `LastTaskResult`／`NextRunTime`；macOS：`launchctl` 的 rc，照實劃界：憑證是 rc 不是時間值）、`holder`／行程表（驗身分）。唯讀、零 token、預算 2 秒。掛點＝`ackhook.after_handoff`（它本來就在 `tools/sessionctl.py` 入口層，`handoff.py` 不 import，守行數牆 §21）。ARCH-Q34 G-5 證據：406454ea 包封存於 11-26 23:47:36 後發生 keepwarm 主載具被殺（逐字稿第 10419 行）、帳號切換、舊哨兵崩潰（G-1），新主控得手翻痕跡。
+- **機械層第 3 欄**：**現查已落地**——`handoff_build.py:96～98` 已含 `git worktree list`（DES §9.3 ⑦ 的實作；TCS AT-CTL-30 已斷言「欄 3 含 worktree 行」）。ARCH-Q34 §5 寫「未查」是當時未讀該檔；本節只重申並以 AT-CTL-120 鎖住，不重做。
+- **機械層第 4 欄**：現行 `wip_tags`（`handoff_build.py:63～67`）只列 `git tag --points-at HEAD` 且以 `-wip-preserved` 結尾者；`406454ea-20261126-flk5-halfwork` 指向 `git stash create` 的 commit（`dc65a475`，不在 HEAD）所以列不到，只活在手寫層（包第 284 行）。新規則：另列 `git tag --list "<sid 前 8 碼>-*"` 中以 `-halfwork` 或 `-wip-preserved` 結尾者，附目標 SHA 前 12 碼與「不在 HEAD」。**標題 `wip-preserved 標籤` 不改**（`MECH_HEADINGS` 順序與字面是 AT-SC-34／AT-CTL-30 的鎖，改標題＝放寬／破壞既有鎖）。
+- **舊哨兵殘骸 GC（誰、何時）**：由 `handoff --ack` 成功後的 `ackhook.after_handoff` 呼叫 `sentgc.sweep`；**不在 `status` 顯示時 GC**（`status` 維持唯讀，TCS AT-CTL-139）。判準三合取（`NextRunTime` 空、sid≠acker、`LastTaskResult≠0` 或任務書 `state∈{abandoned,disarmed,superseded}`）；`NextRunTime` 非空一律不動；至多拆 5 個；只經**既有**移除站點（planner 的 `_schtasks_remove` 同一條路，不新增排程原語、不新增 SITES 登記）。WHY：ack 是「新 session 已接手、舊 session 的舊物該退場」的唯一機器可驗事件；`NextRunTime` 空白＝排程器自報「不會再跑」，拆它不可能影響任何喚醒。**限制（誠實劃界）**：殘骸要等「下一次任何 ack」才被清；沒有 ack 就沒有 GC（`status` 仍會顯示「過期哨兵」讓人看見）。406454ea 的現存殘骸（`AutoSDD_Sentinel_406454ea-91fc-4481-9c11-b28ed7d9e95f`）會在下次 ack 時被清；排程動作不在本棒範圍（SD 不動排程）。
+- **持有面**：`ackhook.py`（掛點＋呼叫）、新葉 `ackevents.py`／`sentgc.py`、`handoff_build.py`。
+
+### 24.6 D-SW-7：名冊訊息三段式（G-2）
+
+- 現狀（ARCH-Q34 G-2 證據）：`agentbrief.py:294～300` 的 `render_cut` 把 `cut`（額度切斷）／`stopped`（主控 TaskStop）／`residue`（擁有者已不在）併成一句「被切斷／停止／未收尾（不自動重派，由主控決定）」；`_ACTIONS["stopped"]`（`:42～43`）一律「重派」；`cutvoice.stop_text`（`cutvoice.py:48～75`）不讀交接包。406454ea 逐字稿第 10412 行（2026-11-26T23:48:27）即此文字，而同稿第 10306 行（23:46:36）TaskStop、第 10308 行 `git stash create`、包第 284／288／308 行已記處置——掌舵者據此重提問題 3。
+- 設計（TCS REQ-CTL-55）：三段標題；`stopped` 列看「本 sid **最新已封存**包的**主控層**（六節）」是否提到該代理 id 前 8 碼或描述首詞元：提到 ⇒「主控已停止並已記入交接包 <路徑>」，否則「主控已停止、交接包未記處置 ⇒ 下一棒依第 12 欄重派」。**只看主控層**：機械層第 12 欄本來就列所有代理，把它算進去＝恆為「已記入」，判準失去鑑別力（TCS MU-CTL-62）。406454ea 的包主控層只寫「FLK5」（第 284／288 行）、id 只在第 12 欄（第 203／207 行）——所以首詞元規則是必要的，否則這個真實案例仍會落「未記處置」。
+- **不加推回**（AT-CTL-127）：`stop_message` 的 `decision` 不變、閂鎖不變；只改 `systemMessage` 文字。第 12 欄 `render_rows`／`_block` 逐字不變（那是交接包本身，「建議處置：重派」在該處是正確的）。E2E-CTL-12 的「四處清單同文」比對範圍收斂為「列的 id／輸出落點／重派指標」，標題行與 `stopped` 處置行不在比對內（TCS §8 檔頭已載）。
+- **持有面**：`agentbrief.py`（`render_cut` 簽名加 `pkg_text`／`pkg_path`，預設 `None` ⇒ 退化為「未記處置」句）、`cutvoice.py`（三處呼叫點找包並傳入）。**不動** `roster.py`（貼天花板）、`sessionctl_guard.py`（`.claude/hooks/**`）。
+
+### 24.7 D-SW-8／D-SW-9：量測與重放（非守衛面）
+
+- **M-W1 子代理口徑**（ARCH-Q34 G-4 證據）：`w1_detail.txt` 第 14～43 行，29 筆 >30 分中 **17 筆**是「本回合結束時仍有 背景任務在跑：（1 個背景 shell）」；`STOP_VOICE="本回合結束時仍有"`（`supervision.py:35`）同時命中代理與 shell。分類規則見 TCS REQ-CTL-56。**既有鍵逐字不變**（向下相容，既有 `test_waste_census_ctl.py` 不改斷言）；§13 TH-2 的升級觸發改以 `agent.gt_30min` 判讀。
+- **哨兵重放第四列**（ARCH-Q34 G-3 證據）：工具現只傳原始 halt 標記、`grace`、`driver`（`sentinel_decide_replay.py:121～126`），不傳 `park=`、`stale=`、`superseded_by=`，不做帳號比對；真 tick（`session_resume_planner.py:1489`）傳 `halt=ruling_io.sentinel_halt(…)`＋`park=`＋`stale=`。結果：主控以重放得 `arm_reset`，真實是 09:51／10:06 `patrol`（park 讓路）與 10:21:52 崩潰。第四列的 `park=` 以痕跡 `park_armed`／`park_cancelled`／`park_acked_cancel` 摺到 `--now`（重放是 as-of，磁碟標記只有現值）；**待實作驗證**：痕跡是否足以還原 `valid_until`／`route`（`park.yields` 的判準輸入）——不足則該列對該欄標「量不到」並說明，不猜。標題固定標明「不重現排程器 stdio 環境」（崩潰類缺陷此列看不見；那一類由 E2E-CTL-25／26 的真 pythonw 行程承擔）。
+- **持有面**：`tools/lib/wastecensus/supervision.py`、`sections_ctl.py`；`tools/probe/sentinel_decide_replay.py`。皆**不接任何閘**。
+
+### 24.8 暴露證據與守衛面准入（R197）
+
+| 改動 | 屬守衛面？ | 暴露證據（severity.md〈暴露度〉三取一） |
+|---|---|---|
+| `_stdio_utf8.py`（D-SW-1） | 被守衛面匯入（`.claude/hooks/**`）；檔本身不在清單 | (b) 排程器自報 `LastTaskResult=1`／`NextRunTime` 空白（2026-11-28T10:25:01+08:00）；續航日誌 10:21:52 有 `sentinel_woken` 無 `sentinel_decided` |
+| `session_resume_planner.py`、`crashguard.py`（D-SW-2） | 是 | 同上（G-1 無痕跡無告警） |
+| `parkearly`／`parkprobe` 欄位（D-SW-3） | 是（`sessionctl/**`） | (b) 痕跡第 1379、1381 行 `unmeasured`、`reading=null`；M-C3 提前恢復 0 件 |
+| `park_fire`／`parkearly`／`othersession`（D-SW-4） | 是 | (a) 65389f03 包 prompts 第 13 行掌舵者真機回報＋(b) 前置情境 2 次（4290bf58、814608d1） |
+| `ackhook`／`ackevents`／`sentgc`（D-SW-5／10） | 是 | (b) 本 session 實況：封存後事件靠手翻（ARCH-Q34 G-5）、殘骸 `AutoSDD_Sentinel_406454ea-…` 仍在（`sessionctl status`「過期哨兵」） |
+| `agentbrief`／`cutvoice`（D-SW-7） | 是 | (a) 掌舵者據逐字稿第 10412 行提問題 3（本 session 第 14 行） |
+| `handoff_build`（D-SW-6） | 是 | (b) 包第 284 行手寫、機械層第 4 欄不列 `halfwork` |
+| `supervision.py`、`sentinel_decide_replay.py` | 否（量測／探針） | (b) `w1_detail.txt` 第 14～43 行；重放與真 tick 輸入不同（主控被誤導一次） |
+
+「量、不挖」：本節只處理有暴露證據者；TH-C（17 筆 shell 是否含 keepwarm／watch 未被辨識）、TH-D（keepwarm 主載具 11-27 00:40:52 被殺原因）只登記（§24.11），不擴大搜尋。
+
+### 24.9 新葉模組與落點（照 `Root_Layout_and_Module_Placement.md` §2；追加 §16 表，不改既有列）
+
+| 元件 | 路徑 | §2 格 |
+|---|---|---|
+| 排程入口崩潰護欄 | `tools/lib/sessionctl/crashguard.py` | 函式庫（sessionctl 既有套件新葉） |
+| 另一 session 在動判準 | `tools/lib/sessionctl/othersession.py` | 同上 |
+| ack 後封存後事件摘要 | `tools/lib/sessionctl/ackevents.py` | 同上 |
+| 舊哨兵殘骸 GC | `tools/lib/sessionctl/sentgc.py` | 同上 |
+| 測試（新） | `tools/tests/test_sessionctl_crashguard.py`、`test_sessionctl_othersession.py`、`test_sessionctl_ackevents.py`、`test_sessionctl_sentgc.py`；其餘擴充既有 `test_stdio_utf8.py`、`test_sessionctl_ackhook.py`、`test_sessionctl_agentbrief.py`、`test_sessionctl_parkprobe.py`、`test_waste_census_ctl.py` | 測試 |
+| E2E | `tools/lib/realverify/cases/control.py`（RV-CTL25～35）、登記 `docs/06_quality/RealVerify_Protocol/cases.json`；結果帳 `docs/06_quality/RealVerify_Result_Ledger.md` | realverify 既有套件 |
+| 規格 | 本節；`docs/03_testing/contracts/TCS-Control-20261122.md` §8；PRD 修訂表 v2.1.30、§16.6 2026-11-28 列 | 需求／設計、測試契約 |
+
+### 24.10 LOC 影響（量測日 2026-11-28；數字一律現查 `python AutoClaude/tools/check_loc_budget.py --json`，下表是本棒當回合以 `count_loc` 與行數實量）
+
+| 檔 | 現值（LOC／raw 行） | tier 上限 | 本節增量上界 | 說明 |
+|---|---|---|---|---|
+| `tools/session_resume_planner.py` | 742／1666 | `guardrail_cli` 750（餘裕 8） | ≤6 LOC（每入口 ≤2 行；`--sentinel-tick`、`--resume-tick`） | 判準全進 `crashguard.py`；**餘裕近 0，Developer 動工前後各量一次**；超出＝設計不可行，退回 SD 重拆而非改天花板 |
+| `tools/_stdio_utf8.py` | 24／92 | `guardrail_cli` 750 | ≈+6 LOC | `None` 分支改綁 devnull |
+| `tools/lib/sessionctl/park_cli.py` | 325／403 | `guardrail_lib` 400 | **0** | raw 行數 403 已逾 DES §21 當時的牆值 400（該牆的口徑現查 `tools/tests` 對應鎖），故**不增一行**；`park --fire` 的 `crashguard` 包裝落 `tools/sessionctl.py` 入口層 |
+| `tools/lib/sessionctl/agentbrief.py` | 254／346 | 400 | ≈+40 LOC | 三段式與已記入判準；若逼近 400 把「已記入」判準抽到新葉（不動 tier） |
+| `tools/lib/sessionctl/cutvoice.py` | 72／110 | 400 | ≈+15 | 三處呼叫點找包 |
+| `tools/lib/sessionctl/park_fire.py` | 61／80 | 400 | ≈+14 | 前置＋延後 |
+| `tools/lib/sessionctl/parkearly.py` | 111／168 | 400 | ≈+10 | `_precheck`＋`why` 欄 |
+| `tools/lib/sessionctl/ackhook.py` | 31／53 | 400 | ≈+10 | 掛點 |
+| `tools/lib/sessionctl/handoff_build.py` | 153／207 | 400 | ≈+14 | 第 4 欄 |
+| `tools/lib/wastecensus/supervision.py` | 184／252 | 400 | ≈+30 | `kind`＋子集 |
+| `tools/probe/sentinel_decide_replay.py` | 92／131 | `guardrail_cli` 750 | ≈+40 | 第四列 |
+| 新葉四檔 | 0 | 各 400 | 各 ≤150 | `crashguard`／`othersession`／`ackevents`／`sentgc` |
+
+`tools/lib/transcript_activity.py`（316／569）**只被呼叫，不改**（`newest_conversation_at` 已存在）。Root_Layout §3 模組數 +4、`tools/tests` 新測試檔 +4 的棘輪重釘走 12 道鎖儀式（同一個 commit 收齊，見 TCS REQ-CTL-59）。
+
+### 24.11 理論洞清單增列（只登記、不擴守衛；附升級觸發）
+
+| 代號 | 洞 | 處置 |
+|---|---|---|
+| TH-A | 雙駕駛 | **本節升格並處理**（D-SW-4）；§13 原列保留為史料，其升級觸發條件已成立 |
+| TH-B | 提前探針量不到 | **本節處理行為與具名原因**（D-SW-3），根因由 Developer 回填 §24.3 |
+| TH-C | 17 筆背景 shell 事件是否含 keepwarm／watch 未被 `roster.is_supervision_shell` 認出（DEF-200-623 回歸？） | 只登記；觸發＝逐筆辨識出任一筆是 keepwarm／watch shell 仍被 Stop 出聲 |
+| TH-D | keepwarm 主載具 11-27 00:40:52 被殺（逐字稿第 10419 行）原因未明 | 只登記；觸發＝主載具被殺且備援也失效、最後靠人 |
+| TH-E（新） | 殘骸 GC 只掛 ack：沒有 ack 就沒有 GC（沒人接手的包，舊哨兵殘骸要等下一次任何 ack） | 只登記；觸發＝殘骸存在逾 7 天且期間無任何 ack（附工作名） |
+| TH-F（新） | `OTHER_SESSION_MAX_DEFERS＝3` 用盡終局 skip：若「另一 session」其實是無關的長跑無人窗口，交接包會被終局 skip（人需自行開窗） | 只登記；觸發＝`park_other_session action=skip` 之後 24 小時內無人 ack 該包（附兩個 sid） |
+
+### 24.12 被否決的方案
+
+| 方案 | 否決理由 |
+|---|---|
+| 只改 `acctswitch.py:229` 一行（`if sys.stderr: …`） | 壓制；同族站點（`quota_gate.py` 多處）下次必重演；違反〈修復不留後遺症〉順序 |
+| stdio `None` 時綁暫存日誌檔 | 主控已定 devnull；日誌檔引入路徑／輪替／清理／編碼決策面，且診斷已由結構化痕跡承擔 |
+| `sentinel_crashed` 落痕跡但不重排 | 崩潰一次就喚醒鏈斷線，且 `NextRunTime` 空白＝與 G-1 不可區分；故重排＋streak 上限 |
+| 無上限重排 | 結構性崩潰會每 15 分鐘無聲空轉（鐵律六同族） |
+| TH-A 在 `park_fire` 直接終局 skip | 標記結算 `skipped` 後交接包無人接；同專案常有無關窗口在到點瞬間有記錄；見 §24.4（常數 `OTHER_SESSION_MAX_DEFERS＝0` 即可切回） |
+| TH-A 判準看檔案 mtime | harness 的 `away_summary`／`cost-state` 讓 mtime 永遠新（DEF-200-560），判準失去鑑別力 |
+| TH-A 判準套 `superseding_since` 的 24 回合／600 秒門檻 | 那把尺是「人已接手、可拆哨兵（不可逆）」；本判準只決定延後（可逆），用同門檻會讓剛開窗的 2.3 分鐘雙駕駛窗口恰好漏掉 |
+| GC 掛在 `status` 顯示時 | `status` 是唯讀診斷，讓它有寫入＝診斷動詞變成副作用站點；且 `status` 常由人在危機時查看 |
+| 把「已記入交接包」判準放寬到整包（含機械層） | 機械層第 12 欄恆列全部代理 ⇒ 恆「已記入」，判準無鑑別力 |
+| 改 `MECH_HEADINGS` 第 4 項標題為「保全標籤」 | 破壞 AT-SC-34／AT-CTL-30 既有鎖；放寬鎖不可行 |
+
+### 24.13 修復不留後遺症三問（本節）
+
+1. **另一台機器／另一個人身上會不會回來？**不會：D-SW-1 在 SSOT 消除成因（任何新增的 `sys.stderr.write` 站點都被覆蓋，AT-CTL-96 的 AST 掃描自動納入新站點）；D-SW-2 的入口清單鎖（AT-CTL-101）讓新增排程入口未護欄即紅。
+2. **有沒有文件、座標、凍結 digest、設定因此不一致？**§0～§23 與 TCS §1～§7 逐字不變；PRD 修訂表／§16.6 只增列；`MECH_HEADINGS` 不動；`engine-bridge` CLI 閉包不動（`othersession` 不被頂層 import，AT-CTL-143）；連動面（落點表、棘輪、compat-ci `paths`、`cases.json`、CLAUDE.md 若需增列）由 REQ-CTL-59 同一個 commit 收齊。
+3. **有沒有留下「之後再看」？**有兩類已明文登記而非遺漏：TH-C／D／E／F（§24.11，各附升級觸發）、TH-B 根因（§24.3 回填格，Developer 先驗證）；除此之外無。凍結後實作前，規格不再補洞。
+
+### 24.14 ADR 判斷
+本節**無新架構決策需要 ADR**：①D-SW-1 是 SSOT 內的缺陷修復，②D-SW-2 沿用既有告警管道與重排原語，③D-SW-4 沿用 `park_yield` 重排原語與 `transcript_activity` 尺，④其餘為文字與量測。若主控認為「排程入口一律過 `crashguard`」屬跨專案架構約束，可在 ADR-XPLAT-004 §2.19 後追加一節；本稿不替主控代決。
