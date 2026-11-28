@@ -6716,12 +6716,12 @@ class TestStrayVenvScan(DevStartTestCase):
                 found, [link], "指向外部 venv 的 symlink 未被列為雜散案例")
 
     def test_find_stray_venvs_perf_guard_on_real_repo(self) -> None:
-        """效能護欄：全樹遞迴改動後，對真實 repo 樹跑一次不得暴衝——不斷言結果
-        內容（他機可能真的有雜散 venv），只釘時間上界（2026-09-15 實測基準見
-        模組檔頭 docstring：約 6370 目錄、0.18 秒）。"""
-        start = time.perf_counter()
+        """效能護欄：對真實 repo 樹跑一次不得暴衝——不斷言結果內容（他機可能真有雜散
+        venv），只釘 CPU 時間上界（非牆鐘：並行全套下牆鐘 4.1 s 會拉到 8.8 s，守的是演算法
+        暴衝而非機器忙不忙；2026-09-15 基準見檔頭 docstring：約 6370 目錄、0.18 秒）。"""
+        start = time.process_time()
         self.stray_venv.find_stray_venvs(dev_start.ROOT)
-        elapsed = time.perf_counter() - start
+        elapsed = time.process_time() - start
         self.assertLess(elapsed, 5.0, f"find_stray_venvs 對真實 repo 耗時 {elapsed:.2f}s，超過上界")
 
     def test_cli_main_returns_zero_on_clean_repo(self) -> None:

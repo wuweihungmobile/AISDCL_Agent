@@ -321,7 +321,7 @@ class ControlFactsTest(_Fence):
         state = controlfacts.control_state(self.payload(), SID, self.env_over)
         self.assertEqual((state.agents_running, state.supervision), (1, "none"))
         self.assertIsNone(state.supervision_pid)
-        self.heartbeat(SID, age_s=40)
+        self.heartbeat(SID, age_s=45)  # 45 而非 40：年齡取整數秒，貼著邊界會因取整少 1 秒而偶紅
         state = controlfacts.control_state(self.payload(), SID, self.env_over)
         self.assertEqual((state.supervision, state.supervision_source, state.supervision_pid),
                          ("valid", "heartbeat", os.getpid()))
