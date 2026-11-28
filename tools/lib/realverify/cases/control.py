@@ -1,4 +1,5 @@
 # WHY：全檔以中文敘述斷言訊息，東亞寬字元計 2 欄、折行會切斷句意；E501 於本檔整體豁免。
+# ruff: noqa: E501
 """control 家族 A：RV-CTL30／32／33／35（WP-SW，TCS-Control §8.4 E2E-CTL-30／32／33／35）。
 
 載具：真 git 的真 `handoff --build`（沙盒倉庫）、真母體量測與真哨兵重放（只讀真逐字稿，不落任何狀態）、
@@ -8,7 +9,6 @@
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path

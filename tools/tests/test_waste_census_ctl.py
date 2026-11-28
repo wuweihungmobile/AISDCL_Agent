@@ -162,6 +162,25 @@ class ReplayRow4Test(unittest.TestCase):
         self.assertIn("不重現排程器 stdio 環境", self.src)
         self.assertIn("第四列「真 tick 同輸入」", self.src)
 
+    def test_at_ctl_134_ast_no_reconcile_call_and_row4_passes_park_and_stale(self) -> None:
+        """MU-CTL-64／65：以 AST 判（不看文字）——模組內沒有任何名為 reconcile 的呼叫（有寫入的
+        acctswitch
+        流程）；第四列的 `sentinel_decide` 呼叫同時帶 `halt=`／`park=`／`stale=`
+        三個關鍵字（回到舊輸入＝重放
+        再次誤導主控）。"""
+        tree = ast.parse(self.src)
+        called = {(n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", ""))
+                  for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        self.assertNotIn("reconcile", called)
+        row4 = next(f for f in ast.walk(tree) if isinstance(f, ast.FunctionDef) and f.name
+            == "_row4")
+        decide = [n for n in ast.walk(row4) if isinstance(n, ast.Call)
+                  and "sentinel_decide" in ast.unparse(n.func)]
+        self.assertTrue(decide, "第四列沒有呼叫 sentinel_decide")
+        for call in decide:
+            self.assertTrue({"halt", "park", "stale"} <= {k.arg for k in call.keywords},
+                ast.unparse(call))
+
     def test_at_ctl_135_three_original_rows_are_still_present(self) -> None:
         for label in ("舊判準 sentinel_decide", "新判準 sentinel_decide", "D3 單獨"):
             self.assertIn(label, self.src)

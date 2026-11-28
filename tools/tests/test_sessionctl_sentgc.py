@@ -156,6 +156,20 @@ class SweepTest(_Fence):
             / "roster.py").read_text(encoding="utf-8")
         self.assertNotIn("sentgc", src, "GC 不得進 status")
 
+    def test_at_ctl_136_running_or_unknown_state_is_never_a_candidate_when_dead(self) -> None:
+        """MU-CTL-75：④「State≠Running」是獨立判準——tick 進行中（Running）或排程器沒回 State
+        的哨兵，即使
+        LastRunTime 很舊、結果非 0、NextRunTime 空白，也不得入候選（拆它＝斷活哨兵的喚醒鏈）。"""
+        sid = "aaaaaaaa-0042-4000-8000-000000000042"
+        for state in ("Running", None, ""):
+            rows = [{**_row(sid), "sid": sid, "state": state, "last_result": 1}]
+            self.assertEqual(sentgc.candidates(rows, ACKER, min_idle_s=MIN_IDLE, now=NOW,
+                plan_state=lambda _s: None),
+                             [], state)
+        ready = [{**_row(sid), "sid": sid, "state": "Ready", "last_result": 1}]
+        self.assertEqual(len(sentgc.candidates(ready, ACKER, min_idle_s=MIN_IDLE, now=NOW,
+            plan_state=lambda _s: None)), 1)
+
     def test_at_ctl_137_removal_goes_only_through_the_existing_disarm_site(self) -> None:
         src = (_REPO_ROOT / "tools" / "lib" / "sessionctl"
             / "sentgc.py").read_text(encoding="utf-8")

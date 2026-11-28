@@ -384,3 +384,4 @@
 | 2026-11-28T07:10:46Z | RV-CTL33 | pass | 1 | - | RV-CTL33 09:52⇒真 tick 同輸入 sentinel_decide ⇒ patrol：park 排程待命（標記 armed 且在窗內）⇒ 哨兵讓路，不搶駕駛；窗過後恢復原判準；10:22 as-of／磁碟並列；既有三列在（重放不落任何狀態＝無副作用可隔離） | 9 |
 | 2026-11-28T07:11:09Z | RV-CTL30 | fail | 1 | RV-CTL30 | 保留證據：C:\Users\wuwei\.autosdd\realverify_kept\RV-CTL30_20261128T151106 | 15 |
 | 2026-11-28T07:11:31Z | RV-CTL30 | pass | 1 | - | RV-CTL30 stash create ea02ce9ad4c1；第 4 欄同列 halfwork（不在 HEAD）與 wip-preserved；機械層標題 13 欄全在 | 15 |
+| 2026-11-28T07:13:08Z | RV-CTL25 | pass | 1 | - | RV-CTL25 pythonw stderr=None 前提成立；修後 rc=0 痕跡 ['sentinel_armed', 'sentinel_decided', 'sentinel_rearmed', 'sentinel_woken'] NextRunTime=2026-11-28T15:27:47.0000000+08:00；oracle rc=1 痕跡 ['sentinel_woken']（與 ARCH-Q34 G-1 證據 2 同形） | 34 |

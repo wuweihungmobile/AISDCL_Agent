@@ -319,6 +319,25 @@ for _name in dir(P.JobTest):  # 只留本類自己的測試
         setattr(ParkFireOtherSessionTest, _name, None)
 
 
+class TranscriptActivityPrivateInterfaceLockTest(unittest.TestCase):
+    """主控裁示 3（DES §24 實作勘誤）：同戳平手檢查集中借用 `tools/lib/transcript_activity.py`
+    的私有
+    `_records`／`_driver_kind`／`_epoch`（單一判準 `_driver_kind`）；
+    其私有介面改名或改簽章時本測必紅，
+    逼改動者連同 `othersession` 一起處理，而不是讓同戳平手檢查在 fail-open 之下無聲失效。"""
+
+    def test_private_helpers_exist_with_the_signature_othersession_relies_on(self):
+        import inspect
+        records, kind, epoch = ta._records, ta._driver_kind, ta._epoch  # noqa: SLF001
+        params = lambda fn: list(inspect.signature(fn).parameters)  # noqa: E731
+        self.assertEqual(params(records)[:2], ["path", "needles"])
+        self.assertEqual(params(kind), ["record"])
+        self.assertEqual(params(epoch), ["raw"])
+        rec = {"type": "assistant", "message": {"model": "claude-fable-5"}}
+        self.assertEqual(kind(rec), "assistant")
+        self.assertIsNotNone(epoch("2026-11-28T10:00:00+08:00"))
+
+
 class ParkEarlyHoldTest(unittest.TestCase):
     """AT-CTL-113：`parkearly._precheck` 回 `other_session`（不提前）。"""
 
