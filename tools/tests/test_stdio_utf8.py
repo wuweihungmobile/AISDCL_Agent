@@ -132,11 +132,11 @@ class WpSwStdioNoneTest(unittest.TestCase):
         from datetime import datetime  # noqa: PLC0415
         from types import SimpleNamespace  # noqa: PLC0415
 
-        lib = str(Path(__file__).resolve().parents[1] / "lib")
-        tools = str(Path(__file__).resolve().parents[1])
-        for p in (tools, lib):
-            if p not in sys.path:
-                sys.path.insert(0, p)
+        # sys.path.insert 必須寫成可靜態解析的形態：compat-ci paths 覆蓋鎖
+        # （AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py）以 AST 解析，
+        # 變數形 `insert(0, p)` 會被判成盲區。
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         import quota_halt_marker  # noqa: PLC0415
 
         from lib.sessionctl import acctswitch  # noqa: PLC0415
